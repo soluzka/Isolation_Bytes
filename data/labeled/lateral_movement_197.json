@@ -1,0 +1,13 @@
+{
+  "features": {
+    "auth_attempts": 10,
+    "unique_systems": 18,
+    "failed_logins": 0,
+    "privilege_escalation": 0,
+    "service_creation": 1,
+    "scheduled_tasks": 1,
+    "remote_execution": 0,
+    "lateral_movement_score": 0.990304738827984
+  },
+  "label": 1
+}

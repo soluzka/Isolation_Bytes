@@ -1,0 +1,13 @@
+{
+  "features": {
+    "memory_corruption": 0,
+    "heap_manipulation": 96,
+    "stack_manipulation": 47,
+    "invalid_pointers": 0,
+    "memory_allocation_pattern": 285,
+    "execution_flow_anomaly": 0,
+    "crash_likelihood": 0.032175048075058665,
+    "exploit_guard_triggers": 0
+  },
+  "label": 0
+}

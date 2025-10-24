@@ -1,0 +1,13 @@
+{
+  "features": {
+    "covert_channel_detected": 0,
+    "unusual_emissions": 0,
+    "signal_strength": 16.045074824896734,
+    "transmission_frequency": 862.0893367462604,
+    "data_modulation": 0,
+    "sensor_readings": 666,
+    "channel_bandwidth": 0.19301141112935127,
+    "ambient_noise": 1.3281078577928846
+  },
+  "label": 0
+}

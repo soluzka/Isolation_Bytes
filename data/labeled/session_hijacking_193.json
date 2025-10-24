@@ -1,0 +1,13 @@
+{
+  "features": {
+    "certificate_mismatch": 1,
+    "ssl_stripping": 0,
+    "arp_spoofing": 1,
+    "dns_spoofing": 1,
+    "unencrypted_traffic": 1,
+    "session_hijacking": 0,
+    "protocol_anomalies": 3,
+    "traffic_redirection": 0
+  },
+  "label": 1
+}

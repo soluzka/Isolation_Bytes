@@ -1,0 +1,13 @@
+{
+  "features": {
+    "keylogging_activity": 0,
+    "screen_capture": 0,
+    "clipboard_monitoring": 0,
+    "browser_monitoring": 0,
+    "data_exfiltration": 61.11113057729727,
+    "process_monitoring": 0,
+    "input_capturing": 0,
+    "stealth_mechanisms": 0.09846380010447442
+  },
+  "label": 0
+}

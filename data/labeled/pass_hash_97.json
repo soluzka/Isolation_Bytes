@@ -1,0 +1,13 @@
+{
+  "features": {
+    "login_attempts": 130,
+    "failed_attempts": 365,
+    "unique_user_agents": 3,
+    "ip_reputation": 0.23908586471366758,
+    "request_rate": 1218.4915604519986,
+    "account_lockouts": 12,
+    "password_entropy": 0.25225969699183176,
+    "known_breach_emails": 0
+  },
+  "label": 1
+}

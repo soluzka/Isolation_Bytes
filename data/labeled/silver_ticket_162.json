@@ -1,0 +1,13 @@
+{
+  "features": {
+    "kerberos_ticket_lifetime": 150,
+    "ticket_encryption_type": 0,
+    "privileged_group_membership": 1,
+    "ticket_usage_count": 490,
+    "service_access_pattern": 1.073218964655356,
+    "ticket_signature_valid": 1,
+    "domain_admin_access": 1,
+    "unusual_service_tickets": 24
+  },
+  "label": 1
+}

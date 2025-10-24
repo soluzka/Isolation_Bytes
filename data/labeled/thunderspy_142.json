@@ -1,0 +1,13 @@
+{
+  "features": {
+    "power_glitch_detected": 0,
+    "em_interference": 0,
+    "light_sensor_anomaly": 1,
+    "execution_errors": 95,
+    "clock_instability": 1.721430213300044,
+    "computation_failures": 148,
+    "sensor_readings_anomaly": 1.687490131698411,
+    "hardware_error_rate": 2.0526681995337923
+  },
+  "label": 1
+}

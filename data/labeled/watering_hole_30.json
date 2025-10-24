@@ -1,0 +1,13 @@
+{
+  "features": {
+    "unusual_dependencies": 1,
+    "version_anomaly": 0,
+    "unsigned_components": 0,
+    "suspicious_network_connections": 18,
+    "unusual_process_creation": 1,
+    "code_obfuscation": 1,
+    "reputation_score": 0.12541966560896486,
+    "behavioral_deviation": 1.2165716807286109
+  },
+  "label": 1
+}

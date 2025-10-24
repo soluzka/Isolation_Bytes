@@ -1,0 +1,13 @@
+{
+  "features": {
+    "query_length": 2810,
+    "special_chars": 140,
+    "sql_keywords": 45,
+    "error_messages": 0,
+    "unusual_encoding": 0,
+    "request_size": 6918,
+    "parameter_manipulation": 0,
+    "query_structure_score": 0.5492884869289375
+  },
+  "label": 1
+}

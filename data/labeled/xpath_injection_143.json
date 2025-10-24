@@ -1,0 +1,13 @@
+{
+  "features": {
+    "frame_manipulation": 0,
+    "cache_inconsistency": 0,
+    "http_desync": 1,
+    "header_manipulation": 20,
+    "response_tampering": 0,
+    "request_anomalies": 84,
+    "security_header_bypass": 0,
+    "attack_sophistication": 0.06628346741995683
+  },
+  "label": 1
+}

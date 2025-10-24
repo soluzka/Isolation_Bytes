@@ -1,0 +1,13 @@
+{
+  "features": {
+    "data_volume": 88335.36008374166,
+    "data_entropy": 7.109826940833055,
+    "unique_destinations": 40,
+    "transfer_speed": 195.0953509162106,
+    "file_types": 9,
+    "time_of_day": 18.39213212478311,
+    "data_compression": 0.8962923752650533,
+    "protocols_used": 1
+  },
+  "label": 1
+}
