@@ -7,6 +7,7 @@ import subprocess
 import requests
 import time
 import webbrowser
+import warnings
 
 # Ensure the 'utils' directory is in sys.path
 basedir = os.path.dirname(os.path.abspath(__file__))
@@ -48,17 +49,18 @@ def get_resource_path(relative_path):
     return os.path.join(base_path, relative_path)
 
 def run_conditional_startup_logic(open_browser=True):
-    """
-    Starts dashboard, CLI, and runs all scans if enabled.
-    Returns a dict with a status report log and structured scan results.
-    """
+    # Suppress scikit-learn version warnings
+    warnings.filterwarnings("ignore", category=UserWarning)
+    
     output = io.StringIO()
     results = {
         "scanned_files": [],
         "quarantined_files": [],
         "errors": [],
-        "process_events": []
+        "process_events": [],
+        "results": []  # Initialize results array immediately
     }
+    scanned_file_status = {}  # Track status for each scanned file
 
     # Define the base directory and state file path
     basedir = os.path.dirname(os.path.abspath(__file__))
@@ -188,6 +190,11 @@ def run_conditional_startup_logic(open_browser=True):
                         scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
                         output.write(f"[conditional_startup] {msg}\n")
                         results["scanned_files"].append(filepath)
+                        scanned_file_status[filepath] = {
+                            "malware_found": malware_found,
+                            "quarantined": False,
+                            "error": None
+                        }
                         
                         # Try YARA scan
                         try:
@@ -203,19 +210,26 @@ def run_conditional_startup_logic(open_browser=True):
                                 quarantine_utils.quarantine_file(filepath)
                                 output.write(f"[conditional_startup] File {filepath} quarantined.\n")
                                 results["quarantined_files"].append(filepath)
+                                scanned_file_status[filepath]["quarantined"] = True
                             except Exception as quarantine_exc:
                                 output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
+                                scanned_file_status[filepath]["error"] = str(quarantine_exc)
                     except (PermissionError, OSError) as perm_error:
-                        # Log permission errors as INFO instead of ERROR
                         output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
+                        scanned_file_status[filepath] = {
+                            "malware_found": None,
+                            "quarantined": False,
+                            "error": str(perm_error)
+                        }
                     except Exception as scan_exc:
-                        # Only log actual scan errors as errors
                         output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
                         results["errors"].append({"file": filepath, "error": str(scan_exc)})
-
-    else:
-        output.write("[conditional_startup] Scheduled scan is disabled. No components started.\n")
-
+                        scanned_file_status[filepath] = {
+                            "malware_found": None,
+                            "quarantined": False,
+                            "error": str(scan_exc)
+                        }
+    
     # Optionally, open the browser if needed
     if open_browser:
         url = 'http://127.0.0.1:5000'
@@ -236,10 +250,27 @@ def run_conditional_startup_logic(open_browser=True):
             output.write(f"[conditional_startup] Warning: Server not available after {timeout} seconds.\n")
             webbrowser.open(url)
 
+    # Remove the previous results["results"] creation and replace with this:
+    scanned_results = []
+    for filepath in results["scanned_files"]:
+        status = scanned_file_status.get(filepath, {})
+        scanned_results.append({
+            "file": filepath,
+            "malware_found": status.get("malware_found", False),
+            "quarantined": status.get("quarantined", False),
+            "error": status.get("error", None)
+        })
+    
+    # Ensure the results field is an array
+    results["results"] = scanned_results
     results["log"] = output.getvalue()
+    
+    # Convert to JSON-compatible format
+    if __name__ == "__main__":
+        return json.dumps(results)
     return results
 
 # Run the logic when the script is executed
 if __name__ == "__main__":
     result = run_conditional_startup_logic()
-    print(result)
+    print(json.dumps(result))

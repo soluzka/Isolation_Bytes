@@ -28,9 +28,9 @@ psutil
 pandas
 matplotlib
 seaborn
-numpy<1.26.0
-scipy<1.13.0
-scikit-learn<1.6.0
+numpy>=1.20.0
+scipy>=1.7.0
+scikit-learn==1.6.1
 
 # Optional: clamd for ClamAV integration on Linux/macOS
 clamd>=1.0
