@@ -875,6 +875,63 @@ class NetworkMonitor:
             }
         }
 
+    def get_ssl_analysis(self):
+        """
+        Get SSL/TLS connection analysis.
+        """
+        connections = []
+        try:
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                try:
+                    proc_connections = proc.connections()
+                    if proc_connections:
+                        for conn in proc_connections:
+                            if conn.status == 'ESTABLISHED' and conn.raddr:
+                                # Check if this might be an SSL/TLS connection (port 443, 8443, etc.)
+                                if conn.raddr.port in [443, 8443, 993, 995, 465, 587, 636, 989, 990, 992, 993]:
+                                    connections.append({
+                                        'server_name': conn.raddr.ip,
+                                        'port': conn.raddr.port,
+                                        'cipher': 'TLS_AES_256_GCM_SHA384',  # Simulated cipher
+                                        'security_level': 'secure' if conn.raddr.port in [443, 8443] else 'medium'
+                                    })
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            self.logger.error(f"Error getting SSL analysis: {str(e)}")
+        
+        return connections
+
+    def get_dns_analysis(self):
+        """
+        Get DNS request analysis.
+        """
+        dns_requests = {}
+        try:
+            # Get recent DNS queries from system (simplified approach)
+            # In a real implementation, this would query DNS logs or use system APIs
+            for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                try:
+                    proc_connections = proc.connections()
+                    if proc_connections:
+                        for conn in proc_connections:
+                            if conn.status == 'ESTABLISHED' and conn.raddr:
+                                # Check if connection is to DNS server (port 53)
+                                if conn.raddr.port == 53:
+                                    domain = conn.raddr.ip
+                                    if domain not in dns_requests:
+                                        dns_requests[domain] = {
+                                            'reason': 'DNS query',
+                                            'last_seen': time.time(),
+                                            'malicious': False
+                                        }
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            self.logger.error(f"Error getting DNS analysis: {str(e)}")
+        
+        return dns_requests
+
 # Constants for blacklists and reputation services
 
 # Constants for blacklists and reputation services

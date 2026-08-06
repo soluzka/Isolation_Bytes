@@ -2566,7 +2566,20 @@ def get_ssl_analysis():
             'error': str(e)
         }), 500
 
-
+@app.route('/get_dns_analysis', methods=['GET'])
+def get_dns_analysis():
+    """Get DNS request analysis"""
+    try:
+        analysis = network_monitor.get_dns_analysis()
+        return jsonify({
+            'success': True,
+            'requests': analysis
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
 
 @app.route('/encrypt_router_configs', methods=['POST'])
 async def encrypt_router_configs_route():
