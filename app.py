@@ -1781,14 +1781,73 @@ def index():
     )
 
 # Route for conditional startup
+# Most recent conditional startup run, exposed to the UI via /api/conditional_startup/status
+conditional_startup_state = {
+    'running': False,
+    'last_run': None,
+    'duration': None,
+    'scanned_files': 0,
+    'quarantined_files': 0,
+    'errors': 0,
+    'process_events': 0,
+    'last_error': None,
+}
+
+
+def normalize_conditional_startup_data(scan_data):
+    """Return conditional startup output as a (results dict, log text) pair.
+
+    run_conditional_startup_logic() returns a dict, but falls back to a plain
+    log string when scan utilities cannot be loaded.
+    """
+    if isinstance(scan_data, dict):
+        return scan_data, scan_data.get('log', '')
+    if isinstance(scan_data, (list, tuple)):
+        log = '\n'.join(str(item) for item in scan_data)
+        return {}, log
+    return {}, '' if scan_data is None else str(scan_data)
+
+
+def record_conditional_startup_run(scan_data=None, duration=None, error=None):
+    """Update the cached conditional startup status shown in the UI."""
+    results, _ = normalize_conditional_startup_data(scan_data)
+
+    def count(key):
+        value = results.get(key) or []
+        return len(value) if isinstance(value, (list, tuple, dict)) else 0
+
+    conditional_startup_state.update({
+        'running': False,
+        'last_run': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': round(duration, 2) if duration is not None else None,
+        'scanned_files': count('scanned_files'),
+        'quarantined_files': count('quarantined_files'),
+        'errors': count('errors'),
+        'process_events': count('process_events'),
+        'last_error': str(error) if error else None,
+    })
+    return conditional_startup_state
+
+
+@app.route('/api/conditional_startup/status', methods=['GET'])
+def conditional_startup_status():
+    """Status of the last conditional startup run, plus network monitor state."""
+    state = dict(conditional_startup_state)
+    state['network_monitor_running'] = bool(globals().get('network_monitor_running'))
+    return jsonify(state)
+
+
 @app.route('/run_startup', methods=['POST'])
 def run_startup():
     """Run conditional startup scans (all monitored directories and all processes)"""
     try:
         from conditional_startup import run_conditional_startup_logic
+        conditional_startup_state['running'] = True
         start_time = time.time()
         scan_data = run_conditional_startup_logic(open_browser=False)
         duration = time.time() - start_time
+        record_conditional_startup_run(scan_data, duration)
+        scan_data, _ = normalize_conditional_startup_data(scan_data)
         return jsonify({
             "status": "success",
             "results": scan_data.get("results", []),
@@ -1799,6 +1858,7 @@ def run_startup():
             "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         })
     except Exception as e:
+        record_conditional_startup_run(error=e)
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # Route for conditional startup
@@ -4728,14 +4788,24 @@ def run_conditional_startup():
                 logf.write(f"[{datetime.datetime.now()}] IMPORT ERROR: {msg}\n")
             return redirect(url_for('index'))
         try:
-            output = run_conditional_startup_logic()
+            start_time = time.time()
+            scan_data = run_conditional_startup_logic()
+            duration = time.time() - start_time
+            results, output = normalize_conditional_startup_data(scan_data)
+            summary = dict(record_conditional_startup_run(scan_data, duration))
             with open(get_resource_path(os.path.join(log_path)), 'a', encoding='utf-8') as logf:
                 logf.write(f"[{datetime.datetime.now()}] Ran run_conditional_startup_logic\n{output}\n")
             flash('Conditional startup completed. See output below.', 'success')
-            return render_template('conditional_startup_result.html', output=output)
+            return render_template(
+                'conditional_startup_result.html',
+                output=output,
+                results=results,
+                summary=summary
+            )
         except Exception as logic_exc:
             tb = traceback.format_exc()
             msg = f'Exception running conditional_startup logic: {logic_exc}'
+            record_conditional_startup_run(error=logic_exc)
             flash(msg + ' (see debug log for details)', 'error')
             with open(get_resource_path(os.path.join(log_path)), 'a', encoding='utf-8') as logf:
                 logf.write(f"[{datetime.datetime.now()}] LOGIC EXCEPTION:\n{tb}\n")

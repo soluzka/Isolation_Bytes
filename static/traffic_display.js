@@ -2,8 +2,19 @@
  * Network traffic monitoring display functions
  */
 
+// Unwrap payloads that nest the data under a success/stats or success/patterns envelope
+function unwrapPayload(payload, key) {
+    if (payload && typeof payload === 'object' && payload[key] && typeof payload[key] === 'object') {
+        return payload[key];
+    }
+    return payload;
+}
+
 // Update traffic statistics display
 function updateTrafficDisplay(trafficData, c2Data) {
+    trafficData = unwrapPayload(trafficData, 'stats');
+    c2Data = unwrapPayload(c2Data, 'patterns');
+
     const trafficContainer = document.getElementById('traffic_stats');
     if (!trafficContainer) return;
     

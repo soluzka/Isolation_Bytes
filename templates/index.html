@@ -496,8 +496,109 @@ if (stopAutoUpdatesBtn) {
                     <p>Directory information will appear here when monitoring is active.</p>
                 </div>
             </div>
+
+            <!-- Conditional Startup Control & Status -->
+            <div class="conditional-startup-panel" style="margin-top:15px;border-top:1px solid #eee;padding-top:10px;">
+                <h4>Conditional Startup</h4>
+                <p style="margin-top:0;color:#555;font-size:0.9em;">Runs all scans (monitored directories, processes and routine maintenance) using the network monitoring data.</p>
+                <div id="conditional_startup_status">
+                    <p>Loading conditional startup status...</p>
+                </div>
+                <div class="button-row">
+                    <button type="button" id="run_conditional_startup_panel_btn" style="background:#b36200;color:#fff;">
+                        Run Conditional Startup
+                    </button>
+                    <button type="button" id="refresh_conditional_startup_btn" style="background:#7f8c8d;color:#fff;">
+                        Refresh Status
+                    </button>
+                </div>
+                <div id="conditional_startup_panel_message"></div>
+            </div>
         </div>
     </div>
+
+    <script>
+        // Conditional startup status panel inside the network monitoring card
+        (function () {
+            const statusDiv = document.getElementById('conditional_startup_status');
+            const messageDiv = document.getElementById('conditional_startup_panel_message');
+            const runBtn = document.getElementById('run_conditional_startup_panel_btn');
+            const refreshBtn = document.getElementById('refresh_conditional_startup_btn');
+            if (!statusDiv) return;
+
+            function tile(value, label, highlight) {
+                const color = highlight && value ? '#e74c3c' : '#2d5f9a';
+                return `<div style="flex:1;min-width:110px;padding:8px;background:#fff;border-radius:4px;text-align:center;">
+                            <span style="display:block;font-size:1.4em;font-weight:bold;color:${color};">${value}</span>
+                            <span style="font-size:0.8em;color:#555;">${label}</span>
+                        </div>`;
+            }
+
+            function renderStatus(data) {
+                if (!data.last_run && !data.running) {
+                    statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
+                    return;
+                }
+                const state = data.running
+                    ? '<span class="status-span" style="color:#b36200;">Running...</span>'
+                    : '<span class="status-span status-enabled">Idle</span>';
+                const duration = (data.duration === null || data.duration === undefined) ? '' : ` &middot; took <strong>${data.duration}s</strong>`;
+                let html = `<p>State: ${state} &middot; Last run: <strong>${data.last_run || 'never'}</strong>${duration}</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        ${tile(data.scanned_files || 0, 'Files Scanned')}
+                        ${tile(data.quarantined_files || 0, 'Quarantined', true)}
+                        ${tile(data.errors || 0, 'Errors', true)}
+                        ${tile(data.process_events || 0, 'Process Events')}
+                    </div>`;
+                if (data.last_error) {
+                    html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;
+                }
+                statusDiv.innerHTML = html;
+            }
+
+            function refreshStatus() {
+                return fetch('/api/conditional_startup/status', {credentials: 'include'})
+                    .then(response => response.json())
+                    .then(renderStatus)
+                    .catch(error => {
+                        statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${error.message || error}</div>`;
+                    });
+            }
+
+            if (runBtn) {
+                runBtn.onclick = function () {
+                    runBtn.disabled = true;
+                    const originalText = runBtn.textContent;
+                    runBtn.textContent = 'Running...';
+                    messageDiv.innerHTML = '<p style="color:#b36200;">Running all scans, this can take a while...</p>';
+                    fetch('/run_startup', {method: 'POST', credentials: 'include'})
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                messageDiv.innerHTML = `<div class="alert alert-info">Conditional startup completed in ${data.scan_time || 'unknown time'}.</div>`;
+                            } else {
+                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || data.error || 'Unknown error'}</div>`;
+                            }
+                            return refreshStatus();
+                        })
+                        .catch(error => {
+                            messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message || error}</div>`;
+                        })
+                        .finally(() => {
+                            runBtn.disabled = false;
+                            runBtn.textContent = originalText;
+                        });
+                };
+            }
+
+            if (refreshBtn) {
+                refreshBtn.onclick = refreshStatus;
+            }
+
+            refreshStatus();
+            setInterval(refreshStatus, 10000);
+        })();
+    </script>
     <div class="card">
         <div class="card-header">
             <h3>Advanced Security Tools</h3>
