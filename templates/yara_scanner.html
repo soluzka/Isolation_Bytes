@@ -1093,6 +1093,24 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             });
         });
         
+        // Coerce API payloads that may be a single value, an object or JSON text into an array
+        function toArray(value) {
+            if (Array.isArray(value)) return value;
+            if (value === null || value === undefined || value === '') return [];
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    return Array.isArray(parsed) ? parsed : [parsed];
+                } catch (e) {
+                    return [value];
+                }
+            }
+            if (typeof value === 'object') {
+                return Array.isArray(value.results) ? value.results : Object.values(value);
+            }
+            return [value];
+        }
+
         function displayResults(data) {
             var resultsHtml = `
                 <div class="card">
@@ -1120,14 +1138,15 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             } else if (data.folder) {
                 resultsHtml += `<p>Folder: ${data.folder}</p>`;
             } else if (data.folders) {
-                resultsHtml += `<p>Folders: ${data.folders.join(', ')}</p>`;
+                resultsHtml += `<p>Folders: ${toArray(data.folders).join(', ')}</p>`;
             }
             
             // Add detailed directory statistics if available
-            if (data.stats && data.stats.directories && data.stats.directories.length > 0) {
+            const directoryStats = data.stats ? toArray(data.stats.directories) : [];
+            if (directoryStats.length > 0) {
                 resultsHtml += `<h3>Directory Details</h3><div class="directory-stats-container">`;
                 
-                data.stats.directories.forEach(dir => {
+                directoryStats.forEach(dir => {
                     if (dir.exists && dir.accessible) {
                         resultsHtml += `
                             <div class="directory-stat-card">
@@ -1143,7 +1162,7 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                                       '<p>No threats detected</p>'}
                                     
                                     <!-- Add subdirectories if available -->
-                                    ${dir.subdirectories && dir.subdirectories.length > 0 ? `
+                                    ${toArray(dir.subdirectories).length > 0 ? `
                                         <div class="subdirectories-container">
                                             <button class="toggle-subdirs" onclick="event.preventDefault(); 
                                                 const subdirList = this.nextElementSibling;
@@ -1155,7 +1174,7 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                                                     this.innerText = 'Show Subdirectories';
                                                 }">Show Subdirectories</button>
                                             <ul class="subdirectories-list" style="display: none;">
-                                                ${dir.subdirectories.map(subdir => `<li>${subdir}</li>`).join('')}
+                                                ${toArray(dir.subdirectories).map(subdir => `<li>${subdir}</li>`).join('')}
                                             </ul>
                                         </div>
                                     ` : ''}
@@ -1168,14 +1187,15 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                 resultsHtml += `</div>`;
             }
             
-            if (data.results && data.results.length > 0) {
+            const matchResults = toArray(data.results);
+            if (matchResults.length > 0) {
                 resultsHtml += `
                     <h3>Matches</h3>
                     <ul>
                 `;
                 
-                data.results.forEach(result => {
-                    if (result.rule) {
+                matchResults.forEach(result => {
+                    if (result && result.rule) {
                         resultsHtml += `<li>Rule: ${result.rule}, Description: ${result.description}, File: ${result.file}</li>`;
                     } else {
                         resultsHtml += `<li>${result}</li>`;
