@@ -1380,6 +1380,121 @@ def status():
         }
     })
 
+# -- Scheduled Scanning Function --
+def run_scheduled_scans():
+    """Run scheduled security scans in the background with continuous YARA scanning."""
+    while True:
+        try:
+            # Run YARA scan on all files in monitored directories
+            try:
+                from security.yara_scanner import scan_file_with_yara
+            except ImportError:
+                logger.warning("YARA scanner not available, skipping YARA scan")
+                scan_file_with_yara = None
+            
+            # Combine monitored directories from both sources
+            monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
+            
+            for scan_dir in monitored_dirs:
+                if not os.path.exists(scan_dir):
+                    continue
+                for root, dirs, files in os.walk(scan_dir):
+                    # Skip excluded paths
+                    if should_exclude_path(root):
+                        continue
+                    
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        
+                        # Skip excluded files
+                        if should_exclude_path(file_path):
+                            continue
+                        
+                        try:
+                            if scan_file_with_yara:
+                                yara_matches = scan_file_with_yara(file_path)
+                                if yara_matches:
+                                    logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
+                                    
+                                    # Handle detected threats
+                                    for match in yara_matches:
+                                        logger.warning(f"Threat detected: {file_path} - Rule: {match.rule}")
+                                        
+                                        # Create quarantine directory
+                                        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+                                        os.makedirs(quarantine_dir, exist_ok=True)
+                                        
+                                        try:
+                                            base_filename = os.path.basename(file_path)
+                                            base_name, ext = os.path.splitext(base_filename)
+                                            encrypted_filename = f"{base_name}{ext}.enc"
+                                            quarantine_path = os.path.join(quarantine_dir, encrypted_filename)
+                                            
+                                            # Add timestamp to prevent collisions
+                                            if os.path.exists(quarantine_path):
+                                                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                                                quarantine_path = os.path.join(quarantine_dir, f"{base_name}_{timestamp}{ext}.enc")
+                                            
+                                            # Encrypt and quarantine
+                                            if encrypt_file(file_path, quarantine_path):
+                                                os.remove(file_path)
+                                                logger.warning(f"Threat quarantined and deleted: {file_path}")
+                                            else:
+                                                logger.error(f"Failed to encrypt threat: {file_path}")
+                                        except Exception as quar_error:
+                                            logger.error(f"Error quarantining threat {file_path}: {quar_error}")
+                        except Exception as e:
+                            logger.error(f"Error scanning {file_path}: {str(e)}")
+            
+            # Delete quarantined files during continuous scanning
+            try:
+                delete_quarantined_files_quick_start()
+            except Exception as e:
+                logger.error(f"Error deleting quarantined files: {str(e)}")
+        
+        except Exception as e:
+            logger.error(f"Error in scheduled scan: {str(e)}")
+        
+        # Continuous scanning - short pause to prevent CPU overload
+        time.sleep(5)
+
+def delete_quarantined_files_quick_start():
+    """Delete quarantined files from the quarantine folder."""
+    try:
+        deleted_count = 0
+        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+        
+        if os.path.exists(quarantine_dir):
+            for filename in os.listdir(quarantine_dir):
+                if filename.endswith('.enc'):  # Only look at encrypted quarantined files
+                    file_path = os.path.join(quarantine_dir, filename)
+                    
+                    try:
+                        # Delete the encrypted file
+                        os.remove(file_path)
+                        deleted_count += 1
+                        
+                        # Delete associated metadata file if it exists
+                        json_path = file_path + '.json'
+                        if os.path.exists(json_path):
+                            os.remove(json_path)
+                        
+                        logger.info(f"Deleted quarantined file: {filename}")
+                        
+                    except Exception as e:
+                        logger.error(f"Error deleting quarantined file {filename}: {str(e)}")
+        
+        if deleted_count > 0:
+            logger.info(f"Successfully deleted {deleted_count} quarantined files")
+        else:
+            logger.info("No quarantined files to delete")
+            
+        return deleted_count
+        
+    except Exception as e:
+        logger.error(f"Error in delete_quarantined_files_quick_start: {str(e)}")
+        return 0
+
 # -- Start the server --
 def start_server(port=5000):
     """
@@ -1500,6 +1615,11 @@ if __name__ == '__main__':
     
     import threading
     import queue
+    
+    # Start scheduled scanning thread for continuous YARA scanning
+    scan_thread = threading.Thread(target=run_scheduled_scans, daemon=True)
+    scan_thread.start()
+    logger.info("Scheduled scanning thread started for continuous YARA scanning")
     
     # Create a queue for passing the port from server thread to main thread
     port_queue = queue.Queue()

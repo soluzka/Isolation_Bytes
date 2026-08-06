@@ -777,95 +777,6 @@ def scan():
 # This function has been replaced with the scan route above
 # The functionality is now handled by scan_all_folders_with_yara and the detector
 
-def run_scheduled_scans():
-    """Run scheduled security scans in the background."""
-    while True:
-        try:
-            with app.app_context():
-                # Run YARA scan on all files in monitored directories
-                from security.yara_scanner import scan_file_with_yara
-                monitored_dirs = load_scan_directories()
-                for scan_dir in monitored_dirs:
-                    if not os.path.exists(scan_dir):
-                        continue
-                    for root, dirs, files in os.walk(scan_dir):
-                        for file in files:
-                            file_path = os.path.join(root, file)
-                            try:
-                                yara_matches = scan_file_with_yara(file_path)
-                                if yara_matches:
-                                    logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
-                                    # Format results for database - YARA match objects need conversion to dict
-                                    for match in yara_matches:
-                                        result_dict = {
-                                            'file': file_path,
-                                            'rule': match.rule,
-                                            'tags': list(match.tags) if hasattr(match, 'tags') else [],
-                                            'strings': [(s[0], s[1].decode('utf-8', errors='replace')) for s in match.strings[:10]] if hasattr(match, 'strings') else []
-                                        }
-                                        scan_result = ScanResult(
-                                            filepath=file_path,
-                                            result=json.dumps(result_dict),
-                                            timestamp=datetime.utcnow()
-                                        )
-                                        db.session.add(scan_result)
-                                    db.session.commit()
-                            except Exception as e:
-                                logger.error(f"Error scanning {file_path}: {str(e)}")
-                
-                # Run process scan
-                process_results = scan_processes()
-                if process_results:
-                    logger.info(f"Process scan completed with results: {process_results}")
-                    
-                    # Save process scan results to database
-                    for result in process_results:
-                        scan_result = ScanResult(
-                            filepath=result.get('file', ''),
-                            result=json.dumps(result),
-                            timestamp=datetime.utcnow()
-                        )
-                        db.session.add(scan_result)
-                    db.session.commit()
-                
-                # Run network scan
-                network_results = network_monitor.monitor_connections()
-                if network_results:
-                    logger.info(f"Network scan completed with results: {network_results}")
-                # Save network scan results to database
-                with app.app_context():
-                    for result in network_results:
-                        scan_result = ScanResult(
-                            filepath=result.get('file', ''),
-                            result=json.dumps(result),
-                            timestamp=datetime.utcnow()
-                        )
-                        db.session.add(scan_result)
-                    db.session.commit()
-            
-            # Run file system scan
-            scan_results = perform_scan()
-            if scan_results:
-                logger.info(f"File system scan completed with results: {scan_results}")
-                
-                # Save file system scan results to database
-                with app.app_context():
-                    for result in scan_results:
-                        scan_result = ScanResult(
-                            filepath=result.get('file', ''),
-                            result=json.dumps(result),
-                            timestamp=datetime.utcnow()
-                        )
-                        db.session.add(scan_result)
-                    db.session.commit()
-        
-        except Exception as e:
-            with app.app_context():
-                logger.error(f"Error in scheduled scan: {str(e)}")
-            
-        # Wait for 1 hour before next scan
-        time.sleep(3600)
-
 # Initialize folder watcher configuration
 MONITORED_DIRECTORIES = [
     os.path.join(os.environ.get('USERPROFILE', r'C:\Users\Default'), 'Downloads'),
@@ -1100,10 +1011,6 @@ if __name__ == '__main__':
     # Start folder watcher
     folder_watcher = FolderWatcher(MONITORED_DIRECTORIES)
     folder_watcher.start()
-
-    # Start scheduled scanning thread
-    scan_thread = threading.Thread(target=run_scheduled_scans, daemon=True)
-    scan_thread.start()
     
     # Try to open browser to the web interface
     try:
