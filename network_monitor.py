@@ -2085,8 +2085,11 @@ if __name__ == "__main__":
             # print(f"Unblocked {ip}")  # Removed to reduce spam
         else:
             pass  # No action; print statement removed to reduce spam
-    # Run connection monitoring in main thread
-    threading.Thread(target=monitor_connections, daemon=True).start()
+    # Create NetworkMonitor instance
+    monitor = NetworkMonitor()
+    # Start monitoring connections in a separate thread
+    monitor_thread = threading.Thread(target=monitor.monitor_connections, daemon=True)
+    monitor_thread.start()
 
     # --- Run scan_active_connections.py every 10 minutes ---
     def run_scan_active_connections_periodically(interval_minutes=10):
