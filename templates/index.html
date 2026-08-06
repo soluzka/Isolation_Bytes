@@ -1481,6 +1481,37 @@ if (stopAutoUpdatesBtn) {
     </button>
     <div id="startupResults" style="margin-top:1em;"></div>
     <script>
+    // Coerce API payloads that may be a single value, an object or JSON text into an array
+    function toArray(value) {
+        if (Array.isArray(value)) return value;
+        if (value === null || value === undefined || value === '') return [];
+        if (typeof value === 'string') {
+            try {
+                const parsed = JSON.parse(value);
+                return Array.isArray(parsed) ? parsed : [parsed];
+            } catch (e) {
+                return [value];
+            }
+        }
+        if (typeof value === 'object') {
+            return Array.isArray(value.results) ? value.results : Object.values(value);
+        }
+        return [value];
+    }
+
+    function formatResult(result) {
+        if (result === null || result === undefined) return '';
+        if (typeof result !== 'object') return String(result);
+        if (result.file) {
+            const flags = [];
+            if (result.malware_found) flags.push('malware found');
+            if (result.quarantined) flags.push('quarantined');
+            if (result.error) flags.push('error: ' + result.error);
+            return result.file + (flags.length ? ' (' + flags.join(', ') + ')' : '');
+        }
+        return JSON.stringify(result);
+    }
+
     function performAction(action) {
         if (action === 'run_startup') {
             const btn = document.getElementById('run_startup_btn');
@@ -1508,16 +1539,17 @@ if (stopAutoUpdatesBtn) {
                     resultsHTML += '<p><strong>Timestamp:</strong> ' + data.timestamp + '</p>';
                     resultsHTML += '<p><strong>Scanned Directories:</strong></p><ul>';
                     
-                    data.scanned_directories.forEach(dir => {
+                    toArray(data.scanned_directories).forEach(dir => {
                         resultsHTML += '<li>' + dir + '</li>';
                     });
                     
                     resultsHTML += '</ul>';
                     
-                    if (data.results && data.results.length > 0) {
+                    const scanResults = toArray(data.results);
+                    if (scanResults.length > 0) {
                         resultsHTML += '<p><strong>Results:</strong></p><ul>';
-                        data.results.forEach(result => {
-                            resultsHTML += '<li>' + result + '</li>';
+                        scanResults.forEach(result => {
+                            resultsHTML += '<li>' + formatResult(result) + '</li>';
                         });
                         resultsHTML += '</ul>';
                     } else {

@@ -748,7 +748,8 @@ def scan():
     ]
     
     # Get all YARA matches
-    yara_results = scan_all_folders_with_yara(scan_dirs)
+    scan_data = scan_all_folders_with_yara(scan_dirs)
+    yara_results = scan_data.get('results', []) if isinstance(scan_data, dict) else scan_data
     
     # Process results with ML analysis
     results = []
@@ -1142,7 +1143,8 @@ def perform_yara_scan():
     ]
     
     try:
-        scan_results = scan_all_folders_with_yara(scan_dirs, YARA_RULES_FILE)
+        scan_data = scan_all_folders_with_yara(scan_dirs, YARA_RULES_FILE)
+        scan_results = scan_data.get('results', []) if isinstance(scan_data, dict) else scan_data
         for result in scan_results:
             if "YARA match" in result:
                 file_path = result.split("YARA match:", 1)[1].strip()
@@ -1783,9 +1785,19 @@ def index():
 def run_startup():
     """Run conditional startup scans (all monitored directories and all processes)"""
     try:
-        from conditional_startup import run_conditional_startup
-        results = run_conditional_startup()
-        return jsonify({"status": "success", "results": results})
+        from conditional_startup import run_conditional_startup_logic
+        start_time = time.time()
+        scan_data = run_conditional_startup_logic(open_browser=False)
+        duration = time.time() - start_time
+        return jsonify({
+            "status": "success",
+            "results": scan_data.get("results", []),
+            "errors": scan_data.get("errors", []),
+            "log": scan_data.get("log", ""),
+            "scanned_directories": load_scan_directories(),
+            "scan_time": f"{duration:.2f} seconds",
+            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        })
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 500
 

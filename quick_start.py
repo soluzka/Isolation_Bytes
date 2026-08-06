@@ -221,7 +221,7 @@ def run_startup():
         start_time = time.time()
         
         # Execute the scan logic
-        results = run_conditional_startup_logic(open_browser=False)
+        scan_data = run_conditional_startup_logic(open_browser=False)
         
         # Calculate scan duration
         duration = time.time() - start_time
@@ -229,7 +229,9 @@ def run_startup():
         # Add scan metrics
         scan_summary = {
             "status": "success",
-            "results": results,
+            "results": scan_data.get("results", []),
+            "errors": scan_data.get("errors", []),
+            "log": scan_data.get("log", ""),
             "scan_time": f"{duration:.2f} seconds",
             "scanned_directories": network_state['monitored_directories'] + folder_watcher_state['monitored_paths'],
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')

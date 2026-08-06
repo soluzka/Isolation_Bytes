@@ -1258,9 +1258,6 @@ def run_conditional_startup_logic(open_browser=True):
     results["results"] = scanned_results
     results["log"] = output.getvalue()
     
-    # Convert to JSON-compatible format
-    if __name__ == "__main__":
-        return json.dumps(results)
     return results
 
 # Run the logic when the script is executed
