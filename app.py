@@ -58,6 +58,34 @@ logger = logging.getLogger('antivirus')
 app = Flask(__name__)
 CORS(app)
 
+
+# Ensure the conditional startup status endpoint is always available.
+# Returns the cached conditional_startup_state if present, otherwise a sensible default.
+@app.route('/api/conditional_startup/status', methods=['GET'])
+def conditional_startup_status_api():
+    """Status of the last conditional startup run (guaranteed JSON).
+    This duplicates the intended endpoint if it wasn't registered earlier.
+    """
+    state = globals().get('conditional_startup_state')
+    if not state:
+        # Minimal default response expected by the frontend
+        return jsonify({
+            'running': False,
+            'last_run': None,
+            'duration': None,
+            'scanned_files': 0,
+            'quarantined_files': 0,
+            'errors': 0,
+            'process_events': 0,
+            'last_error': None,
+            'network_monitor_running': bool(globals().get('network_monitor_running'))
+        })
+
+    # Copy and add runtime flags to avoid mutating original
+    resp = dict(state)
+    resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
+    return jsonify(resp)
+
 # Register network monitoring endpoints
 register_network_monitor_endpoints(app)
 
@@ -268,7 +296,8 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
 # Register the network monitor integration blueprint
-app.register_blueprint(network_bp, url_prefix='/api/network')
+# Registration is handled via register_network_monitor_endpoints(app) to avoid double-registration
+# app.register_blueprint(network_bp, url_prefix='/api/network')
 
 # Database models
 class User(UserMixin, db.Model):
