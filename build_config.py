@@ -76,7 +76,11 @@ hidden_imports = [
     'numpy.random.common',
     'numpy.random.bounded_integers',
     'numpy.random.entropy',
-    'redis'  # Add Redis to hidden imports
+    'redis',  # Add Redis to hidden imports
+    # Add fuzzy and YARA related packages so PyInstaller bundles them
+    'pyssdeep',
+    'ssdeep',
+    'yara',
 ]
 
 # Path separator based on platform
@@ -119,6 +123,40 @@ for directory in data_dirs:
         if not os.path.exists(init_file):
             open(init_file, 'a').close()
         pyinstaller_args.append(f'--add-data={full_path}{sep}{directory}')
+
+# Try to detect compiled extension binaries for fuzzy and YARA libs and include them
+def add_extension_binaries(module_names):
+    """Locate compiled extension module files (.pyd, .so, .dll) and add them to the bundle."""
+    candidates = []
+    for name in module_names:
+        try:
+            mod = __import__(name)
+            mfile = getattr(mod, '__file__', None)
+            if mfile and os.path.exists(mfile):
+                candidates.append(mfile)
+                logging.info(f'Found extension file for {name}: {mfile}')
+        except Exception:
+            # fallback: search site-packages for likely filenames
+            for p in sys.path:
+                if not p:
+                    continue
+                try:
+                    # look for name*.pyd and name*.so
+                    for ext in ('.pyd', '.so', '.dll'):
+                        pattern = os.path.join(p, name + '*' + ext)
+                        for match in glob.glob(pattern):
+                            candidates.append(match)
+                            logging.info(f'Found binary candidate for {name}: {match}')
+                except Exception:
+                    continue
+
+    # Add unique candidates
+    for c in sorted(set(candidates)):
+        pyinstaller_args.append(f'--add-binary={c}{sep}.')
+        logging.info(f'Added binary to PyInstaller args: {c}')
+
+# Add suspected compiled modules
+add_extension_binaries(['pyssdeep', 'ssdeep', 'yara'])
 
 # Add malware_signatures.txt file
 malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')

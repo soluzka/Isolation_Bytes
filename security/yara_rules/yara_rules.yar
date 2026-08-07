@@ -2,6 +2,9 @@ rule SuspiciousExecutable_Strict {
     meta:
         description = "Detects suspicious PE files with advanced and empowered indicators"
         author = "CascadeAI"
+        ssdeep = "TODO:replace_with_ssdeep_hash"
+        imphash = "TODO:replace_with_imphash"
+        fuzzy_note = "Add ssdeep in meta and run external ssdeep comparison to enable fuzzy matching."
     strings:
         // PE header and packers
         $mz = {4D 5A}
@@ -142,6 +145,9 @@ rule Suspicious_PowerShell_Strict {
     meta:
         description = "Detects a wide range of suspicious PowerShell commands and obfuscation"
         author = "CascadeAI"
+        ssdeep = "TODO:replace_with_ssdeep_hash"
+        imphash = "TODO:replace_with_imphash"
+        fuzzy_note = "Add ssdeep in meta and run external ssdeep comparison to enable fuzzy matching."
     strings:
         $cmd1 = "Invoke-Expression"
         $cmd2 = "IEX"
@@ -728,7 +734,7 @@ rule WannaCry_Ransomware {
     strings:
         $note1 = "@Please_Read_Me@.txt"
         $ext1 = ".WNCRY"
-        $mutex = "Global\MsWinZonesCacheCounterMutexA0"
+        $mutex = "Global\\MsWinZonesCacheCounterMutexA0"
         $url = "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
     condition:
         any of ($note*) or $ext1 or $mutex or $url

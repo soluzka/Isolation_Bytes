@@ -24,6 +24,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger('antivirus')
 
+# Allow running the ssdeep runner as a one-off via command line:
+#   python quick_start.py --ssdeep-run --rules <rules> --dir <dir>
+if '--ssdeep-run' in sys.argv:
+    try:
+        # Remove the flag so ssdeep_runner argparse sees only its args
+        sys.argv.remove('--ssdeep-run')
+        # Import and invoke runner
+        import importlib
+        ssr = importlib.import_module('security.yara_rules.ssdeep_runner')
+        ssr.main()
+        sys.exit(0)
+    except Exception as e:
+        logger.exception('Failed to execute ssdeep runner: %s', e)
+        sys.exit(1)
+
 # Add a filter to the root logger to catch DNSBL SERVFAIL warnings and show a friendly message
 class DNSBLWarningFilter(logging.Filter):
     def __init__(self):
