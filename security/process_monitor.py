@@ -31,8 +31,10 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
         if event_callback:
             try:
                 event_callback({'type': event_type, **details})
-            except Exception:
-                pass
+            except Exception as e:
+                # A misbehaving callback shouldn't abort the process scan, but
+                # silently swallowing the error makes such bugs invisible.
+                logging.debug(f'event_callback raised for event {event_type!r}: {e}')
 
     import getpass
     current_user = getpass.getuser()

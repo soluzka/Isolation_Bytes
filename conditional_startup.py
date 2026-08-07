@@ -1038,71 +1038,62 @@ def routine_maintenance_and_system_recovery():
     
     return output.getvalue(), recovery_results
 
-def run_conditional_startup_logic(open_browser=True, progress_callback=None):
-    # Suppress scikit-learn version warnings
-    warnings.filterwarnings("ignore", category=UserWarning)
-    
-    output = io.StringIO()
-    results = {
-        "scanned_files": [],
-        "quarantined_files": [],
-        "errors": [],
-        "process_events": [],
-        "results": [],  # Initialize results array immediately
-        "routine_maintenance": {}  # Add routine maintenance results
-    }
-    scanned_file_status = {}  # Track status for each scanned file
-    
-    # Run comprehensive routine maintenance and system recovery
-    # NOTE: routine_maintenance_and_system_recovery() performs 8+ full recursive
-    # scans of critical_dirs, which includes C:\Windows\System32 (tens of
-    # thousands of files). That makes it extremely slow and it runs before any
-    # scan progress is reported, so it's opt-in only: set
-    # AV_ENABLE_ROUTINE_MAINTENANCE=1 (or true/yes) to enable it.
+def _run_routine_maintenance_step(output, results):
+    """Opt-in routine maintenance/system recovery step (see NOTE in
+    run_conditional_startup_logic for why this defaults to disabled)."""
     routine_maintenance_enabled = os.environ.get('AV_ENABLE_ROUTINE_MAINTENANCE', '').strip().lower() in ('1', 'true', 'yes')
     if not routine_maintenance_enabled:
         output.write("[conditional_startup] Skipping routine maintenance and system recovery (disabled by default; set AV_ENABLE_ROUTINE_MAINTENANCE=1 to enable).\n")
         results["routine_maintenance"] = {"skipped": True}
-    else:
-        output.write("[conditional_startup] Running comprehensive routine maintenance and system recovery...\n")
-        try:
-            maintenance_log, maintenance_results = routine_maintenance_and_system_recovery()
-            output.write(maintenance_log)
-            results["routine_maintenance"] = maintenance_results
-            output.write("[conditional_startup] Routine maintenance completed.\n")
-        except Exception as e:
-            output.write(f"[ERROR] Routine maintenance failed: {e}\n")
-            results["routine_maintenance"] = {"errors": [str(e)]}
+        return
+    output.write("[conditional_startup] Running comprehensive routine maintenance and system recovery...\n")
+    try:
+        maintenance_log, maintenance_results = routine_maintenance_and_system_recovery()
+        output.write(maintenance_log)
+        results["routine_maintenance"] = maintenance_results
+        output.write("[conditional_startup] Routine maintenance completed.\n")
+    except Exception as e:
+        output.write(f"[ERROR] Routine maintenance failed: {e}\n")
+        results["routine_maintenance"] = {"errors": [str(e)]}
 
-    # Define the base directory and state file path
-    basedir = os.path.dirname(os.path.abspath(__file__))
-    STATE_FILE = os.path.abspath(os.path.join(basedir, 'scheduled_scan_state.json'))
+
+def _load_scan_utilities(basedir, output):
+    """Dynamically load the modules the scan needs. Returns a dict of loaded
+    modules, or None if loading failed (with the failure logged to output)."""
     paths_path = os.path.join(basedir, 'utils', 'paths.py')
     if os.path.exists(paths_path):
         output.write(f"[conditional_startup] Found paths.py at: {paths_path}\n")
     else:
         output.write(f"[ERROR] paths.py not found in {basedir}!\n")
-    # Dynamically load scan utilities
+
     scan_utils_path = os.path.join(basedir, 'scan_utils.py')
     yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
     process_monitor_path = os.path.join(basedir, 'security', 'process_monitor.py')
     quarantine_utils_path = os.path.join(basedir, 'quarantine_utils.py')
 
     try:
-        scan_utils = import_module_from_path('scan_utils', scan_utils_path)
-        yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)
-        process_monitor = import_module_from_path('process_monitor', process_monitor_path)
-        quarantine_utils = import_module_from_path('quarantine_utils', quarantine_utils_path)
+        modules = {
+            'scan_utils': import_module_from_path('scan_utils', scan_utils_path),
+            'yara_scanner': import_module_from_path('yara_scanner', yara_scanner_path),
+            'process_monitor': import_module_from_path('process_monitor', process_monitor_path),
+            'quarantine_utils': import_module_from_path('quarantine_utils', quarantine_utils_path),
+        }
         output.write("[conditional_startup] Successfully loaded scan utilities.\n")
+        return modules
     except Exception as e:
         output.write(f"[ERROR] Failed to load scan utilities: {e}\n")
-        return output.getvalue()
+        return None
 
-    # --- Scan running processes ---
-    # NOTE: process_monitor was previously imported here but scan_running_processes()
-    # was never actually called, so results["process_events"] stayed empty and the
-    # "Process Events" stat in the status UI always showed 0 regardless of what
-    # happened during the scan.
+
+def _scan_running_processes_step(process_monitor, scan_utils, results, output, progress_callback):
+    """Scan running processes, reporting live progress per-event.
+
+    NOTE: process_monitor used to only be imported here but
+    scan_running_processes() was never actually called, so
+    results["process_events"] stayed empty and the "Process Events" stat in
+    the status UI always showed 0 regardless of what happened during the
+    scan.
+    """
     output.write("[conditional_startup] Scanning running processes...\n")
 
     def on_process_event(event):
@@ -1114,8 +1105,8 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         if callable(progress_callback):
             try:
                 progress_callback(results)
-            except Exception:
-                pass
+            except Exception as e:
+                output.write(f"[WARNING] progress_callback raised during process scan: {e}\n")
 
     try:
         process_monitor.scan_running_processes(
@@ -1127,7 +1118,9 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         output.write(f"[ERROR] Process scan failed: {e}\n")
         results["errors"].append({"stage": "process_scan", "error": str(e)})
 
-    # --- Launch phishing detector learning behavior (update blocklists) ---
+
+def _update_phishing_blocklists_step(basedir, output):
+    """Launch phishing detector learning behavior (update blocklists)."""
     try:
         phishing_live_feeds_path = os.path.join(basedir, 'phishing_live_feeds.py')
         phishing_live_feeds = import_module_from_path('phishing_live_feeds', phishing_live_feeds_path)
@@ -1136,176 +1129,195 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
     except Exception as e:
         output.write(f"[ERROR] Failed to update phishing detector blocklists: {e}\n")
 
-    # --- Launch safe_downloader.py as a background process ---
+
+def _launch_safe_downloader_step(basedir, output):
+    """Launch safe_downloader.py as a background process, if configured."""
     safe_downloader_path = os.path.join(basedir, 'safe_downloader.py')
     # Only launch safe_downloader.py if required arguments are provided (url, encrypted_output)
     # Otherwise, skip and log a warning
     safe_downloader_url = os.environ.get('SAFE_DOWNLOADER_URL')
     safe_downloader_output = os.environ.get('SAFE_DOWNLOADER_OUTPUT')
-    if os.path.exists(safe_downloader_path):
-        if safe_downloader_url and safe_downloader_output:
-            try:
-                subprocess.Popen([
-                    sys.executable, safe_downloader_path,
-                    safe_downloader_url, safe_downloader_output
-                ])
-            except Exception as e:
-                output.write(f"[ERROR] Failed to launch safe_downloader.py: {e}\n")
-        else:
-            output.write("[WARNING] Skipping launch of safe_downloader.py: required arguments (url, encrypted_output) not provided.\n")
-            output.write("[conditional_startup] safe_downloader.py started as background process.\n")
-    else:
+    if not os.path.exists(safe_downloader_path):
         output.write("[conditional_startup] safe_downloader.py not found!\n")
+        return
+    if safe_downloader_url and safe_downloader_output:
+        try:
+            subprocess.Popen([
+                sys.executable, safe_downloader_path,
+                safe_downloader_url, safe_downloader_output
+            ])
+        except Exception as e:
+            output.write(f"[ERROR] Failed to launch safe_downloader.py: {e}\n")
+    else:
+        output.write("[WARNING] Skipping launch of safe_downloader.py: required arguments (url, encrypted_output) not provided.\n")
+        output.write("[conditional_startup] safe_downloader.py started as background process.\n")
 
-    # Load scheduled scan state
+
+def _load_scheduled_scan_state(state_file, output):
+    """Read scheduled_scan_state.json, returning whether scans are enabled."""
     try:
-        with open(get_resource_path(os.path.join(STATE_FILE)), 'r') as f:
+        with open(get_resource_path(os.path.join(state_file)), 'r') as f:
             state = json.load(f)
-        enabled = state.get('enabled', False)
+        return state.get('enabled', False)
     except Exception as e:
         output.write(f"[conditional_startup] Failed to read scheduled scan state: {e}\n")
-        enabled = False
+        return False
 
-    # Start antivirus_cli.py if it exists
+
+def _start_antivirus_cli_step(basedir, output):
+    """Start antivirus_cli.py as a background process, if present."""
     cli_path = os.path.join(basedir, 'antivirus_cli.py')
-    if os.path.exists(cli_path):
-        try:
-            subprocess.Popen([sys.executable, cli_path])
-            output.write("[conditional_startup] antivirus_cli.py started.\n")
-        except Exception as e:
-            output.write(f"[ERROR] Could not start antivirus_cli.py: {e}\n")
-    else:
+    if not os.path.exists(cli_path):
         output.write("[conditional_startup] antivirus_cli.py not found!\n")
+        return
+    try:
+        subprocess.Popen([sys.executable, cli_path])
+        output.write("[conditional_startup] antivirus_cli.py started.\n")
+    except Exception as e:
+        output.write(f"[ERROR] Could not start antivirus_cli.py: {e}\n")
 
-    # If scheduled scans are enabled, proceed with scans
-    if enabled:
-        output.write('[conditional_startup] Running scheduled scans...\n')
 
-        # Load monitored folders using the modern logic
+def _get_monitored_folders(basedir, output):
+    """Resolve the list of folders to scan via folder_watcher, falling back
+    to basedir/uploads and basedir/encrypted if that's unavailable."""
+    fallback_folders = [os.path.join(basedir, 'uploads'), os.path.join(basedir, 'encrypted')]
+    try:
+        import folder_watcher
+        # Use folder_watcher's load_scan_directories function correctly
+        monitored_folders = folder_watcher.load_scan_directories("scan_directories.txt")
+        output.write(f"[conditional_startup] Monitored folders: {monitored_folders}\n")
+        return monitored_folders
+    except AttributeError:
+        # If the exact function isn't found, try an alternative approach
         try:
-            import folder_watcher
-            # Use folder_watcher's load_scan_directories function correctly
-            monitored_folders = folder_watcher.load_scan_directories("scan_directories.txt")
-            output.write(f"[conditional_startup] Monitored folders: {monitored_folders}\n")
+            # Try to use MONITORED_FOLDERS if available
+            monitored_folders = folder_watcher.MONITORED_FOLDERS
+            output.write(f"[conditional_startup] Using pre-defined monitored folders: {monitored_folders}\n")
+            return monitored_folders
         except AttributeError:
-            # If the exact function isn't found, try an alternative approach
+            # Fall back to build_monitored_folders if available
             try:
-                # Try to use MONITORED_FOLDERS if available
-                monitored_folders = folder_watcher.MONITORED_FOLDERS
-                output.write(f"[conditional_startup] Using pre-defined monitored folders: {monitored_folders}\n")
-            except AttributeError:
-                # Fall back to build_monitored_folders if available
+                monitored_folders = folder_watcher.build_monitored_folders()
+                output.write(f"[conditional_startup] Built monitored folders: {monitored_folders}\n")
+                return monitored_folders
+            except Exception as build_exc:
+                output.write(f"[ERROR] Could not build monitored folders: {build_exc}\n")
+                return fallback_folders
+    except Exception as fw_exc:
+        output.write(f"[ERROR] Could not import folder_watcher: {fw_exc}\n")
+        return fallback_folders
+
+
+def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output):
+    """Scan a single file, quarantining it if malware is found, and record
+    its outcome into results/scanned_file_status."""
+    try:
+        scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
+        output.write(f"[conditional_startup] {msg}\n")
+        results["scanned_files"].append(filepath)
+        scanned_file_status[filepath] = {
+            "malware_found": malware_found,
+            "quarantined": False,
+            "error": None
+        }
+
+        # Try YARA scan
+        try:
+            yara_result = yara_scanner.scan_file(filepath)
+            output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
+        except Exception as yara_exc:
+            # Just log and continue if YARA scan fails
+            output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
+
+        # Quarantine if malware found
+        if malware_found:
+            try:
+                quarantine_utils.quarantine_file(filepath)
+                output.write(f"[conditional_startup] File {filepath} quarantined.\n")
+                results["quarantined_files"].append(filepath)
+                scanned_file_status[filepath]["quarantined"] = True
+            except Exception as quarantine_exc:
+                # Malware was detected but could not be removed (e.g. permission
+                # denied on a protected system file). Previously this was only
+                # written to the internal log and counted toward neither
+                # "Quarantined" nor "Errors", making it look like nothing had
+                # happened when malware had actually been found and left in place.
+                output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
+                scanned_file_status[filepath]["error"] = str(quarantine_exc)
+                results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
+    except (PermissionError, OSError) as perm_error:
+        output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
+        scanned_file_status[filepath] = {
+            "malware_found": None,
+            "quarantined": False,
+            "error": str(perm_error)
+        }
+    except Exception as scan_exc:
+        output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
+        results["errors"].append({"file": filepath, "error": str(scan_exc)})
+        scanned_file_status[filepath] = {
+            "malware_found": None,
+            "quarantined": False,
+            "error": str(scan_exc)
+        }
+
+
+def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback):
+    """Walk every monitored folder and scan each accessible file."""
+    scan_utils = modules['scan_utils']
+    yara_scanner = modules['yara_scanner']
+    quarantine_utils = modules['quarantine_utils']
+
+    for folder in monitored_folders:
+        for root, dirs, files in os.walk(folder):
+            # Skip OneDriveTemp directories entirely
+            if "OneDriveTemp" in root:
+                continue
+
+            for filename in files:
+                filepath = os.path.join(root, filename)
+
+                # Skip files that can't be accessed due to permissions
                 try:
-                    monitored_folders = folder_watcher.build_monitored_folders()
-                    output.write(f"[conditional_startup] Built monitored folders: {monitored_folders}\n")
-                except Exception as build_exc:
-                    output.write(f"[ERROR] Could not build monitored folders: {build_exc}\n")
-                    monitored_folders = [os.path.join(basedir, 'uploads'), os.path.join(basedir, 'encrypted')]
-        except Exception as fw_exc:
-            output.write(f"[ERROR] Could not import folder_watcher: {fw_exc}\n")
-            monitored_folders = [os.path.join(basedir, 'uploads'), os.path.join(basedir, 'encrypted')]
-
-        # Scan all monitored directories
-        for folder in monitored_folders:
-            for root, dirs, files in os.walk(folder):
-                # Skip OneDriveTemp directories entirely
-                if "OneDriveTemp" in root:
+                    with open(filepath, 'rb') as test_access:
+                        pass
+                except (PermissionError, OSError):
+                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\n")
                     continue
-                    
-                # Process files in current directory
-                for filename in files:
-                    filepath = os.path.join(root, filename)
-                    
-                    # Skip files that can't be accessed due to permissions
-                    try:
-                        # Test if we can open the file first
-                        with open(filepath, 'rb') as test_access:
-                            pass
-                    except (PermissionError, OSError) as access_error:
-                        # Silently skip files we can't access
-                        output.write(f"[INFO] Skipping inaccessible file: {filepath}\n")
-                        continue
-                    
-                    # Proceed with scanning only if we can access the file
-                    try:
-                        scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
-                        output.write(f"[conditional_startup] {msg}\n")
-                        results["scanned_files"].append(filepath)
-                        scanned_file_status[filepath] = {
-                            "malware_found": malware_found,
-                            "quarantined": False,
-                            "error": None
-                        }
-                        
-                        # Try YARA scan
-                        try:
-                            yara_result = yara_scanner.scan_file(filepath)
-                            output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
-                        except Exception as yara_exc:
-                            # Just log and continue if YARA scan fails
-                            output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
-                        
-                        # Quarantine if malware found
-                        if malware_found:
-                            try:
-                                quarantine_utils.quarantine_file(filepath)
-                                output.write(f"[conditional_startup] File {filepath} quarantined.\n")
-                                results["quarantined_files"].append(filepath)
-                                scanned_file_status[filepath]["quarantined"] = True
-                            except Exception as quarantine_exc:
-                                # Malware was detected but could not be removed (e.g. permission
-                                # denied on a protected system file). Previously this was only
-                                # written to the internal log and counted toward neither
-                                # "Quarantined" nor "Errors", making it look like nothing had
-                                # happened when malware had actually been found and left in place.
-                                output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
-                                scanned_file_status[filepath]["error"] = str(quarantine_exc)
-                                results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
-                    except (PermissionError, OSError) as perm_error:
-                        output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
-                        scanned_file_status[filepath] = {
-                            "malware_found": None,
-                            "quarantined": False,
-                            "error": str(perm_error)
-                        }
-                    except Exception as scan_exc:
-                        output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
-                        results["errors"].append({"file": filepath, "error": str(scan_exc)})
-                        scanned_file_status[filepath] = {
-                            "malware_found": None,
-                            "quarantined": False,
-                            "error": str(scan_exc)
-                        }
 
-                    # Report live progress so callers (e.g. the status API) don't
-                    # appear stuck at 0 while a large scan is still in progress.
-                    if callable(progress_callback):
-                        try:
-                            progress_callback(results)
-                        except Exception:
-                            pass
-    
-    # Optionally, open the browser if needed
-    if open_browser:
-        url = 'http://127.0.0.1:5000'
-        timeout = 15
-        interval = 0.25
-        waited = 0
-        while waited < timeout:
-            try:
-                response = requests.get(url)
-                if response.status_code == 200:
-                    webbrowser.open(url)
-                    break
-            except Exception:
-                pass
-            time.sleep(interval)
-            waited += interval
-        else:
-            output.write(f"[conditional_startup] Warning: Server not available after {timeout} seconds.\n")
-            webbrowser.open(url)
+                _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output)
 
-    # Remove the previous results["results"] creation and replace with this:
+                # Report live progress so callers (e.g. the status API) don't
+                # appear stuck at 0 while a large scan is still in progress.
+                if callable(progress_callback):
+                    try:
+                        progress_callback(results)
+                    except Exception as e:
+                        output.write(f"[WARNING] progress_callback raised during directory scan: {e}\n")
+
+
+def _open_browser_when_ready(output):
+    """Wait for the local server to come up, then open it in a browser."""
+    url = 'http://127.0.0.1:5000'
+    timeout = 15
+    interval = 0.25
+    waited = 0
+    while waited < timeout:
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                webbrowser.open(url)
+                return
+        except Exception:
+            pass
+        time.sleep(interval)
+        waited += interval
+    output.write(f"[conditional_startup] Warning: Server not available after {timeout} seconds.\n")
+    webbrowser.open(url)
+
+
+def _build_scanned_results(results, scanned_file_status):
+    """Build the per-file results list from scanned_files + scanned_file_status."""
     scanned_results = []
     for filepath in results["scanned_files"]:
         status = scanned_file_status.get(filepath, {})
@@ -1315,11 +1327,55 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
             "quarantined": status.get("quarantined", False),
             "error": status.get("error", None)
         })
-    
-    # Ensure the results field is an array
-    results["results"] = scanned_results
+    return scanned_results
+
+
+def run_conditional_startup_logic(open_browser=True, progress_callback=None):
+    # Suppress scikit-learn version warnings
+    warnings.filterwarnings("ignore", category=UserWarning)
+
+    output = io.StringIO()
+    results = {
+        "scanned_files": [],
+        "quarantined_files": [],
+        "errors": [],
+        "process_events": [],
+        "results": [],  # Initialize results array immediately
+        "routine_maintenance": {}  # Add routine maintenance results
+    }
+    scanned_file_status = {}  # Track status for each scanned file
+
+    # Run comprehensive routine maintenance and system recovery.
+    # NOTE: routine_maintenance_and_system_recovery() performs 8+ full recursive
+    # scans of critical_dirs, which includes C:\Windows\System32 (tens of
+    # thousands of files). That makes it extremely slow and it runs before any
+    # scan progress is reported, so it's opt-in only: set
+    # AV_ENABLE_ROUTINE_MAINTENANCE=1 (or true/yes) to enable it.
+    _run_routine_maintenance_step(output, results)
+
+    basedir = os.path.dirname(os.path.abspath(__file__))
+    state_file = os.path.abspath(os.path.join(basedir, 'scheduled_scan_state.json'))
+
+    modules = _load_scan_utilities(basedir, output)
+    if modules is None:
+        return output.getvalue()
+
+    _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
+    _update_phishing_blocklists_step(basedir, output)
+    _launch_safe_downloader_step(basedir, output)
+    _start_antivirus_cli_step(basedir, output)
+
+    if _load_scheduled_scan_state(state_file, output):
+        output.write('[conditional_startup] Running scheduled scans...\n')
+        monitored_folders = _get_monitored_folders(basedir, output)
+        _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback)
+
+    if open_browser:
+        _open_browser_when_ready(output)
+
+    results["results"] = _build_scanned_results(results, scanned_file_status)
     results["log"] = output.getvalue()
-    
+
     return results
 
 # Run the logic when the script is executed

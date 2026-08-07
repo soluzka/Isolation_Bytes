@@ -20,10 +20,26 @@
     'use strict';
 
     /**
+     * Only allow same-origin, relative API paths (e.g. "/get_traffic_stats").
+     * This function is only ever called today with hardcoded literal
+     * endpoint strings, never with user/query-string-derived input -- but
+     * since it's a shared utility, this guard ensures that if a future
+     * caller ever passes untrusted input by mistake, it can't be used to
+     * make this app fetch an arbitrary external URL (e.g. "https://evil.com"
+     * or a protocol-relative "//evil.com") on the user's behalf.
+     */
+    function isSafeRelativePath(url) {
+        return typeof url === 'string' && /^\/(?!\/)/.test(url);
+    }
+
+    /**
      * Fetch JSON from a URL. Never rejects/throws: resolves to
      * { ok: boolean, status: number|null, data: any, error: string|null }.
      */
     async function fetchJsonSafe(url, options) {
+        if (!isSafeRelativePath(url)) {
+            return { ok: false, status: null, data: null, error: 'Refused to fetch a non-relative or unsafe URL' };
+        }
         try {
             const response = await fetch(url, options);
             if (!response.ok) {
