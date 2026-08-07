@@ -20,8 +20,10 @@ jobs:
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install yara-python ssdeep
+          python -m pip install --upgrade pip setuptools wheel
+          # Prefer pyssdeep on runners; attempt ssdeep but don't fail if it needs a native build
+          pip install yara-python pyssdeep || true
+          pip install ssdeep || true
 
       - name: Run ssdeep runner
         run: |
