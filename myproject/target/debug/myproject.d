@@ -1,0 +1,1 @@
+C:\Users\bpier\.copilot\repos\copilot-worktrees\antivirus-yara-rules\soluzka-fuzzy-garbanzo\myproject\target\debug\myproject.exe: C:\Users\bpier\.copilot\repos\copilot-worktrees\antivirus-yara-rules\soluzka-fuzzy-garbanzo\myproject\src\main.rs
