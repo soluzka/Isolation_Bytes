@@ -223,37 +223,85 @@ def decrypt_file(encrypted_path, output_path):
         logger.error(f"Error decrypting file {encrypted_path}: {e}")
         return False
 
+# -- Conditional startup state and routes --
+conditional_startup_state = {
+    'running': False,
+    'last_run': None,
+    'duration': None,
+    'scanned_files': 0,
+    'quarantined_files': 0,
+    'errors': 0,
+    'process_events': 0,
+    'last_error': None
+}
+conditional_startup_lock = threading.Lock()
+
+
+def record_conditional_startup_run(scan_data=None, duration=None, error=None):
+    """Update conditional_startup_state after a run completes or fails."""
+    if not isinstance(scan_data, dict):
+        scan_data = {}
+    conditional_startup_state.update({
+        'running': False,
+        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': round(duration, 2) if duration is not None else None,
+        'scanned_files': len(scan_data.get('scanned_files', [])),
+        'quarantined_files': len(scan_data.get('quarantined_files', [])),
+        'errors': len(scan_data.get('errors', [])),
+        'process_events': len(scan_data.get('process_events', [])),
+        'last_error': str(error) if error else None
+    })
+
+
+def run_conditional_startup_background():
+    """Run the conditional startup scan in a background thread."""
+    from conditional_startup import run_conditional_startup_logic
+    start_time = time.time()
+    try:
+        scan_data = run_conditional_startup_logic(open_browser=False)
+        record_conditional_startup_run(scan_data, time.time() - start_time)
+        logger.info("Conditional startup scan completed")
+    except Exception as e:
+        logger.error(f"Error running conditional startup: {e}")
+        record_conditional_startup_run(error=e, duration=time.time() - start_time)
+
+
+@app.route('/api/conditional_startup/status', methods=['GET'])
+def conditional_startup_status():
+    """Status of the last conditional startup run."""
+    resp = dict(conditional_startup_state)
+    resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
+    return jsonify(resp)
+
+
 # -- Route for the conditional startup functionality --
 @app.route('/run_startup', methods=['POST'])
 def run_startup():
-    """Run conditional startup scans (all monitored directories and all processes)"""
+    """Start conditional startup scans in the background and return immediately."""
     try:
-        # Import directly from conditional_startup.py
-        from conditional_startup import run_conditional_startup_logic
-        
-        # Log the start of the scan
-        logger.info("Starting conditional startup scan")
-        start_time = time.time()
-        
-        # Execute the scan logic
-        scan_data = run_conditional_startup_logic(open_browser=False)
-        
-        # Calculate scan duration
-        duration = time.time() - start_time
-        
-        # Add scan metrics
-        scan_summary = {
+        with conditional_startup_lock:
+            if conditional_startup_state['running']:
+                return jsonify({
+                    "status": "success",
+                    "message": "Conditional startup scan already in progress",
+                    "scan_time": "in progress",
+                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+            conditional_startup_state['running'] = True
+
+        logger.info("Starting conditional startup scan in background")
+        thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+        thread.start()
+
+        return jsonify({
             "status": "success",
-            "results": scan_data.get("results", []),
-            "errors": scan_data.get("errors", []),
-            "log": scan_data.get("log", ""),
-            "scan_time": f"{duration:.2f} seconds",
+            "message": "Conditional startup scan started in background",
+            "scan_time": "running in background (see status panel)",
             "scanned_directories": network_state['monitored_directories'] + folder_watcher_state['monitored_paths'],
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        return jsonify(scan_summary)
+        })
     except Exception as e:
+        conditional_startup_state['running'] = False
         logger.error(f"Error running conditional startup: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
