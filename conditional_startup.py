@@ -4,6 +4,7 @@ import sys
 import io
 import json
 import subprocess
+import tempfile
 import requests
 import time
 import webbrowser
@@ -994,7 +995,7 @@ def routine_maintenance_and_system_recovery():
                         output.write(f"[CLEANUP ERROR] Error cleaning {temp_dir}: {e}\n")
             
             # Quarantine cleanup
-            quarantine_folder = os.path.join(basedir, 'quarantine')
+            quarantine_folder = os.path.join(tempfile.gettempdir(), 'Defender_Quarantine')
             if os.path.exists(quarantine_folder):
                 try:
                     for filename in os.listdir(quarantine_folder):

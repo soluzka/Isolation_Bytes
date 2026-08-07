@@ -49,7 +49,8 @@ def get_basedir():
     return os.path.dirname(os.path.abspath(__file__))
 
 BASEDIR = get_basedir()
-QUARANTINE_FOLDER = os.path.join(BASEDIR, 'quarantine')
+import tempfile
+QUARANTINE_FOLDER = os.path.join(tempfile.gettempdir(), 'Defender_Quarantine')
 FAILED_QUARANTINE_FOLDER = os.path.join(BASEDIR, 'failed_quarantine')
 ENCRYPTED_FOLDER = os.path.join(BASEDIR, 'encrypted')
 

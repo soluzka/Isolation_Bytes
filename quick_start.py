@@ -16,6 +16,8 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 
 # Import DNS server functionality
 from dns_server import start_dns_server
+# Fernet key provider for quarantine encryption
+from data_analysis import analyze_data
 
 # Configure logging
 logging.basicConfig(
@@ -161,7 +163,7 @@ def should_exclude_path(path):
 
 # Encryption utilities for quarantine files
 def get_encryption_key():
-    """Generate a deterministic encryption key based on machine-specific information"""
+    """Legacy deterministic key (kept for decrypting older quarantined files)"""
     # Use a combination of machine-specific values as salt
     salt = socket.gethostname().encode() + b'antivirus_quarantine_salt'
     # Use a fixed passphrase (in production, this would be securely stored)
@@ -177,24 +179,32 @@ def get_encryption_key():
     key = base64.urlsafe_b64encode(kdf.derive(password))
     return key
 
+FERNET_KEY_LENGTH = 44  # Length of a urlsafe base64-encoded Fernet key
+
 def encrypt_file(file_path, encrypted_path):
-    """Encrypt a file and save it with .enc extension in the quarantine folder"""
+    """Encrypt a file and save it with .enc extension in the quarantine folder.
+
+    The per-file Fernet key comes from data_analysis.analyze_data and is stored
+    as a 44-byte header of the encrypted file (same scheme as file_crypto.py).
+    """
     try:
-        # Generate encryption key
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
         # Read file content
         with open(file_path, 'rb') as file:
             file_data = file.read()
-            
+
+        # Get the Fernet key from data_analysis
+        key = analyze_data(file_data)
+        if isinstance(key, str):
+            key = key.encode()
+        fernet = Fernet(key)
+
         # Encrypt the file data
         encrypted_data = fernet.encrypt(file_data)
-        
-        # Save the encrypted file
+
+        # Save the encrypted file with the key prepended as a header
         with open(encrypted_path, 'wb') as encrypted_file:
-            encrypted_file.write(encrypted_data)
-            
+            encrypted_file.write(key + encrypted_data)
+
         return True
     except Exception as e:
         logger.error(f"Error encrypting file {file_path}: {e}")
@@ -203,57 +213,113 @@ def encrypt_file(file_path, encrypted_path):
 def decrypt_file(encrypted_path, output_path):
     """Decrypt a quarantined file (used when restoring files from quarantine)"""
     try:
-        # Generate encryption key (same key used for encryption)
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
         # Read encrypted file
         with open(encrypted_path, 'rb') as encrypted_file:
-            encrypted_data = encrypted_file.read()
-            
-        # Decrypt the data
-        decrypted_data = fernet.decrypt(encrypted_data)
-        
+            file_data = encrypted_file.read()
+
+        decrypted_data = None
+        # New format: 44-byte Fernet key header followed by the encrypted payload
+        if len(file_data) > FERNET_KEY_LENGTH:
+            try:
+                header_key = file_data[:FERNET_KEY_LENGTH]
+                decrypted_data = Fernet(header_key).decrypt(file_data[FERNET_KEY_LENGTH:])
+            except Exception:
+                decrypted_data = None
+
+        # Legacy format: whole file encrypted with the deterministic machine key
+        if decrypted_data is None:
+            decrypted_data = Fernet(get_encryption_key()).decrypt(file_data)
+
         # Save the decrypted file
         with open(output_path, 'wb') as file:
             file.write(decrypted_data)
-            
+
         return True
     except Exception as e:
         logger.error(f"Error decrypting file {encrypted_path}: {e}")
         return False
 
+# -- Conditional startup state and routes --
+conditional_startup_state = {
+    'running': False,
+    'last_run': None,
+    'duration': None,
+    'scanned_files': 0,
+    'quarantined_files': 0,
+    'errors': 0,
+    'process_events': 0,
+    'last_error': None
+}
+conditional_startup_lock = threading.Lock()
+
+
+def record_conditional_startup_run(scan_data=None, duration=None, error=None):
+    """Update conditional_startup_state after a run completes or fails."""
+    if not isinstance(scan_data, dict):
+        scan_data = {}
+    conditional_startup_state.update({
+        'running': False,
+        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'duration': round(duration, 2) if duration is not None else None,
+        'scanned_files': len(scan_data.get('scanned_files', [])),
+        'quarantined_files': len(scan_data.get('quarantined_files', [])),
+        'errors': len(scan_data.get('errors', [])),
+        'process_events': len(scan_data.get('process_events', [])),
+        'last_error': str(error) if error else None
+    })
+
+
+def run_conditional_startup_background():
+    """Run the conditional startup scan in a background thread."""
+    from conditional_startup import run_conditional_startup_logic
+    start_time = time.time()
+    try:
+        scan_data = run_conditional_startup_logic(open_browser=False)
+        record_conditional_startup_run(scan_data, time.time() - start_time)
+        logger.info("Conditional startup scan completed")
+    except BaseException as e:
+        # BaseException so SystemExit raised by imported modules (e.g. missing
+        # FERNET_KEY) is recorded instead of leaving the state stuck on running
+        logger.error(f"Error running conditional startup: {e!r}")
+        record_conditional_startup_run(error=e, duration=time.time() - start_time)
+
+
+@app.route('/api/conditional_startup/status', methods=['GET'])
+def conditional_startup_status():
+    """Status of the last conditional startup run."""
+    resp = dict(conditional_startup_state)
+    resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
+    return jsonify(resp)
+
+
 # -- Route for the conditional startup functionality --
 @app.route('/run_startup', methods=['POST'])
 def run_startup():
-    """Run conditional startup scans (all monitored directories and all processes)"""
+    """Start conditional startup scans in the background and return immediately."""
     try:
-        # Import directly from conditional_startup.py
-        from conditional_startup import run_conditional_startup_logic
-        
-        # Log the start of the scan
-        logger.info("Starting conditional startup scan")
-        start_time = time.time()
-        
-        # Execute the scan logic
-        scan_data = run_conditional_startup_logic(open_browser=False)
-        
-        # Calculate scan duration
-        duration = time.time() - start_time
-        
-        # Add scan metrics
-        scan_summary = {
+        with conditional_startup_lock:
+            if conditional_startup_state['running']:
+                return jsonify({
+                    "status": "success",
+                    "message": "Conditional startup scan already in progress",
+                    "scan_time": "in progress",
+                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+            conditional_startup_state['running'] = True
+
+        logger.info("Starting conditional startup scan in background")
+        thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+        thread.start()
+
+        return jsonify({
             "status": "success",
-            "results": scan_data.get("results", []),
-            "errors": scan_data.get("errors", []),
-            "log": scan_data.get("log", ""),
-            "scan_time": f"{duration:.2f} seconds",
+            "message": "Conditional startup scan started in background",
+            "scan_time": "running in background (see status panel)",
             "scanned_directories": network_state['monitored_directories'] + folder_watcher_state['monitored_paths'],
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-        }
-        
-        return jsonify(scan_summary)
+        })
     except Exception as e:
+        conditional_startup_state['running'] = False
         logger.error(f"Error running conditional startup: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 

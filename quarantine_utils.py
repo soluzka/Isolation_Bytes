@@ -2,16 +2,17 @@ from utils.paths import get_resource_path
 import os
 import logging
 import shutil
+import tempfile
 from cryptography.fernet import Fernet
 import sys
 
-# Ensure quarantine folder is next to the .exe or script
 if getattr(sys, 'frozen', False):
     basedir = os.path.dirname(sys.executable)
 else:
     basedir = os.path.dirname(os.path.abspath(__file__))
 
-QUARANTINE_FOLDER = os.path.join(basedir, 'quarantine')
+# Quarantine files live in the Defender quarantine folder under the temp directory
+QUARANTINE_FOLDER = os.path.join(tempfile.gettempdir(), 'Defender_Quarantine')
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 # Set strict permissions on the quarantine folder
 import platform
