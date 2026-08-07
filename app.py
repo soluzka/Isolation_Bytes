@@ -158,8 +158,13 @@ def folder_watcher_start_api():
     try:
         fw = globals().get('folder_watcher')
         if fw is not None and hasattr(fw, 'start'):
+            # Determine running state safely whether is_running is a method or boolean attribute
+            is_running_attr = getattr(fw, 'is_running', None)
             try:
-                running = getattr(fw, 'is_running', lambda: False)()
+                if callable(is_running_attr):
+                    running = is_running_attr()
+                else:
+                    running = bool(is_running_attr)
             except Exception:
                 running = False
             if running:
@@ -209,15 +214,29 @@ def start_realtime_compat():
 
 @app.route('/toggle_network_monitor/start', methods=['POST'])
 def toggle_network_monitor_start():
-    if 'network_monitor' in globals() and network_monitor is not None:
+    global network_monitor
+    try:
+        if 'network_monitor' not in globals() or network_monitor is None:
+            # Lazily initialize the network monitor so API calls work even if startup missed it
+            network_monitor = NetworkMonitor()
+            try:
+                set_network_monitor_instance(network_monitor)
+            except Exception:
+                logging.exception('Failed to register network monitor instance with integration module')
+        # Determine if already running
+        is_running_attr = getattr(network_monitor, 'is_running', None)
         try:
-            network_monitor.start()
-            return jsonify({'message': 'Network monitor started', 'status': 'ok'}), 200
-        except Exception as e:
-            tb = traceback.format_exc()
-            logging.error(f'Error starting network monitor: {e}\n{tb}')
-            return jsonify({'error': str(e), 'traceback': tb}), 500
-    return jsonify({'error': 'Network monitor not available'}), 500
+            running = is_running_attr() if callable(is_running_attr) else bool(is_running_attr)
+        except Exception:
+            running = False
+        if running:
+            return jsonify({'message': 'Network monitor already running', 'status': 'warning'}), 200
+        network_monitor.start()
+        return jsonify({'message': 'Network monitor started', 'status': 'ok'}), 200
+    except Exception as e:
+        tb = traceback.format_exc()
+        logging.error(f'Error starting network monitor: {e}\n{tb}')
+        return jsonify({'error': str(e), 'traceback': tb}), 500
 
 @app.route('/toggle_network_monitor/stop', methods=['POST'])
 def toggle_network_monitor_stop():
