@@ -112,3 +112,4 @@ redis>=5.0.1
 pyssdeep>=1.0.0
 # 'ssdeep' package may require native build tools on Windows; use pyssdeep on Windows
 ssdeep>=3.4.2; platform_system!='Windows'
+setuptools>=68.0.0
