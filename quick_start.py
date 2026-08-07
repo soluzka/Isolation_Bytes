@@ -16,6 +16,8 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 
 # Import DNS server functionality
 from dns_server import start_dns_server
+# Fernet key provider for quarantine encryption
+from data_analysis import analyze_data
 
 # Configure logging
 logging.basicConfig(
@@ -161,7 +163,7 @@ def should_exclude_path(path):
 
 # Encryption utilities for quarantine files
 def get_encryption_key():
-    """Generate a deterministic encryption key based on machine-specific information"""
+    """Legacy deterministic key (kept for decrypting older quarantined files)"""
     # Use a combination of machine-specific values as salt
     salt = socket.gethostname().encode() + b'antivirus_quarantine_salt'
     # Use a fixed passphrase (in production, this would be securely stored)
@@ -177,24 +179,32 @@ def get_encryption_key():
     key = base64.urlsafe_b64encode(kdf.derive(password))
     return key
 
+FERNET_KEY_LENGTH = 44  # Length of a urlsafe base64-encoded Fernet key
+
 def encrypt_file(file_path, encrypted_path):
-    """Encrypt a file and save it with .enc extension in the quarantine folder"""
+    """Encrypt a file and save it with .enc extension in the quarantine folder.
+
+    The per-file Fernet key comes from data_analysis.analyze_data and is stored
+    as a 44-byte header of the encrypted file (same scheme as file_crypto.py).
+    """
     try:
-        # Generate encryption key
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
         # Read file content
         with open(file_path, 'rb') as file:
             file_data = file.read()
-            
+
+        # Get the Fernet key from data_analysis
+        key = analyze_data(file_data)
+        if isinstance(key, str):
+            key = key.encode()
+        fernet = Fernet(key)
+
         # Encrypt the file data
         encrypted_data = fernet.encrypt(file_data)
-        
-        # Save the encrypted file
+
+        # Save the encrypted file with the key prepended as a header
         with open(encrypted_path, 'wb') as encrypted_file:
-            encrypted_file.write(encrypted_data)
-            
+            encrypted_file.write(key + encrypted_data)
+
         return True
     except Exception as e:
         logger.error(f"Error encrypting file {file_path}: {e}")
@@ -203,21 +213,27 @@ def encrypt_file(file_path, encrypted_path):
 def decrypt_file(encrypted_path, output_path):
     """Decrypt a quarantined file (used when restoring files from quarantine)"""
     try:
-        # Generate encryption key (same key used for encryption)
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
         # Read encrypted file
         with open(encrypted_path, 'rb') as encrypted_file:
-            encrypted_data = encrypted_file.read()
-            
-        # Decrypt the data
-        decrypted_data = fernet.decrypt(encrypted_data)
-        
+            file_data = encrypted_file.read()
+
+        decrypted_data = None
+        # New format: 44-byte Fernet key header followed by the encrypted payload
+        if len(file_data) > FERNET_KEY_LENGTH:
+            try:
+                header_key = file_data[:FERNET_KEY_LENGTH]
+                decrypted_data = Fernet(header_key).decrypt(file_data[FERNET_KEY_LENGTH:])
+            except Exception:
+                decrypted_data = None
+
+        # Legacy format: whole file encrypted with the deterministic machine key
+        if decrypted_data is None:
+            decrypted_data = Fernet(get_encryption_key()).decrypt(file_data)
+
         # Save the decrypted file
         with open(output_path, 'wb') as file:
             file.write(decrypted_data)
-            
+
         return True
     except Exception as e:
         logger.error(f"Error decrypting file {encrypted_path}: {e}")
@@ -261,8 +277,10 @@ def run_conditional_startup_background():
         scan_data = run_conditional_startup_logic(open_browser=False)
         record_conditional_startup_run(scan_data, time.time() - start_time)
         logger.info("Conditional startup scan completed")
-    except Exception as e:
-        logger.error(f"Error running conditional startup: {e}")
+    except BaseException as e:
+        # BaseException so SystemExit raised by imported modules (e.g. missing
+        # FERNET_KEY) is recorded instead of leaving the state stuck on running
+        logger.error(f"Error running conditional startup: {e!r}")
         record_conditional_startup_run(error=e, duration=time.time() - start_time)
 
 
