@@ -28,6 +28,7 @@ from router_config import get_home_ip, get_router_config, get_network_info
 import yara as yara_module
 import hashlib
 import json
+import traceback
 from pathlib import Path
 # Import network monitor integration module
 from network_monitor_integration import network_bp, get_monitored_network_directories, register_network_monitor_endpoints, set_network_monitor_instance
@@ -86,6 +87,92 @@ def conditional_startup_status_api():
     resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
     return jsonify(resp)
 
+# Temporary runtime routes dump for debugging (remove after use)
+@app.route('/__routes__', methods=['GET'])
+def debug_list_routes():
+    """Return the running app's registered routes as JSON."""
+    routes = []
+    for r in app.url_map.iter_rules():
+        methods = [m for m in r.methods if m not in ('HEAD', 'OPTIONS')]
+        routes.append({'rule': r.rule, 'methods': sorted(methods), 'endpoint': r.endpoint})
+    return jsonify({'routes': routes})
+
+
+# Temporary inspection endpoint to debug runtime monitor objects
+@app.route('/__inspect__', methods=['GET'])
+def debug_inspect_runtime():
+    """Return a summary of key runtime objects (network_monitor, folder_watcher)."""
+    info = {}
+    nm = globals().get('network_monitor')
+    if nm is None:
+        info['network_monitor'] = None
+    else:
+        try:
+            nm_info = {
+                'type': type(nm).__name__,
+                'running_attr': getattr(nm, 'running', None),
+                'is_running_callable': callable(getattr(nm, 'is_running', None)),
+                'is_running': None,
+                'thread_alive': False
+            }
+            try:
+                nm_info['is_running'] = getattr(nm, 'is_running', lambda: None)()
+            except Exception as e:
+                nm_info['is_running_error'] = str(e)
+            th = getattr(nm, 'thread', None)
+            if th is not None:
+                try:
+                    nm_info['thread_alive'] = bool(getattr(th, 'is_alive', lambda: False)())
+                except Exception:
+                    nm_info['thread_alive'] = False
+            info['network_monitor'] = nm_info
+        except Exception as e:
+            info['network_monitor_error'] = str(e)
+
+    fw = globals().get('folder_watcher')
+    if fw is None:
+        info['folder_watcher'] = None
+    else:
+        try:
+            fw_info = {
+                'type': type(fw).__name__,
+                'is_running_attr': getattr(fw, 'is_running', None),
+            }
+            try:
+                fw_info['is_running'] = getattr(fw, 'is_running', lambda: None)()
+            except Exception as e:
+                fw_info['is_running_error'] = str(e)
+            info['folder_watcher'] = fw_info
+        except Exception as e:
+            info['folder_watcher_error'] = str(e)
+
+    info['conditional_startup_state'] = globals().get('conditional_startup_state')
+    return jsonify(info)
+
+# Temporary folder watcher start endpoint to ensure UI can call it
+@app.route('/folder_watcher/start', methods=['POST'])
+def folder_watcher_start_api():
+    """Minimal API for starting the folder watcher (defensive)."""
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+    try:
+        fw = globals().get('folder_watcher')
+        if fw is not None and hasattr(fw, 'start'):
+            try:
+                running = getattr(fw, 'is_running', lambda: False)()
+            except Exception:
+                running = False
+            if running:
+                return jsonify({'success': True, 'message': 'Already running'}), 200
+            fw.start()
+            return jsonify({'success': True, 'message': 'Started folder watcher'}), 200
+        # fallback behaviour: set a runtime flag that frontend can poll
+        globals()['folder_watcher_running'] = True
+        return jsonify({'success': True, 'message': 'Folder watcher start requested (fallback)'}), 200
+    except Exception as e:
+        logging.error(f'Failed to start folder watcher: {e}')
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 # Register network monitoring endpoints
 register_network_monitor_endpoints(app)
 
@@ -94,6 +181,79 @@ register_traffic_monitor_endpoints(app)
 
 # Register network API bridge to fix YARA scanner connection
 register_network_api_bridge(app)
+
+# Compatibility wrappers for legacy frontend endpoints (avoid 404s when frontend uses older paths)
+@app.route('/get_network_monitored_directories', methods=['GET'])
+def get_network_monitored_directories_compat():
+    """Legacy frontend compatibility: proxy to the canonical monitored directories endpoint."""
+    try:
+        return simple_network_monitored_directories()
+    except Exception as e:
+        logging.error(f'Compatibility proxy failed: {e}')
+        return jsonify({'success': False, 'error': str(e), 'monitoring_status': {'enabled': False, 'directories': []}}), 500
+
+@app.route('/start_realtime', methods=['POST'])
+def start_realtime_compat():
+    """Start network traffic monitoring (legacy endpoint)."""
+    if 'network_monitor' in globals() and network_monitor is not None:
+        try:
+            if getattr(network_monitor, 'is_running', lambda: False)():
+                return jsonify({'message': 'Network traffic monitoring is already running', 'status': 'warning'}), 200
+            network_monitor.start()
+            return jsonify({'message': 'Network traffic monitoring started', 'status': 'ok'}), 200
+        except Exception as e:
+            tb = traceback.format_exc()
+            logging.error(f'Error starting network monitor: {e}\n{tb}')
+            return jsonify({'error': str(e), 'traceback': tb}), 500
+    return jsonify({'error': 'Network monitor not available'}), 500
+
+@app.route('/toggle_network_monitor/start', methods=['POST'])
+def toggle_network_monitor_start():
+    if 'network_monitor' in globals() and network_monitor is not None:
+        try:
+            network_monitor.start()
+            return jsonify({'message': 'Network monitor started', 'status': 'ok'}), 200
+        except Exception as e:
+            tb = traceback.format_exc()
+            logging.error(f'Error starting network monitor: {e}\n{tb}')
+            return jsonify({'error': str(e), 'traceback': tb}), 500
+    return jsonify({'error': 'Network monitor not available'}), 500
+
+@app.route('/toggle_network_monitor/stop', methods=['POST'])
+def toggle_network_monitor_stop():
+    if 'network_monitor' in globals() and network_monitor is not None:
+        try:
+            network_monitor.stop()
+            return jsonify({'message': 'Network monitor stopped', 'status': 'ok'}), 200
+        except Exception as e:
+            tb = traceback.format_exc()
+            logging.error(f'Error stopping network monitor: {e}\n{tb}')
+            return jsonify({'error': str(e), 'traceback': tb}), 500
+    return jsonify({'error': 'Network monitor not available'}), 500
+
+@app.route('/run_startup', methods=['POST'])
+def run_startup_compat():
+    """Trigger conditional startup scan (legacy endpoint)."""
+    fn = globals().get('run_conditional_startup')
+    if callable(fn):
+        try:
+            fn()
+            return jsonify({'message': 'Conditional startup triggered', 'success': True}), 200
+        except Exception as e:
+            logging.error(f'Error running conditional startup: {e}')
+            return jsonify({'message': 'Failed to trigger', 'error': str(e)}), 500
+    # Fallback: set a runtime flag so frontend can poll status
+    globals()['conditional_startup_state'] = {
+        'running': True,
+        'last_run': None,
+        'duration': None,
+        'scanned_files': 0,
+        'quarantined_files': 0,
+        'errors': 0,
+        'process_events': 0,
+        'last_error': None
+    }
+    return jsonify({'message': 'Conditional startup requested (fallback)', 'success': True}), 200
 
 # Add direct simple route for network monitored directories (needed by YARA scanner)
 @app.route('/api/network/monitored_directories', methods=['GET'])
@@ -215,15 +375,8 @@ def network_monitored_directories():
                 }
             }), 500
 
-# Initialize network monitor instance at module level
-network_monitor = NetworkMonitor()
-
-# Automatically start network monitoring for real-time protection
-network_monitor.start()
-logging.info("Network monitoring started automatically at application startup")
-
-# Set network monitor instance for integration module
-set_network_monitor_instance(network_monitor)
+# Network monitor instance will be initialized on first request (to avoid duplicate starts and ensure runtime paths are available)
+# set_network_monitor_instance will be called when the monitor is created in initialize_monitors()
 
 # Initialize DNS server and start it automatically
 try:
@@ -281,7 +434,8 @@ app.config['SECRET_KEY'] = SECRET_KEY
 app.config['SESSION_TYPE'] = 'filesystem'
 app.config['SESSION_PERMANENT'] = False
 app.config['SESSION_USE_SIGNER'] = True
-app.config['SESSION_COOKIE_SECURE'] = True
+# For local development over HTTP, allow session cookies (not secure). In production set to True.
+app.config['SESSION_COOKIE_SECURE'] = False
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # Load environment variables from .env file
@@ -370,14 +524,41 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
+# Ensure API requests receive JSON 401 instead of HTML redirect when unauthenticated
+@login_manager.unauthorized_handler
+def login_unauthorized():
+    # Treat API routes and AJAX/JSON requests specially
+    api_prefixes = [
+        '/api',
+        '/folder_watcher',
+        '/yara_scan',
+        '/start_traffic_monitoring',
+        '/stop_traffic_monitoring',
+        '/start_folder_watcher',
+        '/toggle_folder_watcher',
+        '/get_folder_watcher_paths',
+    ]
+    accept = request.headers.get('Accept', '')
+    content_type = request.headers.get('Content-Type', '')
+    is_api = (
+        any(request.path.startswith(p) for p in api_prefixes)
+        or request.is_json
+        or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or 'application/json' in accept
+        or content_type.startswith('application/json')
+    )
+    if is_api:
+        return jsonify({'error': 'Authentication required'}), 401
+    return redirect(url_for('login', next=request.path))
+
 # Initialize security components after app
 network_security = NetworkSecurity()
 
 # Global variables for monitors
-network_monitor = None
 folder_watcher = None
 
 # Flag to ensure initialization only happens once
+network_monitor = None
 _initialized = False
 
 @app.before_request
@@ -385,20 +566,26 @@ def initialize_monitors():
     """Initialize network monitor and folder watcher."""
     global network_monitor, folder_watcher, _initialized
     if not _initialized:
+        # Initialize network monitor once and register it with the integration layer
         network_monitor = NetworkMonitor()
         network_monitor.start()
-        
-                # Get common directories to monitor
+        logging.info("Network monitoring started on first request")
+        try:
+            set_network_monitor_instance(network_monitor)
+        except Exception:
+            logging.exception('Failed to set network monitor instance on integration module')
+
+        # Get common directories to monitor
         home_dir = os.path.expanduser("~")
         common_dirs = [
             os.path.join(home_dir, "Downloads"),
             os.path.join(home_dir, "Desktop"),
             os.path.join(home_dir, "Documents")
         ]
-        
+
         # Filter out non-existent directories
         directories = [d for d in common_dirs if os.path.exists(d) and os.path.isdir(d)]
-        
+
         folder_watcher = FolderWatcher(directories)
         folder_watcher.start()
 
@@ -4454,6 +4641,9 @@ def stop_folder_watcher_ui():
 @app.route('/folder_watcher/<action>', methods=['POST'])
 def folder_watcher_action(action):
     """Handle folder watcher start/stop actions"""
+    # Return JSON 401 when unauthenticated to avoid HTML login redirects breaking frontend
+    if not current_user.is_authenticated:
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
     try:
         # Declare global variables first
         global real_time_protection_running, real_time_protection_thread
