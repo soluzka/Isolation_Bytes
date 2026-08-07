@@ -78,6 +78,7 @@ hidden_imports = [
     'numpy.random.entropy',
     'redis',  # Add Redis to hidden imports
     # Add fuzzy and YARA related packages so PyInstaller bundles them
+    'pyssdeep',
     'ssdeep',
     'yara',
 ]
