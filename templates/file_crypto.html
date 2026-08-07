@@ -17,6 +17,7 @@
 </head>
 <body>
     <h2>File Encryption / Decryption</h2>
+    <p style="color:#555;font-size:0.9em;">Maximum file size: 125MB.</p>
     <form method="post" action="/encrypt" enctype="multipart/form-data">
         <label for="file">Choose file to encrypt:</label>
         <input type="file" name="file" id="file" required>
@@ -46,5 +47,21 @@
         <a href="/">Back to Home</a>
         <a href="/logs">View Antivirus Logs</a>
     </nav>
+    <script>
+        // Give instant feedback for oversized files instead of waiting for the
+        // server's 413 response, which only arrives after the whole file has
+        // already been uploaded.
+        var MAX_FILE_SIZE_BYTES = 125 * 1024 * 1024;
+        document.querySelectorAll('form').forEach(function (form) {
+            form.addEventListener('submit', function (e) {
+                var fileInput = form.querySelector('input[type="file"]');
+                var file = fileInput && fileInput.files[0];
+                if (file && file.size > MAX_FILE_SIZE_BYTES) {
+                    e.preventDefault();
+                    alert('File is too large. Maximum allowed size is 125MB.');
+                }
+            });
+        });
+    </script>
 </body>
 </html>

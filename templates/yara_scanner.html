@@ -3,6 +3,7 @@
 <html>
 <head>
     <title>YARA Scanner</title>
+    <script src="{{ url_for('static', filename='network_data_utils.js') }}"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -562,15 +563,6 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
         <p>Monitor network traffic for suspicious activity and potential threats.</p>
 
         <div class="card">
-            <h3>Network Monitor Status</h3>
-            <p>Status: <span id="network_monitor_status">{{ 'Enabled' if network_monitor_running else 'Disabled' }}</span></p>
-            <div class="button-group">
-                <button id="start_network_monitor_btn" class="action-button">Start Network Monitoring</button>
-                <button id="stop_network_monitor_btn" class="action-button">Stop Network Monitoring</button>
-            </div>
-        </div>
-
-        <div class="card">
             <h3>Monitored Network Directories</h3>
             <div id="monitored_directories">
                 <p>Loading monitored directories...</p>
@@ -663,48 +655,16 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                 foldersList.innerHTML = '';
             }
             
-            // Fetch monitored directories from both network monitor and folder watcher
-            // Use a more robust approach with individual error handling for each request
-            const networkMonitorPromise = fetch('/get_network_monitored_directories')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Network monitor API returned ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Transform the response if needed to match expected format
-                    if (!data.monitoring_status && data.success) {
-                        return {
-                            success: true,
-                            monitoring_status: {
-                                enabled: data.monitored_directories ? true : false,
-                                directories: data.monitored_directories || [],
-                                total_directories: data.monitored_directories ? data.monitored_directories.length : 0
-                            }
-                        };
-                    }
-                    return data;
-                })
-                .catch(error => {
-                    console.warn('Network monitor directories fetch failed:', error);
-                    // Return an empty result instead of failing the whole operation
-                    return { success: false, error: error.message, monitoring_status: { enabled: false, directories: [] } };
-                });
-                
-            const folderWatcherPromise = fetch('/get_folder_watcher_paths')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Folder watcher API returned ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .catch(error => {
-                    console.warn('Folder watcher paths fetch failed:', error);
-                    // Return an empty result instead of failing the whole operation
-                    return { success: false, error: error.message, folders: [] };
-                });
-                
+            // Fetch monitored directories from both network monitor and folder watcher.
+            // fetchJsonSafe() never rejects, and the normalizers always return a
+            // consistent shape whether the request succeeded or failed, so the
+            // rendering code below never has to guess (or crash on) missing fields.
+            const networkMonitorPromise = NetworkDataUtils.fetchJsonSafe('/get_network_monitored_directories')
+                .then(NetworkDataUtils.normalizeNetworkMonitorData);
+
+            const folderWatcherPromise = NetworkDataUtils.fetchJsonSafe('/get_folder_watcher_paths')
+                .then(NetworkDataUtils.normalizeFolderWatcherData);
+
             Promise.all([networkMonitorPromise, folderWatcherPromise])
             .then(([networkData, folderData]) => {
                 // Hide loading indicator
@@ -718,10 +678,18 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                     networkStatusElement.innerHTML = `<strong>Network Monitor Status:</strong> <span class="${status === 'ENABLED' ? 'enabled' : 'disabled'}">${status}</span>`;
                     networkStatusElement.innerHTML += `<br><strong>Last Scan:</strong> ${networkData.monitoring_status.last_scan}`;
                     networkStatusElement.innerHTML += `<br><strong>Total Monitored Directories:</strong> ${networkData.monitoring_status.total_directories}`;
+                    if (networkData.error) {
+                        networkStatusElement.innerHTML += `<br><span class="disabled">Network monitor data unavailable: ${networkData.error}</span>`;
+                    }
+                    if (folderData.error) {
+                        networkStatusElement.innerHTML += `<br><span class="disabled">Folder watcher data unavailable: ${folderData.error}</span>`;
+                    }
                 }
                 
-                // Combine directories from both sources
-                const allDirectories = new Set([...networkData.monitored_directories, ...folderData.paths]);
+                // Combine directories from both sources. Use folderData.monitored_paths
+                // (plain path strings) rather than folderData.paths, which holds
+                // detailed {path, exists, accessible, ...} objects, not strings.
+                const allDirectories = new Set([...networkData.monitored_directories, ...folderData.monitored_paths]);
                 
                 // First, add a section for ALL monitored paths (root + subdirectories)
                 if (foldersList) {
@@ -737,7 +705,7 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                     statsDiv.className = 'directories-stats';
                     statsDiv.innerHTML = `
                         <p><strong>Network Monitor:</strong> ${networkData.monitored_directories.length} directories</p>
-                        <p><strong>Folder Watcher:</strong> ${folderData.paths ? folderData.paths.length : 0} directories</p>
+                        <p><strong>Folder Watcher:</strong> ${folderData.monitored_paths.length} directories</p>
                         <p><strong>Combined Total:</strong> ${allDirectories.size} unique directories</p>
                     `;
                     allPathsSection.appendChild(statsDiv);
@@ -862,6 +830,7 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             document.getElementById('networkMonitorTab').addEventListener('click', function() {
                 openTab(this, 'NetworkMonitor');
                 fetchNetworkMonitoredDirectories();
+                fetchTrafficStats();
             });
             
             document.getElementById('quarantineTab').addEventListener('click', function() {
@@ -875,134 +844,119 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             document.getElementById('threatHandlingTab').addEventListener('click', function() {
                 openTab(this, 'ThreatHandling');
             });
-            
-            // Network monitoring button handlers
-            document.getElementById('start_network_monitor_btn').addEventListener('click', function() {
-                startNetworkMonitor();
-            });
-            
-            document.getElementById('stop_network_monitor_btn').addEventListener('click', function() {
-                stopNetworkMonitor();
-            });
         });
         
-        // Network monitoring functions
-        function startNetworkMonitor() {
-            fetch('/toggle_network_monitor/start', {method: 'POST'})
-                .then(async response => {
-                    let text = await response.text();
-                    let data;
-                    try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
-                    if (data.status === 'success' || data.status === 'ENABLED') { 
-                        alert(data.message || 'Network Monitor started.'); 
-                        // Update the network monitor status in the UI
-                        document.getElementById('network_monitor_status').textContent = 'Enabled';
-                        document.getElementById('network_monitor_status').style.color = '#27ae60';
-                        
-                        // Fetch network directories after starting
-                        fetchNetworkMonitoredDirectories();
-                    } else { 
-                        alert('Error: ' + (data.message || data.error || 'Unknown error')); 
-                    }
-                })
-                .catch(error => alert('Error: ' + error));
-        }
-        
-        function stopNetworkMonitor() {
-            fetch('/toggle_network_monitor/stop', {method: 'POST'})
-                .then(async response => {
-                    let text = await response.text();
-                    let data;
-                    try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
-                    if (data.status === 'success' || data.status === 'DISABLED') { 
-                        alert(data.message || 'Network Monitor stopped.'); 
-                        // Update the network monitor status in the UI
-                        document.getElementById('network_monitor_status').textContent = 'Disabled';
-                        document.getElementById('network_monitor_status').style.color = '#c0392b';
-                    } else { 
-                        alert('Error: ' + (data.message || data.error || 'Unknown error')); 
-                    }
-                })
-                .catch(error => alert('Error: ' + error));
-        }
-        
         function fetchNetworkMonitoredDirectories() {
-            // Use the get_network_monitored_directories endpoint that's known to work
-            fetch('/get_network_monitored_directories')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error(`Failed to fetch monitored directories: ${response.status}`);
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    // Transform data if needed to match expected format
-                    if (!data.monitoring_status && data.success) {
-                        data = {
-                            success: true,
-                            monitoring_status: {
-                                enabled: data.monitored_directories ? true : false,
-                                directories: data.monitored_directories || [],
-                                total_directories: data.monitored_directories ? data.monitored_directories.length : 0
-                            }
-                        };
-                    }
-                    updateNetworkMonitoredDirectoriesDisplay(data);
-                })
-                .catch(error => {
-                    console.error('Error fetching network monitored directories:', error);
-                    const directoriesContainer = document.getElementById('monitored_directories');
-                    if (directoriesContainer) {
-                        directoriesContainer.innerHTML = `<div class="alert alert-warning">Error loading network monitored directories: ${error.message}</div>`;
-                    }
-                });
+            // fetchJsonSafe() never rejects, and normalizeNetworkMonitorData()
+            // always returns the same shape whether the request succeeded or
+            // failed, so updateNetworkMonitoredDirectoriesDisplay() never has to
+            // guess (or crash on) missing fields.
+            NetworkDataUtils.fetchJsonSafe('/get_network_monitored_directories')
+                .then(NetworkDataUtils.normalizeNetworkMonitorData)
+                .then(updateNetworkMonitoredDirectoriesDisplay);
         }
         
         function updateNetworkMonitoredDirectoriesDisplay(data) {
             const directoriesContainer = document.getElementById('monitored_directories');
+            if (!directoriesContainer) return;
             
             // Clear previous contents
             directoriesContainer.innerHTML = '';
             
-            // Display monitoring status
-            if (data && data.success) {
-                const status = data.monitoring_status;
-                const statusDiv = document.createElement('div');
-                statusDiv.className = 'monitoring-status';
-                statusDiv.innerHTML = `
-                    <p><strong>Status:</strong> <span class="${status.enabled ? 'enabled' : 'disabled'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></p>
-                    <p><strong>Last Scan:</strong> ${status.last_scan}</p>
-                    <p><strong>Total Monitored:</strong> ${status.total_directories} directories</p>
-                `;
-                directoriesContainer.appendChild(statusDiv);
-                
-                // Display directory list
-                if (status.directories && status.directories.length > 0) {
-                    const list = document.createElement('ul');
-                    list.className = 'directories-list';
-                    
-                    status.directories.forEach(dir => {
-                        const li = document.createElement('li');
-                        const statusClass = dir.exists && dir.accessible ? 'directory-active' : 'directory-inactive';
-                        const statusIcon = dir.exists && dir.accessible ? '✓' : '⚠️';
-                        
-                        li.innerHTML = `<span class="${statusClass}">${statusIcon}</span> ${dir.path}`;
-                        
-                        // Add file count if available
-                        if (dir.file_count !== undefined) {
-                            li.innerHTML += ` <span class="file-count">(${dir.file_count} files)</span>`;
-                        }
-                        
-                        list.appendChild(li);
-                    });
-                    
-                    directoriesContainer.appendChild(list);
-                } else {
-                    directoriesContainer.innerHTML += '<p>No directories currently being monitored.</p>';
-                }
-            } else {
-                directoriesContainer.innerHTML = '<p>Error loading monitored directories.</p>';
+            const status = data.monitoring_status;
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'monitoring-status';
+            statusDiv.innerHTML = `
+                <p><strong>Status:</strong> <span class="${status.enabled ? 'enabled' : 'disabled'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></p>
+                <p><strong>Last Scan:</strong> ${status.last_scan}</p>
+                <p><strong>Total Monitored:</strong> ${status.total_directories} directories</p>
+            `;
+            directoriesContainer.appendChild(statusDiv);
+
+            if (data.error) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'alert alert-warning';
+                warningDiv.textContent = `Network monitored directories unavailable: ${data.error}`;
+                directoriesContainer.appendChild(warningDiv);
+                return;
             }
+
+            // Display directory list
+            if (status.directories && status.directories.length > 0) {
+                const list = document.createElement('ul');
+                list.className = 'directories-list';
+                
+                status.directories.forEach(dir => {
+                    const li = document.createElement('li');
+                    const statusClass = dir.exists && dir.accessible ? 'directory-active' : 'directory-inactive';
+                    const statusIcon = dir.exists && dir.accessible ? '✓' : '⚠️';
+                    
+                    li.innerHTML = `<span class="${statusClass}">${statusIcon}</span> ${dir.path}`;
+                    
+                    // Add file count if available
+                    if (dir.file_count !== undefined) {
+                        li.innerHTML += ` <span class="file-count">(${dir.file_count} files)</span>`;
+                    }
+                    
+                    list.appendChild(li);
+                });
+                
+                directoriesContainer.appendChild(list);
+            } else {
+                directoriesContainer.innerHTML += '<p>No directories currently being monitored.</p>';
+            }
+        }
+
+        function formatBytesForDisplay(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        function fetchTrafficStats() {
+            // fetchJsonSafe() never rejects, and the normalizers always return a
+            // consistent shape whether the request succeeded or failed.
+            Promise.all([
+                NetworkDataUtils.fetchJsonSafe('/get_traffic_stats').then(NetworkDataUtils.normalizeTrafficStats),
+                NetworkDataUtils.fetchJsonSafe('/get_c2_patterns').then(NetworkDataUtils.normalizeC2Patterns)
+            ]).then(([trafficData, c2Data]) => updateTrafficStatsDisplay(trafficData, c2Data));
+        }
+
+        function updateTrafficStatsDisplay(trafficData, c2Data) {
+            const trafficContainer = document.getElementById('traffic_stats');
+            if (!trafficContainer) return;
+
+            if (trafficData.error) {
+                trafficContainer.innerHTML = `<p class="alert alert-warning">Traffic statistics unavailable: ${trafficData.error}</p>`;
+                return;
+            }
+
+            let html = `
+                <p><strong>Total Connections:</strong> ${trafficData.total_connections}</p>
+                <p><strong>Active Remote IPs:</strong> ${trafficData.active_ips.length}</p>
+                <p><strong>Inbound:</strong> ${formatBytesForDisplay(trafficData.inbound)}</p>
+                <p><strong>Outbound:</strong> ${formatBytesForDisplay(trafficData.outbound)}</p>
+            `;
+
+            const protocolEntries = Object.entries(trafficData.protocols);
+            if (protocolEntries.length > 0) {
+                html += '<p><strong>Protocols:</strong></p><ul class="directories-list">';
+                protocolEntries.forEach(([protocol, count]) => {
+                    html += `<li>${protocol}: ${count}</li>`;
+                });
+                html += '</ul>';
+            }
+
+            if (c2Data.suspicious_connections && c2Data.suspicious_connections.length > 0) {
+                html += '<p><strong>Suspicious Connections:</strong></p><ul class="directories-list">';
+                c2Data.suspicious_connections.forEach(conn => {
+                    html += `<li><span class="directory-inactive">⚠️</span> ${conn.process}: ${conn.remote_ip}:${conn.remote_port} - ${conn.reason}</li>`;
+                });
+                html += '</ul>';
+            }
+
+            trafficContainer.innerHTML = html;
         }
         
         // Initial load of monitored folders

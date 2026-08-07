@@ -7,12 +7,24 @@ import json
 import socket
 import shutil  # For file operations like move for quarantine
 import threading
+import psutil
+import ipaddress
 import base64
+import tempfile
 from datetime import datetime
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, Blueprint
+from werkzeug.utils import secure_filename
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint
+
+# Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
+# module is normally run directly with `python quick_start.py`, which (unlike
+# `flask run`) does not load .env/.flaskenv automatically. Without this,
+# anything that depends on FERNET_KEY being set (e.g. file_crypto.py) would
+# fail with EnvironmentError even though the key is present in .env.
+from dotenv import load_dotenv
+load_dotenv()
 
 # Import DNS server functionality
 from dns_server import start_dns_server
@@ -81,6 +93,10 @@ for handler in logging.getLogger().handlers:
 app = Flask(__name__, 
             template_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'templates'),
             static_folder=os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static'))
+
+# Cap request/upload size at 125MB (currently only used by the file
+# encryption/decryption feature's file uploads).
+app.config['MAX_CONTENT_LENGTH'] = 125 * 1024 * 1024
 
 # Create a blueprint for network-related API endpoints
 network_bp = Blueprint('network', __name__, url_prefix='/api/network')
@@ -242,7 +258,9 @@ def decrypt_file(encrypted_path, output_path):
 # -- Conditional startup state and routes --
 conditional_startup_state = {
     'running': False,
-    'last_run': None,
+    'started_at': None,    # When the current/most recent run started
+    'last_updated': None,  # Timestamp of the most recent progress tick (while running)
+    'last_run': None,      # When the most recent run *completed* (success or failure)
     'duration': None,
     'scanned_files': 0,
     'quarantined_files': 0,
@@ -273,8 +291,24 @@ def run_conditional_startup_background():
     """Run the conditional startup scan in a background thread."""
     from conditional_startup import run_conditional_startup_logic
     start_time = time.time()
+
+    def report_progress(partial_results):
+        """Update shared state with in-progress counts so the status API
+        reflects live progress instead of appearing stuck at 0/never. This
+        used to only update counts, leaving 'last_run' as 'never' for the
+        entire (sometimes multi-minute) duration of a run, since that field
+        was only ever set once the whole scan finished."""
+        conditional_startup_state.update({
+            'running': True,
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'scanned_files': len(partial_results.get('scanned_files', [])),
+            'quarantined_files': len(partial_results.get('quarantined_files', [])),
+            'errors': len(partial_results.get('errors', [])),
+            'process_events': len(partial_results.get('process_events', [])),
+        })
+
     try:
-        scan_data = run_conditional_startup_logic(open_browser=False)
+        scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
         record_conditional_startup_run(scan_data, time.time() - start_time)
         logger.info("Conditional startup scan completed")
     except BaseException as e:
@@ -306,6 +340,8 @@ def run_startup():
                     "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                 })
             conditional_startup_state['running'] = True
+            conditional_startup_state['started_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            conditional_startup_state['last_updated'] = conditional_startup_state['started_at']
 
         logger.info("Starting conditional startup scan in background")
         thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
@@ -824,7 +860,21 @@ def toggle_network_monitor(action):
 
 @app.route('/get_network_monitored_directories')
 def get_network_monitored_directories():
-    """Get the list of network-monitored directories with recursive subdirectory scanning."""
+    """Get the list of network-monitored directories with recursive subdirectory scanning.
+
+    NOTE: This used to permanently append every recursively-discovered
+    subdirectory into network_state['monitored_directories'] on every call.
+    Since this endpoint is polled repeatedly (background scan thread, page
+    load, periodic UI refresh) and directories like AppData/ProgramData/
+    System32 contain thousands of nested subdirectories, that caused
+    unbounded runaway growth: each call discovered and persisted more
+    subdirectories, making the next call's os.walk() (and the next
+    discovery pass) slower and larger, snowballing until calls timed out
+    entirely and the rendered directory list ballooned to megabytes. This
+    now reports discovered subdirectories in the response without
+    persisting them, so repeated calls stay bounded by the fixed base
+    directory list rather than compounding.
+    """
     global network_state
     
     # Define high-risk file extensions to monitor more carefully
@@ -834,10 +884,10 @@ def get_network_monitored_directories():
         '.wsh', '.sys', '.inf'
     ]
     
-    # Get monitoring status and statistics
-    monitored_dirs = network_state['monitored_directories']
+    # Snapshot the persistent base list -- do not mutate network_state below.
+    monitored_dirs = list(network_state['monitored_directories'])
     total_files_monitored = 0
-    discovered_subdirs = [] # Keep track of discovered subdirectories
+    discovered_subdirs = [] # Keep track of discovered subdirectories (not persisted)
     
     monitoring_status = {
         'enabled': network_state['monitoring_enabled'],
@@ -847,46 +897,35 @@ def get_network_monitored_directories():
         'directories': []
     }
     
-    # Add detailed information about each directory
+    # Add detailed information about each directory.
+    # NOTE: This only scans one level deep (os.scandir on the directory
+    # itself) rather than fully recursing with os.walk(). A full recursive
+    # walk over directories like AppData/ProgramData/System32 -- which can
+    # contain hundreds of thousands of files -- made this endpoint take so
+    # long it would time out on every call. File/subdirectory counts below
+    # reflect only the immediate contents of each monitored directory, not
+    # its entire subtree.
     for directory in monitored_dirs:
         if os.path.exists(directory):
             try:
-                # Count files in directory (recursive)
                 file_count = 0
                 high_risk_file_count = 0
                 subdir_count = 0
-                
-                # Use os.walk to recursively traverse directory tree
-                for root, dirs, files in os.walk(directory):
-                    # Skip excluded paths
-                    if any(excluded in root for excluded in folder_watcher_state['excluded_paths']):
-                        continue
-                    
-                    # Add root to discovered subdirectories if it's not the original directory
-                    # and not already in the monitored directories list
-                    if root != directory and root not in monitored_dirs and root not in discovered_subdirs:
-                        discovered_subdirs.append(root)
-                        
-                    # Count subdirectories (but only at first level)
-                    if root == directory:
-                        subdir_count = len(dirs)
-                        
-                        # Also add immediate subdirectories to our discovered list
-                        for subdir in dirs:
-                            subdir_path = os.path.join(root, subdir)
-                            if subdir_path not in monitored_dirs and subdir_path not in discovered_subdirs:
-                                discovered_subdirs.append(subdir_path)
-                    else:
-                        # Count this as a subdirectory
-                        subdir_count += 1
-                    
-                    # Count files and check for high-risk extensions
-                    for filename in files:
-                        file_count += 1
-                        _, ext = os.path.splitext(filename)
-                        if ext.lower() in high_risk_extensions:
-                            high_risk_file_count += 1
-                
+
+                with os.scandir(directory) as entries:
+                    for entry in entries:
+                        if any(excluded in entry.path for excluded in folder_watcher_state['excluded_paths']):
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            subdir_count += 1
+                            if entry.path not in monitored_dirs and entry.path not in discovered_subdirs:
+                                discovered_subdirs.append(entry.path)
+                        elif entry.is_file(follow_symlinks=False):
+                            file_count += 1
+                            _, ext = os.path.splitext(entry.name)
+                            if ext.lower() in high_risk_extensions:
+                                high_risk_file_count += 1
+
                 # Update total files count
                 total_files_monitored += file_count
                 
@@ -921,32 +960,150 @@ def get_network_monitored_directories():
     # Add total files monitored to the status
     monitoring_status['total_files_monitored'] = total_files_monitored
     
-    # Add discovered subdirectories to the network state's monitored directories
-    if discovered_subdirs:
-        # Filter out any excluded paths
-        valid_subdirs = []
-        for subdir in discovered_subdirs:
-            # Skip if any excluded term is in the path
-            if not any(excluded in subdir for excluded in folder_watcher_state['excluded_paths']):
-                valid_subdirs.append(subdir)
-        
-        # Add valid subdirectories to monitored directories
-        for subdir in valid_subdirs:
-            if subdir not in network_state['monitored_directories']:
-                network_state['monitored_directories'].append(subdir)
-                logging.info(f"Added discovered subdirectory to network monitoring: {subdir}")
+    # Report discovered subdirectories in the response without persisting them
+    # into network_state (see NOTE on the route above for why).
+    valid_subdirs = [
+        subdir for subdir in discovered_subdirs
+        if not any(excluded in subdir for excluded in folder_watcher_state['excluded_paths'])
+    ]
+    all_directories = list(monitored_dirs)
+    for subdir in valid_subdirs:
+        if subdir not in all_directories:
+            all_directories.append(subdir)
     
-    # Update the monitoring_status to reflect the added subdirectories
-    monitoring_status['total_directories'] = len(network_state['monitored_directories'])
+    # Update the monitoring_status to reflect the discovered subdirectories
+    monitoring_status['total_directories'] = len(all_directories)
     
     # Also add a separate count for all subdirectories to make it clearly visible
-    monitoring_status['total_subdirectories_found'] = len(discovered_subdirs)
+    monitoring_status['total_subdirectories_found'] = len(valid_subdirs)
     
     return jsonify({
         'success': True,
-        'monitored_directories': network_state['monitored_directories'],
+        'monitored_directories': all_directories,
         'monitoring_status': monitoring_status
     })
+
+# Common ports that are expected/benign for outbound traffic. Connections to
+# other remote ports are flagged as "uncommon" by /get_c2_patterns below --
+# this is a simple heuristic, not a real C2/beaconing detector.
+_COMMON_REMOTE_PORTS = {80, 443, 53, 123, 22, 21, 25, 110, 143, 993, 995, 587, 3389, 8080, 8443}
+
+
+def _collect_live_connections():
+    """Enumerate current inet socket connections via psutil, returning a list
+    of dicts with process/protocol/address info. Connections we can't get a
+    process name for (permission issues, race with process exit, etc.) are
+    still included with a placeholder process name rather than being dropped.
+    """
+    connections = []
+    for conn in psutil.net_connections(kind='inet'):
+        if not conn.laddr:
+            continue
+        proto = 'TCP' if conn.type == socket.SOCK_STREAM else 'UDP' if conn.type == socket.SOCK_DGRAM else 'OTHER'
+        process_name = 'Unknown'
+        if conn.pid:
+            try:
+                process_name = psutil.Process(conn.pid).name()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                process_name = f'PID {conn.pid}'
+        connections.append({
+            'pid': conn.pid,
+            'process': process_name,
+            'protocol': proto,
+            'status': conn.status,
+            'local_ip': conn.laddr.ip if conn.laddr else None,
+            'local_port': conn.laddr.port if conn.laddr else None,
+            'remote_ip': conn.raddr.ip if conn.raddr else None,
+            'remote_port': conn.raddr.port if conn.raddr else None,
+        })
+    return connections
+
+
+@app.route('/get_traffic_stats', methods=['GET'])
+def get_traffic_stats():
+    """Get live network traffic statistics using psutil.
+
+    Reports currently active connections, protocol distribution, per-process
+    connection counts, and cumulative bytes sent/received (since the OS was
+    booted/counters were last reset -- psutil doesn't give us a "since app
+    start" delta without us tracking a baseline, so this is total I/O, not a
+    live throughput rate).
+    """
+    try:
+        connections = _collect_live_connections()
+        established = [c for c in connections if c['remote_ip']]
+
+        active_ips = sorted({c['remote_ip'] for c in established})
+        protocols = {}
+        processes = {}
+        for c in connections:
+            protocols[c['protocol']] = protocols.get(c['protocol'], 0) + 1
+            processes.setdefault(c['process'], {'connections': 0})
+            processes[c['process']]['connections'] += 1
+
+        io_counters = psutil.net_io_counters()
+
+        return jsonify({
+            'success': True,
+            'total_connections': len(connections),
+            'active_ips': active_ips,
+            'inbound': io_counters.bytes_recv,
+            'outbound': io_counters.bytes_sent,
+            'protocols': protocols,
+            'processes': processes,
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting traffic stats: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/get_c2_patterns', methods=['GET'])
+def get_c2_patterns():
+    """Flag established connections to uncommon remote ports on external hosts.
+
+    NOTE: This is a lightweight heuristic (uncommon destination port on a
+    non-local address), not a real command-and-control/beaconing detector.
+    It exists to give the UI something meaningful to show rather than an
+    empty panel; it will surface false positives for legitimate software
+    using non-standard ports. Loopback and private/LAN addresses are
+    excluded since C2 traffic is inherently about external endpoints --
+    without that exclusion, nearly every local dev tool or IDE using an
+    ephemeral loopback port gets flagged, making the list useless noise.
+    """
+    try:
+        connections = _collect_live_connections()
+        suspicious = []
+        for c in connections:
+            if not c['remote_ip'] or not c['remote_port']:
+                continue
+            if c['remote_port'] in _COMMON_REMOTE_PORTS:
+                continue
+            try:
+                remote_addr = ipaddress.ip_address(c['remote_ip'])
+            except ValueError:
+                continue
+            if remote_addr.is_loopback or remote_addr.is_private or remote_addr.is_link_local:
+                continue
+            suspicious.append({
+                'process': c['process'],
+                'remote_ip': c['remote_ip'],
+                'remote_port': c['remote_port'],
+                'reason': f"Connection to uncommon port {c['remote_port']}"
+            })
+
+        # Cap the list so a noisy system doesn't produce an enormous response.
+        suspicious = suspicious[:50]
+
+        return jsonify({
+            'success': True,
+            'suspicious_connections': suspicious,
+            'timestamp': time.time()
+        })
+    except Exception as e:
+        logger.error(f"Error getting C2 patterns: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 
 @app.route('/toggle_folder_watcher/<action>', methods=['POST'])
 def toggle_folder_watcher(action):
@@ -1010,7 +1167,15 @@ def toggle_folder_watcher(action):
 @app.route('/folder-watcher-paths', methods=['GET'])
 @app.route('/get_folder_watcher_paths', methods=['GET'])
 def get_folder_watcher_paths():
-    """Get the list of folder watcher monitored paths with recursive subdirectory scanning."""
+    """Get the list of folder watcher monitored paths with recursive subdirectory scanning.
+
+    NOTE: See the matching NOTE on get_network_monitored_directories() above --
+    this used to permanently append every discovered subdirectory into
+    folder_watcher_state['monitored_paths'] on every call, causing the same
+    unbounded runaway growth (repeated calls got slower and the persisted
+    list larger without limit). This now reports discovered subdirectories
+    in the response without persisting them.
+    """
     global folder_watcher_state
     
     # Define high-risk file extensions to monitor more carefully
@@ -1020,8 +1185,8 @@ def get_folder_watcher_paths():
         '.wsh', '.sys', '.inf'
     ]
     
-    # Get monitoring status and statistics for folder watcher
-    monitored_paths = folder_watcher_state['monitored_paths']
+    # Snapshot the persistent base list -- do not mutate folder_watcher_state below.
+    monitored_paths = list(folder_watcher_state['monitored_paths'])
     
     # Initialize counters for total statistics
     total_files_monitored = 0
@@ -1055,40 +1220,26 @@ def get_folder_watcher_paths():
             
             if is_accessible:
                 try:
-                    # Use os.walk to traverse directory structure recursively
-                    for root, dirs, files in os.walk(path):
-                        # Skip excluded paths
-                        if any(excluded in root for excluded in folder_watcher_state['excluded_paths']):
-                            continue
-                        
-                        # Add root to discovered subdirectories if it's not the original path
-                        # and not already in the monitored paths list
-                        if root != path and root not in monitored_paths and root not in discovered_subdirs:
-                            discovered_subdirs.append(root)
-                        
-                        # Count first-level subdirectories separately
-                        if root == path:
-                            subdir_count = len(dirs)
-                            total_directories_monitored += len(dirs)
-                            
-                            # Add immediate subdirectories to our discovered list
-                            for subdir in dirs:
-                                subdir_path = os.path.join(root, subdir)
-                                if subdir_path not in monitored_paths and subdir_path not in discovered_subdirs:
-                                    discovered_subdirs.append(subdir_path)
-                        else:
-                            # This is a subdirectory being processed
-                            subdir_count += 1
-                            total_directories_monitored += 1
-                            
-                        # Count files and identify high-risk ones
-                        for filename in files:
-                            file_count += 1
-                            total_files_monitored += 1
-                            _, ext = os.path.splitext(filename)
-                            if ext.lower() in high_risk_extensions:
-                                high_risk_count += 1
-                                total_high_risk_files += 1
+                    # NOTE: Only scans one level deep (os.scandir) rather than
+                    # fully recursing with os.walk() -- see the matching NOTE
+                    # on get_network_monitored_directories() above for why a
+                    # full recursive walk made this endpoint time out.
+                    with os.scandir(path) as entries:
+                        for entry in entries:
+                            if any(excluded in entry.path for excluded in folder_watcher_state['excluded_paths']):
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                subdir_count += 1
+                                total_directories_monitored += 1
+                                if entry.path not in monitored_paths and entry.path not in discovered_subdirs:
+                                    discovered_subdirs.append(entry.path)
+                            elif entry.is_file(follow_symlinks=False):
+                                file_count += 1
+                                total_files_monitored += 1
+                                _, ext = os.path.splitext(entry.name)
+                                if ext.lower() in high_risk_extensions:
+                                    high_risk_count += 1
+                                    total_high_risk_files += 1
                 except Exception as e:
                     # Handle potential errors like permission issues
                     logging.warning(f"Error scanning {path}: {str(e)}")
@@ -1124,23 +1275,17 @@ def get_folder_watcher_paths():
                 'subdirectory_count': 0
             })
     
-    # Add discovered subdirectories to the folder watcher's monitored paths
-    if discovered_subdirs:
-        # Filter out any excluded paths
-        valid_subdirs = []
-        for subdir in discovered_subdirs:
-            # Skip if any excluded term is in the path
-            if not any(excluded in subdir for excluded in folder_watcher_state['excluded_paths']):
-                valid_subdirs.append(subdir)
-        
-        # Add valid subdirectories to monitored paths
-        for subdir in valid_subdirs:
-            if subdir not in folder_watcher_state['monitored_paths']:
-                folder_watcher_state['monitored_paths'].append(subdir)
-                logging.info(f"Added discovered subdirectory to folder watcher: {subdir}")
-        
-        # Update the total directories count
-        total_directories_monitored = len(folder_watcher_state['monitored_paths'])
+    # Report discovered subdirectories in the response without persisting them
+    # into folder_watcher_state (see NOTE on the route above for why).
+    valid_subdirs = [
+        subdir for subdir in discovered_subdirs
+        if not any(excluded in subdir for excluded in folder_watcher_state['excluded_paths'])
+    ]
+    all_paths = list(monitored_paths)
+    for subdir in valid_subdirs:
+        if subdir not in all_paths:
+            all_paths.append(subdir)
+    total_directories_monitored = len(all_paths)
     
     # Generate response with enhanced statistics
     response = {
@@ -1152,11 +1297,11 @@ def get_folder_watcher_paths():
         'total_files_monitored': total_files_monitored,
         'total_directories_monitored': total_directories_monitored,
         'total_high_risk_files': total_high_risk_files,
-        'monitored_paths': folder_watcher_state['monitored_paths'],  # Include updated paths
+        'monitored_paths': all_paths,  # Base paths plus discovered subdirectories
         'root_directories_count': len(monitored_paths),  # Original root directories
-        'subdirectories_count': len(discovered_subdirs),  # Found subdirectories
-        'total_subdirectories_found': len(discovered_subdirs),  # For consistency with network monitor
-        'total_paths': len(folder_watcher_state['monitored_paths'])  # Total of all monitored paths
+        'subdirectories_count': len(valid_subdirs),  # Found subdirectories
+        'total_subdirectories_found': len(valid_subdirs),  # For consistency with network monitor
+        'total_paths': len(all_paths)  # Total of all monitored paths
     }
     
     return jsonify(response)
@@ -1171,10 +1316,81 @@ def start_realtime():
         logger.error(f"Error starting real-time monitoring: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/file_crypto', methods=['GET', 'POST'])
+@app.errorhandler(413)
+def handle_file_too_large(e):
+    """Friendly error for uploads exceeding MAX_CONTENT_LENGTH, instead of
+    Flask's default plain-text 413 response."""
+    max_mb = app.config['MAX_CONTENT_LENGTH'] // (1024 * 1024)
+    if request.path in ('/encrypt', '/decrypt'):
+        return render_template('file_crypto.html', error=f'File is too large. Maximum allowed size is {max_mb}MB.'), 413
+    return jsonify({'success': False, 'error': f'File is too large. Maximum allowed size is {max_mb}MB.'}), 413
+
+
+@app.route('/file_crypto', methods=['GET'])
 def file_crypto():
-    """Handle file crypto operations"""
-    return jsonify({'status': 'success', 'message': 'File crypto functionality available'})
+    """File encryption/decryption tool page."""
+    return render_template('file_crypto.html')
+
+
+@app.route('/encrypt', methods=['POST'])
+def encrypt_file_route():
+    """Encrypt an uploaded file and return it for download."""
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return render_template('file_crypto.html', error='No file selected')
+
+    file = request.files['file']
+    temp_in_path = temp_out_path = None
+    try:
+        from file_crypto import encrypt_file as encrypt_file_util
+
+        with tempfile.NamedTemporaryFile(delete=False) as temp_in:
+            file.save(temp_in.name)
+            temp_in_path = temp_in.name
+        temp_out_fd, temp_out_path = tempfile.mkstemp()
+        os.close(temp_out_fd)
+
+        encrypt_file_util(temp_in_path, temp_out_path)
+        return send_file(temp_out_path, as_attachment=True,
+                          download_name=f'encrypted_{secure_filename(file.filename)}')
+    except Exception as e:
+        logger.error(f"Error encrypting file: {e}")
+        return render_template('file_crypto.html', error=f'Encryption failed: {e}')
+    finally:
+        if temp_in_path and os.path.exists(temp_in_path):
+            os.remove(temp_in_path)
+        # Note: temp_out_path is intentionally not removed here since send_file
+        # streams it after this function returns.
+
+
+@app.route('/decrypt', methods=['POST'])
+def decrypt_file_route():
+    """Decrypt an uploaded file and return it for download."""
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return render_template('file_crypto.html', error='No file selected')
+
+    file = request.files['file']
+    key = request.form.get('key') or None
+    temp_in_path = temp_out_path = None
+    try:
+        from file_crypto import decrypt_file as decrypt_file_util
+
+        with tempfile.NamedTemporaryFile(delete=False) as temp_in:
+            file.save(temp_in.name)
+            temp_in_path = temp_in.name
+        temp_out_fd, temp_out_path = tempfile.mkstemp()
+        os.close(temp_out_fd)
+
+        decrypt_file_util(temp_in_path, temp_out_path, key.encode() if key else None)
+        return send_file(temp_out_path, as_attachment=True,
+                          download_name=f'decrypted_{secure_filename(file.filename)}')
+    except InvalidToken:
+        return render_template('file_crypto.html', error='Decryption failed: invalid key or corrupted file')
+    except Exception as e:
+        logger.error(f"Error decrypting file: {e}")
+        return render_template('file_crypto.html', error=f'Decryption failed: {e}')
+    finally:
+        if temp_in_path and os.path.exists(temp_in_path):
+            os.remove(temp_in_path)
 
 # -- Additional required routes to prevent 404 errors --
 @app.route('/quarantine', methods=['GET'])

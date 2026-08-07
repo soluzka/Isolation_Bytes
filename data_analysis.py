@@ -19,24 +19,41 @@ data = '3=U³\\¬¶6|cò\\u000fã£Ü\\u001bn>]UãÊOM³YWl®cÕ\\u0017«ÔñqZ�
 
 def analyze_data(data):
     """
-    Analyze the provided data.
+    Generate a Fernet key for encrypting the provided data.
+
+    NOTE: This used to run a large amount of debug analysis (hex-dumping the
+    entire input, computing entropy/chi-squared statistics, and rendering
+    matplotlib plots to disk) on every call. Since the generated key never
+    actually depended on that analysis, and callers invoke this per scanned/
+    quarantined file, that overhead made scans and quarantining extremely
+    slow (flooding logs with full file hex dumps), leaked unclosed
+    matplotlib figures (RuntimeWarning: More than 20 figures have been
+    opened), and has been observed to crash the server outright on large
+    files. The analysis has been removed; this now just returns a fresh
+    Fernet key as it always did.
 
     Args:
         data (str or bytes): The data to analyze.
 
     Returns:
-        None
+        bytes: A newly generated Fernet key.
     """
 
     # Validate input data
     if not data:
         print('Error: Input data is empty. Please provide valid data.')
-        return
+        return Fernet.generate_key()
 
     # Convert to bytes if data is a string
     if isinstance(data, str):
         data = data.encode('latin-1')  # Convert to bytes using latin-1 encoding
 
+    return Fernet.generate_key()
+
+
+def _analyze_data_debug(data):
+    """Retained for reference: the original verbose debug analysis that used
+    to run on every call to analyze_data(). Not called anywhere."""
     print('Initial Data Length:', len(data))  # Log the initial length of the data
     print('Raw Data (hex):', data.hex())  # Log the raw data in hex
 

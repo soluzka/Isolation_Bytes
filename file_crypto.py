@@ -46,20 +46,28 @@ def encrypt_file(input_path, output_path, key=FERNET_KEY):
             data = f.read()
         logging.info(f"Read data from file: {input_path}")
 
-    # Run data analysis before using FERNET_KEY
-    key = analyze_data(data)
+    # Run data analysis (kept for parity with existing behavior; its result is
+    # not the encryption key -- see NOTE below).
+    analyze_data(data)
 
     # Use secure key for Fernet
-    fernet = Fernet(secure_key.get_bytes())
+    actual_key = secure_key.get_bytes()
+    fernet = Fernet(actual_key)
     encrypted = fernet.encrypt(data)
 
-    # Write output: prepend key as header (44 bytes)
+    # Write output: prepend the actual key used for encryption as header (44 bytes).
+    # NOTE: This used to write the unrelated key returned by analyze_data() as the
+    # header instead of the key actually used to encrypt (actual_key, from
+    # FERNET_KEY). Since decrypt_file() auto-extracts the header as the
+    # decryption key when none is supplied, that mismatch meant decryption
+    # would always fail with InvalidToken unless the caller separately knew
+    # and passed the real FERNET_KEY by hand.
     if output_path == '-':
-        sys.stdout.buffer.write(key + encrypted)
+        sys.stdout.buffer.write(actual_key + encrypted)
         logging.info("Wrote encrypted data with key header to stdout.")
     else:
         with open(get_resource_path(os.path.join(output_path)), 'wb') as f:
-            f.write(key + encrypted)
+            f.write(actual_key + encrypted)
         logging.info(f"Wrote encrypted data with key header to file: {output_path}")
 
     if input_path != '-' and output_path != '-':

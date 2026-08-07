@@ -973,26 +973,34 @@ def routine_maintenance_and_system_recovery():
         output.write("[ROUTINE MAINTENANCE] Performing system cleanup and recovery...\n")
         try:
             # Clean temporary files
-            temp_dirs = [
-                os.path.join(os.environ.get('TEMP', '')),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'Temp'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Local\\Temp'),
-            ]
-            
-            for temp_dir in temp_dirs:
-                if os.path.exists(temp_dir):
-                    try:
-                        for root, dirs, files in os.walk(temp_dir):
-                            for file in files:
-                                filepath = os.path.join(root, file)
-                                try:
-                                    os.remove(filepath)
-                                    recovery_results["cleaned_files"].append(filepath)
-                                    output.write(f"[CLEANUP] Removed temporary file: {filepath}\n")
-                                except Exception as e:
-                                    output.write(f"[CLEANUP ERROR] Could not remove {filepath}: {e}\n")
-                    except Exception as e:
-                        output.write(f"[CLEANUP ERROR] Error cleaning {temp_dir}: {e}\n")
+            # NOTE: This recursively deletes every file under %TEMP%, %SYSTEMROOT%\Temp,
+            # and %USERPROFILE%\AppData\Local\Temp, which can affect files other
+            # applications are actively using. This is destructive and opt-in only:
+            # set AV_ENABLE_TEMP_CLEANUP=1 (or true/yes) to enable it.
+            temp_cleanup_enabled = os.environ.get('AV_ENABLE_TEMP_CLEANUP', '').strip().lower() in ('1', 'true', 'yes')
+            if not temp_cleanup_enabled:
+                output.write("[CLEANUP] Skipping temp file cleanup (disabled by default; set AV_ENABLE_TEMP_CLEANUP=1 to enable).\n")
+            else:
+                temp_dirs = [
+                    os.path.join(os.environ.get('TEMP', '')),
+                    os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'Temp'),
+                    os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Local\\Temp'),
+                ]
+
+                for temp_dir in temp_dirs:
+                    if os.path.exists(temp_dir):
+                        try:
+                            for root, dirs, files in os.walk(temp_dir):
+                                for file in files:
+                                    filepath = os.path.join(root, file)
+                                    try:
+                                        os.remove(filepath)
+                                        recovery_results["cleaned_files"].append(filepath)
+                                        output.write(f"[CLEANUP] Removed temporary file: {filepath}\n")
+                                    except Exception as e:
+                                        output.write(f"[CLEANUP ERROR] Could not remove {filepath}: {e}\n")
+                        except Exception as e:
+                            output.write(f"[CLEANUP ERROR] Error cleaning {temp_dir}: {e}\n")
             
             # Quarantine cleanup
             quarantine_folder = os.path.join(tempfile.gettempdir(), 'Defender_Quarantine')
@@ -1030,7 +1038,7 @@ def routine_maintenance_and_system_recovery():
     
     return output.getvalue(), recovery_results
 
-def run_conditional_startup_logic(open_browser=True):
+def run_conditional_startup_logic(open_browser=True, progress_callback=None):
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
     
@@ -1046,15 +1054,25 @@ def run_conditional_startup_logic(open_browser=True):
     scanned_file_status = {}  # Track status for each scanned file
     
     # Run comprehensive routine maintenance and system recovery
-    output.write("[conditional_startup] Running comprehensive routine maintenance and system recovery...\n")
-    try:
-        maintenance_log, maintenance_results = routine_maintenance_and_system_recovery()
-        output.write(maintenance_log)
-        results["routine_maintenance"] = maintenance_results
-        output.write("[conditional_startup] Routine maintenance completed.\n")
-    except Exception as e:
-        output.write(f"[ERROR] Routine maintenance failed: {e}\n")
-        results["routine_maintenance"] = {"errors": [str(e)]}
+    # NOTE: routine_maintenance_and_system_recovery() performs 8+ full recursive
+    # scans of critical_dirs, which includes C:\Windows\System32 (tens of
+    # thousands of files). That makes it extremely slow and it runs before any
+    # scan progress is reported, so it's opt-in only: set
+    # AV_ENABLE_ROUTINE_MAINTENANCE=1 (or true/yes) to enable it.
+    routine_maintenance_enabled = os.environ.get('AV_ENABLE_ROUTINE_MAINTENANCE', '').strip().lower() in ('1', 'true', 'yes')
+    if not routine_maintenance_enabled:
+        output.write("[conditional_startup] Skipping routine maintenance and system recovery (disabled by default; set AV_ENABLE_ROUTINE_MAINTENANCE=1 to enable).\n")
+        results["routine_maintenance"] = {"skipped": True}
+    else:
+        output.write("[conditional_startup] Running comprehensive routine maintenance and system recovery...\n")
+        try:
+            maintenance_log, maintenance_results = routine_maintenance_and_system_recovery()
+            output.write(maintenance_log)
+            results["routine_maintenance"] = maintenance_results
+            output.write("[conditional_startup] Routine maintenance completed.\n")
+        except Exception as e:
+            output.write(f"[ERROR] Routine maintenance failed: {e}\n")
+            results["routine_maintenance"] = {"errors": [str(e)]}
 
     # Define the base directory and state file path
     basedir = os.path.dirname(os.path.abspath(__file__))
@@ -1079,6 +1097,35 @@ def run_conditional_startup_logic(open_browser=True):
     except Exception as e:
         output.write(f"[ERROR] Failed to load scan utilities: {e}\n")
         return output.getvalue()
+
+    # --- Scan running processes ---
+    # NOTE: process_monitor was previously imported here but scan_running_processes()
+    # was never actually called, so results["process_events"] stayed empty and the
+    # "Process Events" stat in the status UI always showed 0 regardless of what
+    # happened during the scan.
+    output.write("[conditional_startup] Scanning running processes...\n")
+
+    def on_process_event(event):
+        results["process_events"].append(event)
+        # Report progress per-event, not just once after the whole process
+        # scan finishes -- scanning a handful of large executables against
+        # every YARA rule can take minutes, so waiting until the end would
+        # leave the status UI showing 0 the entire time.
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception:
+                pass
+
+    try:
+        process_monitor.scan_running_processes(
+            scan_utils.scan_file_for_viruses,
+            event_callback=on_process_event
+        )
+        output.write(f"[conditional_startup] Process scan reported {len(results['process_events'])} event(s).\n")
+    except Exception as e:
+        output.write(f"[ERROR] Process scan failed: {e}\n")
+        results["errors"].append({"stage": "process_scan", "error": str(e)})
 
     # --- Launch phishing detector learning behavior (update blocklists) ---
     try:
@@ -1206,8 +1253,14 @@ def run_conditional_startup_logic(open_browser=True):
                                 results["quarantined_files"].append(filepath)
                                 scanned_file_status[filepath]["quarantined"] = True
                             except Exception as quarantine_exc:
+                                # Malware was detected but could not be removed (e.g. permission
+                                # denied on a protected system file). Previously this was only
+                                # written to the internal log and counted toward neither
+                                # "Quarantined" nor "Errors", making it look like nothing had
+                                # happened when malware had actually been found and left in place.
                                 output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
                                 scanned_file_status[filepath]["error"] = str(quarantine_exc)
+                                results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
                     except (PermissionError, OSError) as perm_error:
                         output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
                         scanned_file_status[filepath] = {
@@ -1223,6 +1276,14 @@ def run_conditional_startup_logic(open_browser=True):
                             "quarantined": False,
                             "error": str(scan_exc)
                         }
+
+                    # Report live progress so callers (e.g. the status API) don't
+                    # appear stuck at 0 while a large scan is still in progress.
+                    if callable(progress_callback):
+                        try:
+                            progress_callback(results)
+                        except Exception:
+                            pass
     
     # Optionally, open the browser if needed
     if open_browser:

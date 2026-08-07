@@ -535,7 +535,7 @@ if (stopAutoUpdatesBtn) {
             }
 
             function renderStatus(data) {
-                if (!data.last_run && !data.running) {
+                if (!data.last_run && !data.running && !data.started_at) {
                     statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
                     return;
                 }
@@ -543,7 +543,15 @@ if (stopAutoUpdatesBtn) {
                     ? '<span class="status-span" style="color:#b36200;">Running...</span>'
                     : '<span class="status-span status-enabled">Idle</span>';
                 const duration = (data.duration === null || data.duration === undefined) ? '' : ` &middot; took <strong>${data.duration}s</strong>`;
-                let html = `<p>State: ${state} &middot; Last run: <strong>${data.last_run || 'never'}</strong>${duration}</p>
+                // While running, show when this run started and when its progress was
+                // last updated -- "Last run" only gets set once the whole scan finishes,
+                // which can take minutes, so relying on it alone left this stuck showing
+                // "never" for the entire duration of a run even though it was actively
+                // making progress.
+                const timeInfo = data.running
+                    ? `Started: <strong>${data.started_at || 'unknown'}</strong> &middot; Last updated: <strong>${data.last_updated || 'unknown'}</strong>`
+                    : `Last run: <strong>${data.last_run || 'never'}</strong>`;
+                let html = `<p>State: ${state} &middot; ${timeInfo}${duration}</p>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;">
                         ${tile(data.scanned_files || 0, 'Files Scanned')}
                         ${tile(data.quarantined_files || 0, 'Quarantined', true)}
@@ -647,11 +655,6 @@ if (stopAutoUpdatesBtn) {
         .scan-btn:disabled {
             background: #ccc;
             cursor: not-allowed;
-        }
-
-        #run_startup_btn {
-            background: #b36200;
-            color: #fff;
         }
 
         #network_monitor_running {
@@ -829,7 +832,9 @@ if (stopAutoUpdatesBtn) {
                 }
                 const data = await response.json();
                 
-                if (data.status === 'success') {
+                // /toggle_network_monitor/<action> returns {success: true, status: 'ENABLED'|'DISABLED', ...},
+                // not {status: 'success'} -- check the actual fields the backend sends.
+                if (data.success && (data.network_monitor_running || data.status === 'ENABLED')) {
                     updateTrafficStats();
                     setInterval(updateTrafficStats, 5000); // Update every 5 seconds
                 }
@@ -838,20 +843,29 @@ if (stopAutoUpdatesBtn) {
             }
         }
 
+        // Fetch JSON from a URL, treating any failure (network error, 404,
+        // non-JSON body, etc.) as "not available" for that endpoint alone,
+        // instead of letting it reject and abort every other update.
+        async function fetchJsonOrNotAvailable(url) {
+            try {
+                const response = await fetch(url);
+                if (!response.ok) {
+                    return { success: false, error: 'Not implemented' };
+                }
+                return await response.json();
+            } catch (error) {
+                return { success: false, error: 'Not implemented' };
+            }
+        }
+
         async function updateTrafficStats() {
             if (!networkMonitorRunning) return;
 
             try {
-                const [trafficRes, c2Res, directoriesRes] = await Promise.all([
-                    fetch('/get_traffic_stats'),
-                    fetch('/get_c2_patterns'),
-                    fetch('/get_network_monitored_directories')
-                ]);
-
                 const [trafficData, c2Data, directoriesData] = await Promise.all([
-                    trafficRes.json(),
-                    c2Res.json(),
-                    directoriesRes.json()
+                    fetchJsonOrNotAvailable('/get_traffic_stats'),
+                    fetchJsonOrNotAvailable('/get_c2_patterns'),
+                    fetchJsonOrNotAvailable('/get_network_monitored_directories')
                 ]);
 
                 updateTrafficDisplay(trafficData, c2Data);
@@ -1023,29 +1037,14 @@ if (stopAutoUpdatesBtn) {
         
         // Update function for traffic display
         function updateTrafficDisplay(trafficData, c2Data) {
-            // Create traffic statistics display area if it doesn't exist
-            let trafficStatsElem = document.getElementById('network_traffic_stats');
-            if (!trafficStatsElem) {
-                const monitoringCard = document.querySelector('.card');
-                if (monitoringCard) {
-                    trafficStatsElem = document.createElement('div');
-                    trafficStatsElem.id = 'network_traffic_stats';
-                    trafficStatsElem.className = 'card';
-                    trafficStatsElem.innerHTML = `
-                        <div class="card-header">
-                            <h3>Network Traffic Statistics</h3>
-                        </div>
-                        <div id="traffic_content" class="card-body"></div>
-                    `;
-                    monitoringCard.parentNode.insertBefore(trafficStatsElem, monitoringCard.nextSibling);
-                }
-            }
-
-            // Update traffic statistics content
-            const trafficContent = document.getElementById('traffic_content');
+            // Update the existing "Traffic statistics will appear here..." placeholder
+            // in the Network Traffic Monitoring card, instead of creating a separate
+            // duplicate card elsewhere on the page.
+            const trafficContent = document.getElementById('traffic_stats');
             if (trafficContent) {
-                if (trafficData.error) {
-                    trafficContent.innerHTML = `<div class="alert alert-warning">Error retrieving traffic statistics: ${trafficData.error}</div>`;
+                if (!trafficData || trafficData.error || trafficData.success === false) {
+                    const message = (trafficData && trafficData.error) || 'Not available';
+                    trafficContent.innerHTML = `<div class="alert alert-warning">Traffic statistics unavailable: ${message}</div>`;
                     return;
                 }
 
@@ -1218,113 +1217,6 @@ if (stopAutoUpdatesBtn) {
         
     </script>
 
-        function getDNSColor(isMalicious) {
-            return isMalicious ? '#e74c3c' : '#27ae60';
-        }
-
-        function formatSSLConnections(connections) {
-            if (!connections.length) return 'No SSL connections analyzed';
-            return connections.map(function(conn) {
-                return `
-                    <div class="ssl-connection">
-                        <span class="ssl-server-name"><strong>${conn.server_name}</strong></span>
-                        <span class="ssl-port">Port: ${conn.port}</span>
-                        <span class="ssl-cipher">Cipher: ${conn.cipher}</span>
-                        <span class="ssl-security-level ${conn.security_level === 'secure' ? 'secure-level' : 'insecure-level'}">${conn.security_level}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function formatDNSRequests(requests) {
-            if (!Object.keys(requests).length) return 'No DNS requests analyzed';
-            return Object.entries(requests).map(function([domain, info]) {
-                return `<div class="dns-request ${info.malicious ? 'malicious-request' : 'safe-request'}">
-                        <span class="domain-name ${info.malicious ? 'malicious-color' : 'safe-color'}"><strong>${domain}</strong></span>
-                        <span class="reason" style="color: #8e44ad;">${info.reason}</span>
-                        <span class="last-seen">Last: ${new Date(info.last_seen).toLocaleString()}</span>
-                    </div>`;
-            }).join('');
-        }
-
-        function formatC2Patterns(patterns) {
-            if (!Object.keys(patterns).length) return 'No C2 patterns detected';
-            return Object.entries(patterns).map(function([ip, info]) {
-                return `
-                    <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid #e74c3c;">
-                        <span style="color: #e74c3c;"><strong>${ip}</strong></span>
-                        <span style="margin-left: 1em;">Confidence: ${info.confidence}%</span>
-                        <span style="margin-left: 1em; color: #8e44ad;">${info.reason}</span>
-                        <span style="margin-left: 1em;">Last Active: ${new Date(info.timestamp).toLocaleString()}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function formatRateLimitedIPs(ips) {
-            if (!Object.keys(ips).length) return 'No rate limited IPs';
-            return Object.entries(ips).map(function([ip, info]) {
-                return `
-                    <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid #f1c40f;">
-                        <span style="color: #f1c40f;"><strong>${ip}</strong></span>
-                        <span style="margin-left: 1em;">${info.reason}</span>
-                        <span style="margin-left: 1em;">Since: ${new Date(info.timestamp).toLocaleString()}</span>
-                    </div>
-                `;
-            }).join('');
-        }
-
-        function updateTrafficStats() {
-            if (window.serviceStates.networkMonitorRunning) {
-                Promise.all([
-                    fetch('/get_traffic_stats'),
-                    fetch('/get_c2_patterns')
-                ])
-                .then(responses => Promise.all(responses.map(r => r.json())))
-                .then(([trafficData, c2Data]) => {
-                    updateTrafficDisplay(trafficData, c2Data);
-                })
-                .catch(error => {
-                    console.error('Error fetching traffic stats:', error);
-                });
-                
-                // Additional network analysis if available
-                Promise.all([
-                    fetch('/get_ssl_analysis').catch(() => new Response('{"error":"Not implemented"}')),
-                    fetch('/get_dns_analysis').catch(() => new Response('{"error":"Not implemented"}'))
-                ])
-                .then(function(responses) {
-                    return Promise.all(responses.map(function(response) {
-                        return response.json();
-                    }));
-                })
-                .then(function([trafficData, c2Data, sslData, dnsData]) {
-                    if (trafficData.success) {
-                        const stats = trafficData.stats;
-                        document.getElementById('total_connections').textContent = stats.total_connections;
-                        document.getElementById('total_bandwidth').textContent = formatBytes(stats.total_bandwidth);
-                        document.getElementById('top_connections').innerHTML = formatTopConnections(stats.top_connections);
-                        document.getElementById('suspicious_ips').innerHTML = formatIPList(stats.suspicious_ips);
-                        document.getElementById('blocked_ips').innerHTML = formatIPList(stats.blocked_ips);
-                        document.getElementById('rate_limited_ips').innerHTML = formatRateLimitedIPs(stats.rate_limited_ips);
-                    }
-                    if (c2Data.success) {
-                        document.getElementById('c2_patterns').innerHTML = formatC2Patterns(c2Data.patterns);
-                    }
-                    if (sslData.success) {
-                        document.getElementById('ssl_connections').innerHTML = formatSSLConnections(sslData.connections);
-                    }
-                    if (dnsData.success) {
-                        document.getElementById('dns_requests').innerHTML = formatDNSRequests(dnsData.requests);
-                    }
-                })
-                .catch(function(error) {
-                    console.error('Error updating stats:', error);
-                });
-                setTimeout(updateTrafficStats, 5000); // Update every 5 seconds
-            }
-        }
-        
         {% if c2_detector_low_count > 0 %}
         <li><strong style="color:#6c757d;">Low ({{ c2_detector_low_count }}):</strong> Minor anomalies detected</li>
         {% endif %}
@@ -1577,106 +1469,6 @@ if (stopAutoUpdatesBtn) {
         <a href="/safe_download">Safe Download</a>
         <a href="/quarantine/list" style="display:inline-block;margin-top:1em;background:#16a085;color:#fff;padding:0.5em 1em;border-radius:5px;text-decoration:none;">List Quarantine</a>
     </nav>
-    <button type="button" id="run_startup_btn" class="scan-btn" style="background:#b36200;color:#fff;padding:0.7em 1.5em;border:none;border-radius:4px;font-weight:bold;cursor:pointer;">
-        Run Conditional Startup (All Scans)
-    </button>
-    <div id="startupResults" style="margin-top:1em;"></div>
-    <script>
-    // Coerce API payloads that may be a single value, an object or JSON text into an array
-    function toArray(value) {
-        if (Array.isArray(value)) return value;
-        if (value === null || value === undefined || value === '') return [];
-        if (typeof value === 'string') {
-            try {
-                const parsed = JSON.parse(value);
-                return Array.isArray(parsed) ? parsed : [parsed];
-            } catch (e) {
-                return [value];
-            }
-        }
-        if (typeof value === 'object') {
-            return Array.isArray(value.results) ? value.results : Object.values(value);
-        }
-        return [value];
-    }
-
-    function formatResult(result) {
-        if (result === null || result === undefined) return '';
-        if (typeof result !== 'object') return String(result);
-        if (result.file) {
-            const flags = [];
-            if (result.malware_found) flags.push('malware found');
-            if (result.quarantined) flags.push('quarantined');
-            if (result.error) flags.push('error: ' + result.error);
-            return result.file + (flags.length ? ' (' + flags.join(', ') + ')' : '');
-        }
-        return JSON.stringify(result);
-    }
-
-    function performAction(action) {
-        if (action === 'run_startup') {
-            const btn = document.getElementById('run_startup_btn');
-            const resultsDiv = document.getElementById('startupResults');
-            btn.disabled = true;
-            resultsDiv.innerHTML = '<span style="color:#b36200;">Running all scans, please wait...</span>';
-            
-            fetch('/run_startup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin' // Include cookies in the request
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Server returned status ' + response.status);
-                }
-                return response.json();
-            })
-            .then(data => {
-                btn.disabled = false;
-                if (data.status === 'success') {
-                    let resultsHTML = '<div style="background:#eafaf1;color:#006644;padding:1em;margin-top:1em;border-radius:6px;">';
-                    resultsHTML += '<h3>Scan Completed Successfully</h3>';
-                    resultsHTML += '<p><strong>Scan Time:</strong> ' + data.scan_time + '</p>';
-                    resultsHTML += '<p><strong>Timestamp:</strong> ' + data.timestamp + '</p>';
-                    resultsHTML += '<p><strong>Scanned Directories:</strong></p><ul>';
-                    
-                    toArray(data.scanned_directories).forEach(dir => {
-                        resultsHTML += '<li>' + dir + '</li>';
-                    });
-                    
-                    resultsHTML += '</ul>';
-                    
-                    const scanResults = toArray(data.results);
-                    if (scanResults.length > 0) {
-                        resultsHTML += '<p><strong>Results:</strong></p><ul>';
-                        scanResults.forEach(result => {
-                            resultsHTML += '<li>' + formatResult(result) + '</li>';
-                        });
-                        resultsHTML += '</ul>';
-                    } else {
-                        resultsHTML += '<p><strong>Results:</strong> No issues found.</p>';
-                    }
-                    
-                    resultsHTML += '</div>';
-                    resultsDiv.innerHTML = resultsHTML;
-                } else {
-                    resultsDiv.innerHTML = '<div style="background:#f8d7da;color:#721c24;padding:1em;margin-top:1em;border-radius:6px;"><strong>Error:</strong> ' + (data.message || 'Unknown error') + '</div>';
-                }
-            })
-            .catch(err => {
-                console.error('Error running conditional scan:', err);
-                btn.disabled = false;
-                resultsDiv.innerHTML = '<div style="background:#f8d7da;color:#721c24;padding:1em;margin-top:1em;border-radius:6px;"><strong>Error:</strong> ' + (err.message || err) + '</div>';
-            });
-        }
-    }
-    // Safely add click handler for quick start button
-    const runStartupBtn = document.getElementById('run_startup_btn');
-    if (runStartupBtn) {
-        runStartupBtn.onclick = function() { performAction('run_startup'); };
-    }
-    </script>
-    </script>
     </div>
 
     {% if yara_scan_results %}
@@ -1697,7 +1489,15 @@ if (stopAutoUpdatesBtn) {
     </div>
     {% endif %}
 
-    <iframe src="/file_crypto" width="100%" height="500"></iframe>
+    <div class="card">
+        <div class="card-header">
+            <h3>File Encryption / Decryption</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <p style="margin-top:0;color:#555;font-size:0.9em;">Encrypt or decrypt a file using Fernet.</p>
+            <iframe src="/file_crypto" width="100%" height="500" style="border:1px solid #ddd;border-radius:4px;"></iframe>
+        </div>
+    </div>
 
     <script>
         // Global variables for service states

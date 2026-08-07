@@ -18,10 +18,22 @@ def get_basedir():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-def scan_running_processes(scan_func, terminate_on_malware=True, block_connections=True):
+def scan_running_processes(scan_func, terminate_on_malware=True, block_connections=True, event_callback=None):
     """
     Scan all running processes owned by the current user and running from user-created folders (not Windows defaults/system).
+
+    event_callback: optional callable invoked with a dict for each notable
+    event (process scanned, malware found, process terminated, connection
+    blocked, YARA match). Callers that don't need this can omit it -- this
+    is purely additive so existing callers are unaffected.
     """
+    def emit(event_type, **details):
+        if event_callback:
+            try:
+                event_callback({'type': event_type, **details})
+            except Exception:
+                pass
+
     import getpass
     current_user = getpass.getuser()
     import pathlib
@@ -64,16 +76,19 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                     else:
                         logging.error(f'Unexpected scan result format for {exe}: {result}')
                         continue
+                    emit('process_scanned', pid=pid, name=name, exe=exe, malware_found=bool(malware_found))
                     if not scan_success:
                         logging.warning(f'Scan failed for {exe}: {msg}')
                     elif malware_found:
                         logging.warning(f'Malware found in process {name} (PID: {pid}), exe: {exe}. {msg}')
+                        emit('malware_found', pid=pid, name=name, exe=exe, message=msg)
                         if terminate_on_malware:
                             try:
                                 p = psutil.Process(pid)
                                 p.terminate()
                                 p.wait(timeout=5)
                                 logging.warning(f'Terminated process {name} (PID: {pid}) due to malware.')
+                                emit('process_terminated', pid=pid, name=name, exe=exe)
                             except Exception as e:
                                 logging.error(f'Failed to terminate process {pid}: {e}')
                         if block_connections:
@@ -86,6 +101,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                                             remote_ip = conn.raddr.ip
                                             block_ip(remote_ip)
                                             logging.warning(f'Blocked IP {remote_ip} for process {name} (PID: {pid})')
+                                            emit('connection_blocked', pid=pid, name=name, remote_ip=remote_ip)
                             except Exception as e:
                                 logging.error(f'Failed to block connections for process {pid}: {e}')
                     else:
@@ -95,6 +111,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                         from security.yara_scanner import scan_file_with_yara
                         if scan_file_with_yara(exe):
                             logging.warning(f'[RTP][PROC] YARA match detected in process EXE: {exe} (PID: {pid}, Name: {name})')
+                            emit('yara_match', pid=pid, name=name, exe=exe)
                     except Exception as e:
                         logging.error(f'[RTP][PROC] Error running YARA scan on process EXE {exe}: {e}')
 
