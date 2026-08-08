@@ -101,3 +101,6 @@ antivirus.db
 # Keep important files/folders (add ! in front)
 !uploads/README.md
 !logs/README.md
+
+# Executables
+antivirus_server.exe
