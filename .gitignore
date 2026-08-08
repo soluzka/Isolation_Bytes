@@ -84,11 +84,6 @@ models/**/*.pkl
 models/*.pkl
 models/*.txt
 
-# Vendored copy of the scikit-learn source repo -- the project uses the
-# pip-installed scikit-learn package, this isn't imported from anywhere
-scikit-learn-main/
-scikit-learn.zip
-
 # Rust build artifacts (myproject/)
 target/
 
