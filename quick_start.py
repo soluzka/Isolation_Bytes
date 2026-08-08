@@ -31,13 +31,17 @@ def _request_admin_elevation():
     """Prompt for UAC elevation on Windows and relaunch if not running as admin."""
     if sys.platform != 'win32':
         return
+    # Only attempt UAC elevation once. The relaunched process carries this
+    # flag so it cannot recurse and spam UAC prompts / new browser windows.
+    if '--elevation-attempted' in sys.argv:
+        return
     try:
         is_admin = ctypes.windll.shell32.IsUserAnAdmin()
     except Exception:
         return
     if not is_admin:
         script = os.path.abspath(sys.argv[0])
-        params = [script] + sys.argv[1:]
+        params = [script] + sys.argv[1:] + ['--elevation-attempted']
         params = ' '.join(['"%s"' % arg if ' ' in arg else arg for arg in params])
         ret = ctypes.windll.shell32.ShellExecuteW(
             None, 'runas', sys.executable, params, None, 1
@@ -2069,54 +2073,36 @@ def start_server(port=5000):
 
 def open_browser(port):
     """
-    Attempt to open the browser to the running application.
+    Open the browser to the running application once.
     """
     if port is None or port < 0:
         print("Could not determine port to open browser with.")
         return
-        
+
     import webbrowser
     import time
-    
+
     # Wait a moment for the server to start
     time.sleep(1.5)
-    
+
     browser_url = f"http://127.0.0.1:{port}"
-    localhost_url = f"http://localhost:{port}"
-    external_url = f"http://localhost:{port}"
-    
     print(f"Opening browser at {browser_url}")
-    
-    # First ensure the server is responding before opening browser
+
+    # Wait for the server to be responding before opening the browser
     try:
-        # Simple check to see if server is responding
         import urllib.request
         with urllib.request.urlopen(browser_url, timeout=2) as response:
             if response.getcode() == 200:
                 print("Server confirmed ready")
-    except:
-        # If server check fails, just wait a bit longer
+    except Exception:
         print("Waiting for server to fully initialize...")
         time.sleep(3)
-    
-    # Try multiple methods to open the browser
+
     try:
-        # Use new=2 to open in a new tab if possible
-        if not webbrowser.open(browser_url, new=2):
-            # If the first attempt returns False (no success), try the second URL
-            if not webbrowser.open(localhost_url, new=2):
-                # If both fail, try with the default browser explicitly
-                browser = webbrowser.get()
-                browser.open(external_url)
+        webbrowser.open(browser_url, new=2)
     except Exception as e:
-        print(f"Failed to open browser with standard method: {e}")
-        try:
-            # Try to get the default browser directly
-            browser = webbrowser.get()
-            browser.open(browser_url)
-        except Exception as e2:
-            print(f"Failed to open browser with alternative method: {e2}")
-            print(f"Please manually open {browser_url} in your browser")
+        print(f"Failed to open browser: {e}")
+        print(f"Please manually open {browser_url} in your browser")
 
 # Class to share the port between threads
 class ServerInfo:
