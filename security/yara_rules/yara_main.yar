@@ -84,7 +84,7 @@ rule VirtualizationEscape {
         
     strings:
         $hyperv_instr = { 0F 01 ?? ?? ?? }
-        $vm_detect = { 0F C7 /6 }
+        $vm_detect = { 0F C7 ?? }
         $container_esc = "docker.sock" wide ascii
         $namespace = "unshare" wide ascii
         
@@ -327,8 +327,8 @@ rule AdvancedHypervisorAttack {
         $vmcall = { 0F 01 C1 }
         $vmxon = { 0F 01 C2 }
         $vmxoff = { 0F 01 C4 }
-        $vmclear = { 66 0F C7 /6 }
-        $vmptrld = { 0F C7 /6 }
+        $vmclear = { 66 0F C7 ?? }
+        $vmptrld = { 0F C7 ?? }
         
     condition:
         2 of them

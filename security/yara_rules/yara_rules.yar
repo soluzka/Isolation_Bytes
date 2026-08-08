@@ -112,6 +112,16 @@ rule SuspiciousExecutable_Strict {
     condition:
         $mz at 0 and 10 of ($upx*, $aspack, $fsg, $mpress, $petite*, $pecompact, $themida, $molebox, $yoda, $execryptor, $nsPack, $telock, $armadillo, $svkp, $upack, $section*, $rich, $dosmode, $padd, $mzpad, $dll, $exe, $bat, $scr, $com, $antidbg*, $antivm*, $obf*, $mal*)
 }
+
+// NOTE: this rule's header (rule NAME { ... strings:) was missing in the
+// original file -- the block below was a strings:/condition: pair with no
+// preceding rule declaration, which failed to compile. Reconstructed with a
+// name matching its content (suspicious API imports + executable extensions).
+rule Suspicious_PE_API_Imports {
+    meta:
+        description = "Detects suspicious Windows API imports commonly used by malware"
+    strings:
+        $mz = {4D 5A}
         $exe = ".exe"
         $bat = ".bat"
         $scr = ".scr"
@@ -138,7 +148,11 @@ rule SuspiciousExecutable_Strict {
         $susp20 = "RegDeleteKey"
         // ...add more as needed
     condition:
-        $mz at 0 and 5 of ($upx*, $aspack, $fsg, $mpress, $petite, $section*, $rich, $dosmode, $padd, $mzpad, $pecompact, $dll, $exe, $bat, $scr, $com, $susp*)
+        // Original condition referenced strings ($upx*, $aspack, $section*, etc.)
+        // from the previous rule that aren't defined here -- a copy-paste
+        // artifact from the missing-header bug above. Narrowed to the strings
+        // actually defined in this rule.
+        $mz at 0 and 5 of ($exe, $bat, $scr, $com, $susp*)
 }
 
 rule Suspicious_PowerShell_Strict {
@@ -456,15 +470,6 @@ rule Persistence_Autorun_Generic {
 // ...additional rules for Dridex, QakBot, AgentTesla, LokiBot, AZORult, NanoCore, Remcos, Cobalt Strike, REvil, Ryuk, Dharma, Maze, LockBit, GandCrab, Sodinokibi, etc. can be added in this same format for maximum coverage.
 
 
-rule EICAR_Test_File {
-    meta:
-        description = "Detects the EICAR antivirus test file"
-    strings:
-        $eicar = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
-    condition:
-        $eicar
-}
-
 rule Suspicious_PowerShell {
     meta:
         description = "Detects suspicious PowerShell commands"
@@ -738,18 +743,6 @@ rule WannaCry_Ransomware {
         $url = "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
     condition:
         any of ($note*) or $ext1 or $mutex or $url
-}
-
-rule CobaltStrike_Beacon {
-    meta:
-        description = "Detects Cobalt Strike beacon payloads"
-    strings:
-        $str1 = "Cobalt Strike"
-        $str2 = "Beacon"
-        $str3 = "sleeptime"
-        $str4 = "process-inject"
-    condition:
-        any of ($*)
 }
 
 rule XMRig_Miner_Strict {
@@ -1116,18 +1109,6 @@ rule FIN7_Carbanak_APT {
         any of ($*)
 }
 
-rule Emotet_Malware {
-    meta:
-        description = "Detects Emotet banking trojan"
-        author = "YARA-Rules"
-    strings:
-        $a = "emotet"
-        $b = "loader_emotet"
-        $c = { 45 6D 6F 74 65 74 } // "Emotet"
-    condition:
-        any of them
-}
-
 rule Trickbot_Malware {
     meta:
         description = "Detects Trickbot banking trojan"
@@ -1136,18 +1117,6 @@ rule Trickbot_Malware {
         $a = "trickbot"
         $b = "tabDll32"
         $c = "client_id"
-    condition:
-        any of them
-}
-
-rule CobaltStrike_Beacon {
-    meta:
-        description = "Detects Cobalt Strike beacon"
-        author = "YARA-Rules"
-    strings:
-        $a = "CobaltStrike"
-        $b = "BeaconObject"
-        $c = { 43 6F 62 61 6C 74 53 74 72 69 6B 65 } // "CobaltStrike"
     condition:
         any of them
 }

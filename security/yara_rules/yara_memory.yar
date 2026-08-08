@@ -64,7 +64,7 @@ rule KernelPoolOverflow {
         severity = "critical"
         
     strings:
-        $pool_tag = { 'k' 'e' 'r' 'n' }
+        $pool_tag = "kern" wide ascii
         $pool_alloc = "ExAllocatePool" wide ascii
         $pool_overflow = { F3 A5 }  // REP MOVSD
         $pool_spray = { B9 ?? ?? 00 00 F3 }  // MOV ECX, X; REP

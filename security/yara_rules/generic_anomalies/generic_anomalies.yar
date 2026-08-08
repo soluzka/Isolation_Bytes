@@ -1,3 +1,6 @@
+import "pe"
+import "math"
+
 rule SuspiciousExecutable_Strict {
     meta:
         description = "Detects suspicious PE files with advanced and empowered indicators"
@@ -20,7 +23,7 @@ rule SuspiciousExecutable_Strict {
         $shellcode = {31 C0 50 68 00 00 00 00 68 00 00 00 00 68 00 00 00 00 8B}
     
     condition:
-        all of ($mz, $packer, $xor, $shellcode)
+        $mz at 0 and (any of ($upx0, $upx1, $upx2, $aspack) or all of ($packer, $xor, $shellcode))
 }
 
 rule FileSizeAnomaly {
@@ -36,5 +39,5 @@ rule EntropyAnomaly {
         description = "Detects files with unusually high entropy (potential encryption/packing)"
         author = "CascadeAI"
     condition:
-        pe.entropy > 7.0
+        math.entropy(0, filesize) > 7.0
 }

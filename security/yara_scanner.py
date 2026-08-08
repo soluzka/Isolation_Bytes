@@ -94,22 +94,25 @@ def load_yara_rules():
         for rule_path in rule_files:
             file_name = os.path.basename(rule_path)
             try:
-                # Skip known problematic rules
-                if 'generic_anomalies.yar' in file_name or 'CVE-2010-0805.yar' in file_name:
-                    logging.info(f"Skipping known problematic rule file: {file_name}")
-                    skipped_rules.append(file_name)
-                    continue
-                    
-                # Skip yara_rules.yar since it has syntax errors (but keep fallback rules)
-                if file_name == 'yara_rules.yar':
-                    logging.info(f"Skipping problematic main rule file: {file_name} - using embedded fallback rules instead")
-                    skipped_rules.append(file_name)
-                    continue
-                    
+                # NOTE: generic_anomalies.yar, CVE-2010-0805.yar, and yara_rules.yar
+                # used to be unconditionally skipped here as "known problematic".
+                # generic_anomalies.yar was missing `import "pe"`/`import "math"`
+                # and used an invalid pe.entropy field; yara_rules.yar had a rule
+                # with a missing header (orphaned strings:/condition: block) and
+                # a triplicated rule name; CVE-2010-0805.yar compiled fine on its
+                # own and had no evident reason to be excluded. All three are
+                # fixed now (see the .yar files themselves), so they go through
+                # the normal compile-with-fallback path below like everything else.
+
                 # Try to compile the rule with more detailed error handling
                 try:
-                    # First attempt with includes (which might reference other files)
-                    rule = yara_module.compile(filepath=rule_path, includes=True, error_on_warning=False)
+                    # First attempt with includes (which might reference other files).
+                    # externals declares variables some rules (e.g. generic_anomalies.yar's
+                    # webshell-by-extension rules) reference in their condition but that
+                    # aren't YARA builtins -- the real per-file value is supplied at match
+                    # time in scan_file_with_yara(); this default just lets them compile.
+                    rule = yara_module.compile(filepath=rule_path, includes=True, error_on_warning=False,
+                                                externals={'extension': ''})
                     compiled_rules.append(rule)
                     successful_rules.append(file_name)
                     logging.info(f"Successfully loaded YARA rule: {file_name}")
@@ -117,7 +120,8 @@ def load_yara_rules():
                     # If includes fail, try again without them as a fallback
                     logging.warning(f"Failed to load YARA rule with includes, trying without: {file_name}. Error: {include_error}")
                     try:
-                        rule = yara_module.compile(filepath=rule_path, includes=False, error_on_warning=False)
+                        rule = yara_module.compile(filepath=rule_path, includes=False, error_on_warning=False,
+                                                    externals={'extension': ''})
                         compiled_rules.append(rule)
                         successful_rules.append(file_name)
                         logging.info(f"Successfully loaded YARA rule (without includes): {file_name}")

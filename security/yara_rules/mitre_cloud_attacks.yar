@@ -5,7 +5,7 @@ rule CloudCredentialAccess {
         mitre_technique = "T1552"
         
     strings:
-        $aws_cred = /.{20}(?:AKIA|ABIA|ACCA)[0-9A-Z]{16}/ wide ascii
+        $aws_cred = /.{20}(AKIA|ABIA|ACCA)[0-9A-Z]{16}/ wide ascii
         $azure_token = "eyJ0eXAiOiJKV1QiL" wide ascii
         $gcp_key = "-----BEGIN PRIVATE KEY-----" wide ascii
         $kubectl_config = ".kube/config" wide ascii
