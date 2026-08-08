@@ -318,7 +318,6 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     if not isinstance(scan_data, dict):
         scan_data = {}
     conditional_startup_state.update({
-        'running': False,
         'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
         'scanned_files': len(scan_data.get('scanned_files', [])),
@@ -333,9 +332,9 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
 
 
 def run_conditional_startup_background():
-    """Run the conditional startup scan in a background thread."""
+    """Run the conditional startup scan in a background thread, looping until the app exits."""
     from conditional_startup import run_conditional_startup_logic
-    start_time = time.time()
+    interval = int(os.environ.get('AV_SCAN_INTERVAL_SECONDS', '60'))
 
     def report_progress(partial_results):
         """Update shared state with in-progress counts so the status API
@@ -355,15 +354,32 @@ def run_conditional_startup_background():
             'persistence_indicators': _count_persistence_indicators(partial_results),
         })
 
-    try:
-        scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
-        record_conditional_startup_run(scan_data, time.time() - start_time)
-        logger.info("Conditional startup scan completed")
-    except BaseException as e:
-        # BaseException so SystemExit raised by imported modules (e.g. missing
-        # FERNET_KEY) is recorded instead of leaving the state stuck on running
-        logger.error(f"Error running conditional startup: {e!r}")
-        record_conditional_startup_run(error=e, duration=time.time() - start_time)
+    while True:
+        start_time = time.time()
+        with conditional_startup_lock:
+            conditional_startup_state.update({
+                'running': True,
+                'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            })
+
+        try:
+            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
+            record_conditional_startup_run(scan_data, time.time() - start_time)
+            logger.info("Conditional startup scan completed")
+        except BaseException as e:
+            # BaseException so SystemExit raised by imported modules (e.g. missing
+            # FERNET_KEY) is recorded instead of leaving the state stuck on running
+            logger.error(f"Error running conditional startup: {e!r}")
+            record_conditional_startup_run(error=e, duration=time.time() - start_time)
+
+        # Keep the scanner in an active state; it will re-scan after the interval.
+        conditional_startup_state.update({
+            'running': True,
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+        })
+        logger.info(f"Next conditional startup scan in {interval} seconds")
+        time.sleep(interval)
 
 
 @app.route('/api/conditional_startup/status', methods=['GET'])
