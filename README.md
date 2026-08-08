@@ -1,15 +1,16 @@
 # Antivirus (YARA-based)
 
-A Flask-based antivirus/security dashboard for Windows featuring YARA-based
-malware scanning, real-time network traffic monitoring, folder watching,
-process scanning, quarantine management, and file encryption/decryption.
+A Windows-first security dashboard and CLI for YARA-based malware scanning,
+real-time network and process monitoring, encrypted quarantine, and folder
+watching. It is built around a Flask web UI (`quick_start.py`) and a
+companion command-line tool (`antivirus_cli.py`).
 
 ## Requirements
 
-- Windows (several features rely on Windows-specific APIs: Windows Firewall
-  via `netsh`, `VirtualLock`/`VirtualUnlock` for secure key storage, etc.)
+- Windows 10/11 (UAC elevation, Windows Firewall, WMI, and secure-memory
+  helpers are Windows-specific)
 - Python 3.11+
-- Dependencies from `requirements.txt`:
+- Dependencies in `requirements.txt`:
 
   ```
   pip install -r requirements.txt
@@ -35,64 +36,83 @@ process scanning, quarantine management, and file encryption/decryption.
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
    ```
 
-   `FERNET_KEY` is required by the quarantine encryption and file
-   encrypt/decrypt features; the app will fail to start those features
-   without it.
+   `FERNET_KEY` is required by quarantine encryption and the file
+   encrypt/decrypt features.
 
-2. Other optional settings live in `.env` (secret key, admin credentials,
-   quarantine size limits, etc.) -- see the comments in that file.
+2. Optional `.env` settings include the Flask secret key, admin credentials,
+   quarantine size limits, etc. See `.env.example` for the full list.
 
-## Running
+## Running the app
 
 ```
 python quick_start.py
 ```
 
-This starts the Flask app on `http://127.0.0.1:5000` (falls back to 5001 if
-5000 is in use), along with a local DNS server and a background thread that
-continuously YARA-scans monitored directories.
+On Windows, `quick_start.py` first checks for administrator rights. If it is
+not running elevated, it prompts via UAC and relaunches itself. This is needed
+for system-directory scanning, firewall blocking, and other protected
+operations.
+
+The Flask dashboard starts on `http://127.0.0.1:5000` (falling back to 5001 if
+5000 is in use). A local DNS server and a background YARA folder-watcher also
+start automatically.
+
+## Command-line usage
+
+```
+python antivirus_cli.py scan <path>
+python antivirus_cli.py quarantine list
+python antivirus_cli.py quarantine release <file.enc> <dest_dir>
+python antivirus_cli.py quarantine delete <file.enc>
+python antivirus_cli.py monitor
+python antivirus_cli.py update-signatures
+```
+
+- `scan` detects malware, prompts to quarantine, and deletes the original only
+  after the user confirms.
+- `quarantine release` decrypts a `.enc` file to the destination and removes
+  the encrypted copy from quarantine.
+- `quarantine delete` permanently removes a `.enc` file from quarantine.
+
+## Tests
+
+The root test scripts can be run individually:
+
+```
+python -m pytest test_antivirus_cli.py -v
+python simple_yara_test.py
+python test_yara.py            # scans the project root; can take a while
+python fernet_decrypt_test.py  # requires the same FERNET_KEY that encrypted the sample
+python test_environment.py
+```
 
 ## Features
 
-- **YARA scanning** -- signature-based malware detection using rule sets in
-  `security/yara_rules/`, with real-time and on-demand scanning.
+- **YARA scanning** -- signature-based detection using rule sets in
+  `security/yara_rules/`, with on-demand and background scanning.
+- **Persistent scan cache** -- `data/scan_cache.json` stores file
+  fingerprints/verdicts to avoid rescanning unchanged files. It is saved
+  atomically and is automatically backed up and reset if it becomes corrupt
+  or truncated.
+- **Safe quarantine** -- protected system locations, oversized files, and
+  unreadable files are skipped; encryption (Fernet) and original-file removal
+  happen only when the user confirms.
 - **Network traffic monitoring** -- live connection/protocol/process stats
-  via `psutil` (`/get_traffic_stats`), plus a lightweight heuristic that
-  flags established connections to uncommon ports on external hosts
-  (`/get_c2_patterns`).
-- **Folder watching / monitored directories** -- tracks a configurable set
-  of directories and reports file counts, high-risk file types, and
-  accessibility per directory (`/get_network_monitored_directories`,
-  `/get_folder_watcher_paths`). These endpoints scan one level deep per
-  call rather than recursing through the whole tree, to keep response
-  times bounded even for large directories.
-- **Conditional startup scan** -- a combined scan (`/run_startup`) covering
-  monitored directories and running processes, with live progress reported
-  via `/api/conditional_startup/status` (files scanned, quarantined,
-  errors, process events, start/last-updated/last-run timestamps).
-  - Two optional, off-by-default steps can be enabled via environment
-    variables since they are expensive and destructive/slow by default:
-    - `AV_ENABLE_TEMP_CLEANUP=1` -- deletes all files under `%TEMP%`,
-      `%SYSTEMROOT%\Temp`, and `%USERPROFILE%\AppData\Local\Temp`.
-    - `AV_ENABLE_ROUTINE_MAINTENANCE=1` -- runs a much larger battery of
-      scans (YARA, ML, heuristic, signature, etc.) over critical system
-      directories including `C:\Windows\System32`.
-- **Quarantine** -- detected threats are encrypted (Fernet) and moved to
-  `%TEMP%\Defender_Quarantine`; manage/restore/delete via `/quarantine`,
-  `/quarantine/list`.
-- **File encryption/decryption** -- upload a file to encrypt or decrypt via
-  the dashboard or `/file_crypto`. Uploads are capped at 125MB.
+  plus heuristic C2-pattern detection.
+- **Folder watching** -- tracks configured directories and reports file
+  counts, high-risk file types, and accessibility.
+- **Conditional startup scan** -- a combined scan of monitored directories and
+  running processes with live progress reporting.
+  - Optional, off-by-default steps:
+    - `AV_ENABLE_TEMP_CLEANUP=1` -- deletes files under temp directories.
+    - `AV_ENABLE_ROUTINE_MAINTENANCE=1` -- runs a larger scan battery over
+      critical system directories.
+- **File encryption/decryption** -- upload a file to encrypt or decrypt
+  through the dashboard or `/file_crypto`; uploads are capped at 125MB.
 
 ## Known limitations
 
-- `data_analysis.py`'s `analyze_data()` (used by the quarantine/file-crypto
-  encryption path) can be configured to run verbose debug analysis
-  (hex-dumping file contents, plotting byte-frequency charts) on every
-  call. This is significantly slower and can affect stability on large
-  files; a lightweight version that skips this analysis is available in
-  the function's history if performance/stability is a priority over the
-  debug output.
-- This runs Flask's built-in development server (`app.run(...)`), which is
-  not intended for production use.
-- Several features (Windows Firewall blocking, secure in-memory key
-  storage, WMI-based checks) are Windows-only.
+- `quick_start.py` runs Flask's built-in development server, which is not
+  intended for production.
+- Several features (UAC elevation, Windows Firewall blocking, in-memory secure
+  key storage, WMI checks) are Windows-only.
