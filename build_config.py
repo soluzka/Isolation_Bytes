@@ -81,6 +81,14 @@ hidden_imports = [
     'pyssdeep',
     'ssdeep',
     'yara',
+    # Static-file malware classifier (security/detector.py, security/ember_vendor/,
+    # train_ember_classifier.py) -- both have compiled extensions PyInstaller
+    # doesn't reliably auto-detect.
+    'lief',
+    'lightgbm',
+    'lightgbm.basic',
+    'lightgbm.sklearn',
+    'pefile',
 ]
 
 # Path separator based on platform
@@ -156,7 +164,7 @@ def add_extension_binaries(module_names):
         logging.info(f'Added binary to PyInstaller args: {c}')
 
 # Add suspected compiled modules
-add_extension_binaries(['pyssdeep', 'ssdeep', 'yara'])
+add_extension_binaries(['pyssdeep', 'ssdeep', 'yara', 'lief', 'lightgbm'])
 
 # Add malware_signatures.txt file
 malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')
@@ -167,6 +175,18 @@ if os.path.exists(malware_signatures_file):
 scheduled_scan_state_file = os.path.join(base_dir, 'scheduled_scan_state.json')
 if os.path.exists(scheduled_scan_state_file):
     pyinstaller_args.append(f'--add-data={scheduled_scan_state_file}{sep}.')
+
+# Add trained malware classifier model files, if present (see
+# train_malware_classifier.py / train_ember_classifier.py). These aren't
+# committed to source control (regenerable), so they may not exist yet on a
+# given build machine -- in that case security/detector.py falls back to its
+# untrained placeholder model.
+models_dir = os.path.join(base_dir, 'models')
+for model_filename in ('file_malware_classifier.pkl', 'ember_malware_model.txt'):
+    model_path = os.path.join(models_dir, model_filename)
+    if os.path.exists(model_path):
+        pyinstaller_args.append(f'--add-data={model_path}{sep}models')
+        logging.info(f'Including trained model in build: {model_filename}')
 
 # Optional: Add non-entry-point .py files if needed
 for root, _, files in os.walk(base_dir):

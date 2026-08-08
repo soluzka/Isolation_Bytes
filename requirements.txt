@@ -113,3 +113,8 @@ pyssdeep>=1.0.0
 # 'ssdeep' package may require native build tools on Windows; use pyssdeep on Windows
 ssdeep>=3.4.2; platform_system!='Windows'
 setuptools>=68.0.0
+
+# Static-file malware classifier (security/detector.py, security/ember_vendor/,
+# train_ember_classifier.py, train_malware_classifier.py)
+lief>=0.14.0
+lightgbm>=4.0.0
