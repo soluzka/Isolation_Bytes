@@ -4,8 +4,8 @@
             "192.168.1.0/24"
         ],
         "services": [
-            "web",
-            "database"
+            "database",
+            "web"
         ],
         "ports": [
             5432,

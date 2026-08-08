@@ -111,10 +111,10 @@ if __name__ == "__main__":
     rules = compile_rules()
     
     if not rules:
-        print("\n❌ Failed to compile any YARA rules")
+        print("\n[FAIL] Failed to compile any YARA rules")
         sys.exit(1)
     
-    print(f"\n✅ Successfully compiled {len(rules)} YARA rules")
+    print(f"\n[OK] Successfully compiled {len(rules)} YARA rules")
     
     # Scan this script as a test
     test_file = __file__
@@ -122,10 +122,10 @@ if __name__ == "__main__":
     matches = scan_file(test_file, rules)
     
     if matches:
-        print(f"\n⚠️ Found {len(matches)} YARA matches in test file")
+        print(f"\n[WARNING] Found {len(matches)} YARA matches in test file")
         for match in matches:
             print(f"  - {getattr(match, 'rule', 'Unknown rule')}")
     else:
-        print("\n✅ No YARA matches found in test file (expected for non-malicious files)")
+        print("\n[OK] No YARA matches found in test file (expected for non-malicious files)")
     
     print("\nTest complete!")

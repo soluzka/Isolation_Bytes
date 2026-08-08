@@ -103,15 +103,33 @@ class FileScanCache:
             return {}
         try:
             with open(self.cache_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            logger.warning('Failed to load scan cache, starting fresh')
+                data = json.load(f)
+            if not isinstance(data, dict):
+                logger.warning('Scan cache is not a JSON object, starting fresh')
+                return {}
+            return data
+        except Exception as e:
+            logger.warning(f'Failed to load scan cache, starting fresh: {e}')
+            # Move the corrupt/truncated file aside so it won't keep breaking.
+            try:
+                backup = self.cache_path.with_suffix(
+                    f'.json.bak.{int(time.time())}'
+                )
+                self.cache_path.rename(backup)
+                logger.info(f'Backed up corrupt scan cache to {backup}')
+            except Exception:
+                pass
             return {}
 
     def _save(self):
         try:
-            with open(self.cache_path, 'w', encoding='utf-8') as f:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            # Write to a temp file first, then atomically replace the real one
+            # so a crash mid-write never leaves a truncated scan_cache.json.
+            tmp_path = self.cache_path.with_suffix('.json.tmp')
+            with open(tmp_path, 'w', encoding='utf-8') as f:
                 json.dump(self._cache, f, indent=2)
+            tmp_path.replace(self.cache_path)
         except Exception as e:
             logger.warning(f'Failed to save scan cache: {e}')
 

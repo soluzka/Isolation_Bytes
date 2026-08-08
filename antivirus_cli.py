@@ -100,17 +100,17 @@ def update_signatures():
 def scan_path(path):
     try:
         if not os.path.exists(path):
-            logging.error(f"Path not found: {path}")
+            print(f"Path not found: {path}")
             return
     except Exception as e:
         logging.error(f"Error accessing path {path}: {e}")
+        return
     if os.path.isfile(path):
         _, malware, msg = scan_file_for_viruses_with_test_flag(path)
         print(f"Scan result for {path}: {msg}")
         if malware:
-            quarantine_file(path)  # Quarantine the file
-            os.remove(path)  # Delete the original file after quarantining
-            print(f"[!] File {path} quarantined and deleted.")
+            if quarantine_file(path):
+                print(f"[!] File {path} quarantined and deleted.")
     elif os.path.isdir(path):
         for root, dirs, files in os.walk(path):
             for file in files:
@@ -128,22 +128,22 @@ def quarantine_file(filepath):
     if confirm != 'y':
         print("Quarantine cancelled by user.")
         logging.info(f"Quarantine cancelled by user for {filepath}")
-        return
+        return False
     try:
         os.makedirs(QUARANTINE_DIR, exist_ok=True)
     except Exception as e:
         logging.error(f"Error creating quarantine directory: {e}")
-        return
+        return False
     try:
         key = os.environ.get('FERNET_KEY')
         if not key:
             print('FERNET_KEY not set in environment.')
-            return
+            return False
         fernet = Fernet(key)
         if not os.path.isfile(filepath):
             print(f"File not found: {filepath}")
             logging.error(f"File not found for quarantine: {filepath}")
-            return
+            return False
         with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
             data = f.read()
         encrypted = fernet.encrypt(data)
@@ -152,11 +152,13 @@ def quarantine_file(filepath):
         os.remove(filepath)
         logging.warning(encrypt_message(f"Quarantined file: {filepath}"))
         print(f"[!] Infected file moved to quarantine (encrypted): {dest}")
+        return True
     except Exception as e:
         import traceback
         print(f"Failed to quarantine {filepath}: {e}")
         traceback.print_exc()
         logging.error(f"Failed to quarantine {filepath}: {e}")
+        return False
 
 def list_quarantine():
     try:
@@ -199,7 +201,8 @@ def release_from_quarantine(filename, dest_dir):
             return
         with open(get_resource_path(os.path.join(dest)), 'wb') as f:
             f.write(decrypted)
-        print(f"Released {out_name} to {dest_dir}")
+        os.remove(src)
+        print(f"Released {out_name} to {dest_dir} and removed {filename} from quarantine")
     else:
         print(f"File not found in quarantine: {filename}")
 

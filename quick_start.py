@@ -1,5 +1,6 @@
 import os
 import sys
+import ctypes
 import time
 import logging
 from logging.handlers import RotatingFileHandler
@@ -24,6 +25,30 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 # anything that depends on FERNET_KEY being set (e.g. file_crypto.py) would
 # fail with EnvironmentError even though the key is present in .env.
 from dotenv import load_dotenv
+
+
+def _request_admin_elevation():
+    """Prompt for UAC elevation on Windows and relaunch if not running as admin."""
+    if sys.platform != 'win32':
+        return
+    try:
+        is_admin = ctypes.windll.shell32.IsUserAnAdmin()
+    except Exception:
+        return
+    if not is_admin:
+        script = os.path.abspath(sys.argv[0])
+        params = [script] + sys.argv[1:]
+        params = ' '.join(['"%s"' % arg if ' ' in arg else arg for arg in params])
+        ret = ctypes.windll.shell32.ShellExecuteW(
+            None, 'runas', sys.executable, params, None, 1
+        )
+        if ret <= 32:
+            print('Administrator privileges are required to run this application.')
+            sys.exit(1)
+        sys.exit(0)
+
+
+_request_admin_elevation()
 load_dotenv()
 
 # Import DNS server functionality
