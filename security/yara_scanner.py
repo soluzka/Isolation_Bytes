@@ -12,6 +12,63 @@ def get_basedir():
     base_dir = os.path.dirname(security_dir)
     return base_dir
 
+# Default values for YARA external variables used by some rules (e.g.
+# generic_anomalies.yar's filename/extension/filetype based conditions).
+# Real per-file values are supplied at match time in scan_file_with_yara().
+_YARA_EXTERNALS_DEFAULTS = {
+    'extension': '',
+    'filename': '',
+    'filepath': '',
+    'filetype': '',
+}
+
+def _classify_filetype(filepath):
+    """Best-effort filetype string for YARA external variables.
+
+    Tries to identify the file by magic bytes first, then falls back to the
+    file extension. Returns an empty string if the type cannot be determined.
+    """
+    ext = os.path.splitext(filepath)[1].lower()
+    ext_type_map = {
+        '.vbs': 'VBS', '.wsf': 'VBS',
+        '.php': 'PHP',
+        '.jsp': 'JSP',
+        '.py': 'Python', '.pyc': 'Python',
+        '.asp': 'ASP', '.aspx': 'ASP',
+        '.bat': 'BATCH', '.cmd': 'BATCH',
+        '.rtf': 'RTF',
+        '.mdmp': 'MDMP',
+        '.ps1': 'PowerShell', '.psm1': 'PowerShell', '.psd1': 'PowerShell',
+    }
+    if ext in ext_type_map:
+        return ext_type_map[ext]
+
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(8)
+    except (OSError, IOError):
+        return ''
+
+    if not header:
+        return ''
+
+    # PE / Windows executable
+    if header[:2] == b'MZ':
+        return 'EXE'
+    # ELF
+    if header[:4] == b'\x7fELF':
+        return 'ELF'
+    # Mach-O (little- and big-endian, 32- and 64-bit) and fat binaries
+    if header[:4] in (b'\xcf\xfa\xed\xfe', b'\xcf\xfa\xed\xff',
+                      b'\xfe\xed\xfa\xcf', b'\xfe\xed\xfa\xff',
+                      b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
+        return 'MACH-O'
+    # PDF
+    if header[:4] == b'%PDF':
+        return 'PDF'
+
+    return ''
+
 def load_yara_rules():
     """Load YARA rules from the rules directory structure or create basic rules if none exist."""
     # Create a fallback rule to ensure we have at least one rule available
@@ -108,11 +165,11 @@ def load_yara_rules():
                 try:
                     # First attempt with includes (which might reference other files).
                     # externals declares variables some rules (e.g. generic_anomalies.yar's
-                    # webshell-by-extension rules) reference in their condition but that
-                    # aren't YARA builtins -- the real per-file value is supplied at match
-                    # time in scan_file_with_yara(); this default just lets them compile.
+                    # extension/filename/filepath/filetype conditions) reference but that
+                    # aren't YARA builtins -- the real per-file values are supplied at match
+                    # time in scan_file_with_yara(); these defaults just let them compile.
                     rule = yara_module.compile(filepath=rule_path, includes=True, error_on_warning=False,
-                                                externals={'extension': ''})
+                                                externals=_YARA_EXTERNALS_DEFAULTS)
                     compiled_rules.append(rule)
                     successful_rules.append(file_name)
                     logging.info(f"Successfully loaded YARA rule: {file_name}")
@@ -121,7 +178,7 @@ def load_yara_rules():
                     logging.warning(f"Failed to load YARA rule with includes, trying without: {file_name}. Error: {include_error}")
                     try:
                         rule = yara_module.compile(filepath=rule_path, includes=False, error_on_warning=False,
-                                                    externals={'extension': ''})
+                                                    externals=_YARA_EXTERNALS_DEFAULTS)
                         compiled_rules.append(rule)
                         successful_rules.append(file_name)
                         logging.info(f"Successfully loaded YARA rule (without includes): {file_name}")
@@ -152,49 +209,6 @@ def load_yara_rules():
         if fallback_rule:
             return [fallback_rule]
         return []
-
-    # If normal loading failed, try the index file
-    try:
-        index_path = os.path.join(rules_dir, 'yara_rules_index.yar')
-        if os.path.exists(index_path):
-            try:
-                # Load rules from index file
-                rules = yara_module.compile(filepath=index_path, includes=True)
-                logging.info(f"Loaded YARA rules from index file: {index_path}")
-                return [rules]
-            except YaraError as ye:
-                logging.error(f"Error loading YARA rules from index: {str(ye)}")
-            
-        # If index fails or doesn't exist, try to load individual rules again with different options
-        rules = []
-        for root, _, files in os.walk(rules_dir):
-            for file in files:
-                if file.endswith(('.yar', '.yara')) and file != 'yara_rules_index.yar':
-                    rule_path = os.path.join(root, file)
-                    try:
-                        # Skip known problematic rules
-                        if 'generic_anomalies.yar' in file or 'CVE-2010-0805.yar' in file:
-                            logging.info(f"Skipping known problematic rule file: {file}")
-                            continue
-                            
-                        rule = yara_module.compile(filepath=rule_path, includes=True)
-                        rules.append(rule)
-                        logging.info(f"Loaded YARA rules from {rule_path}")
-                    except YaraError as ye:
-                        logging.error(f"Error loading YARA rules from {rule_path}: {str(ye)}")
-                        continue
-        
-        if rules:
-            return rules
-    except Exception as e:
-        logging.error(f"Error in fallback YARA rule loading: {str(e)}")
-        
-    # If all else fails, return the fallback rule or empty list
-    logging.warning("No valid YARA rules could be loaded")
-    if fallback_rule:
-        logging.info("Using fallback rule due to error loading regular rules")
-        return [fallback_rule]
-    return []
 
 def scan_file_with_yara(filepath, timeout=10):
     """
@@ -240,11 +254,19 @@ def scan_file_with_yara(filepath, timeout=10):
         timeouts = 0
         errors = 0
         
+        # Build per-file external variables for rules that depend on them
+        externals = {
+            'extension': os.path.splitext(filepath)[1].lower(),
+            'filename': os.path.basename(filepath),
+            'filepath': filepath,
+            'filetype': _classify_filetype(filepath),
+        }
+        
         # Apply each rule with a timeout
         for rule_index, rule in enumerate(rules):
             try:
-                # Apply the rule with timeout
-                matches = rule.match(filepath, timeout=timeout)
+                # Apply the rule with timeout and per-file externals
+                matches = rule.match(filepath, timeout=timeout, externals=externals)
                 
                 # Process any matches found
                 if matches:
