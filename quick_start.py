@@ -31,12 +31,19 @@ from dns_server import start_dns_server
 # Fernet key provider for quarantine encryption
 from data_analysis import analyze_data
 
+# Persistent scan cache and safe quarantine helper
+from security.scan_cache import FileScanCache, safe_quarantine
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('antivirus')
+
+# Persistent scan cache: avoid rescanning unchanged files on every background
+# pass and gives the operator a hash -> verdict record.
+scan_cache = FileScanCache('data/scan_cache.json')
 
 # Allow running the ssdeep runner as a one-off via command line:
 #   python quick_start.py --ssdeep-run --rules <rules> --dir <dir>
@@ -1826,12 +1833,14 @@ def run_scheduled_scans():
             # Run YARA scan on all files in monitored directories
             try:
                 from security.yara_scanner import scan_file_with_yara
+                from security.detector import ember_detector, detector
             except ImportError:
-                logger.warning("YARA scanner not available, skipping YARA scan")
+                logger.warning("YARA scanner or detector not available, skipping scheduled scan")
                 scan_file_with_yara = None
             
             # Combine monitored directories from both sources
             monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
+            quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
             
             for scan_dir in monitored_dirs:
                 if not os.path.exists(scan_dir):
@@ -1849,38 +1858,70 @@ def run_scheduled_scans():
                             continue
                         
                         try:
-                            if scan_file_with_yara:
-                                yara_matches = scan_file_with_yara(file_path)
+                            # Cache: avoid rescanning unchanged files.  This also
+                            # gives the operator a persistent hash -> verdict record.
+                            cached = scan_cache.get(file_path)
+                            if cached is not None:
+                                yara_matches = cached.get('yara_matches', [])
                                 if yara_matches:
-                                    logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
-                                    
-                                    # Handle detected threats
+                                    logger.debug(f"Cached YARA matches ({len(yara_matches)}) for {file_path}")
+                                continue
+                            
+                            if not scan_file_with_yara:
+                                continue
+                            
+                            yara_matches = scan_file_with_yara(file_path)
+                            cache_entry = {
+                                'yara_matches': [getattr(m, 'rule', str(m)) for m in yara_matches],
+                                'quarantined': False,
+                                'reported': False,
+                            }
+                            
+                            if yara_matches:
+                                logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
+                                
+                                # Get a second opinion from the trained classifier(s)
+                                ml_score = None
+                                if ember_detector.available:
+                                    ml_score = ember_detector.score(file_path)
+                                    cache_entry['ember_score'] = ml_score
+                                if ml_score is None and detector is not None:
+                                    try:
+                                        ml_score = detector.get_anomaly_score(file_path)
+                                        cache_entry['legacy_ml_score'] = ml_score
+                                    except Exception:
+                                        pass
+                                
+                                # Quarantine only when the ML model (EMBER or legacy)
+                                # agrees that the file is malicious.  Pure YARA matches
+                                # from broad rules are logged but not auto-quarantined
+                                # to avoid flooding the quarantine with false positives
+                                # (e.g. libcef.dll).
+                                should_quarantine = False
+                                if ml_score is not None:
+                                    if ember_detector.available and ml_score >= 0.85:
+                                        should_quarantine = True
+                                        cache_entry['quarantine_reason'] = 'ember'
+                                    elif not ember_detector.available and ml_score >= 0.5:
+                                        should_quarantine = True
+                                        cache_entry['quarantine_reason'] = 'legacy'
+                                
+                                if should_quarantine:
                                     for match in yara_matches:
-                                        logger.warning(f"Threat detected: {file_path} - Rule: {match.rule}")
-                                        
-                                        # Create quarantine directory
-                                        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
-                                        os.makedirs(quarantine_dir, exist_ok=True)
-                                        
-                                        try:
-                                            base_filename = os.path.basename(file_path)
-                                            base_name, ext = os.path.splitext(base_filename)
-                                            encrypted_filename = f"{base_name}{ext}.enc"
-                                            quarantine_path = os.path.join(quarantine_dir, encrypted_filename)
-                                            
-                                            # Add timestamp to prevent collisions
-                                            if os.path.exists(quarantine_path):
-                                                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                                                quarantine_path = os.path.join(quarantine_dir, f"{base_name}_{timestamp}{ext}.enc")
-                                            
-                                            # Encrypt and quarantine
-                                            if encrypt_file(file_path, quarantine_path):
-                                                os.remove(file_path)
-                                                logger.warning(f"Threat quarantined and deleted: {file_path}")
-                                            else:
-                                                logger.error(f"Failed to encrypt threat: {file_path}")
-                                        except Exception as quar_error:
-                                            logger.error(f"Error quarantining threat {file_path}: {quar_error}")
+                                        logger.warning(f"Threat detected: {file_path} - Rule: {getattr(match, 'rule', match)}")
+                                    
+                                    success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
+                                    logger.warning(message)
+                                    cache_entry['quarantined'] = success
+                                else:
+                                    cache_entry['reported'] = True
+                                    for match in yara_matches:
+                                        logger.warning(f"YARA match (report-only): {file_path} - Rule: {getattr(match, 'rule', match)}")
+                                    if ml_score is not None:
+                                        logger.info(f"  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}")
+                            
+                            scan_cache.set(file_path, cache_entry)
+                        
                         except Exception as e:
                             logger.error(f"Error scanning {file_path}: {str(e)}")
             
