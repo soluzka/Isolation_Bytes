@@ -1,0 +1,13 @@
+{
+  "features": {
+    "file_encryption_rate": 6955.419235477389,
+    "file_deletion_rate": 350.3181281648336,
+    "registry_changes": 25,
+    "network_connections": 15,
+    "process_creation": 0,
+    "ransom_note_detected": 0,
+    "crypto_operations": 0,
+    "entropy_level": 1.6720398555520153
+  },
+  "label": 1
+}

@@ -1,0 +1,1171 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>YARA Scanner</title>
+    <script src="{{ url_for('static', filename='network_data_utils.js') }}"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+        }
+        .card {
+            background-color: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], input[type="file"] {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        /* Subdirectories styling */
+        .subdirectories-container {
+            margin-top: 8px;
+            margin-bottom: 8px;
+            width: 100%;
+        }
+        
+        .toggle-subdirs {
+            background-color: #f0f0f0;
+            color: #333;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            margin-bottom: 5px;
+            transition: background-color 0.2s;
+        }
+        
+        .toggle-subdirs:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .subdirectories-list {
+            list-style-type: none;
+            padding-left: 15px;
+            margin-top: 5px;
+            font-size: 0.85em;
+            max-height: 200px;
+            overflow-y: auto;
+            background-color: #f9f9f9;
+            border-left: 2px solid #ddd;
+            padding-top: 5px;
+            padding-bottom: 5px;
+        }
+        
+        .subdirectories-list li {
+            padding: 3px 5px;
+            margin-bottom: 3px;
+            border-bottom: 1px dotted #eee;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .folder-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        .folder-list li {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .alert {
+            padding: 15px;
+            background-color: #f44336;
+            color: white;
+            margin-bottom: 15px;
+            border-radius: 3px;
+        }
+        .high-risk-files {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        /* Styles for all monitored paths section */
+        .all-monitored-paths {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #eee;
+            margin-bottom: 20px;
+        }
+        
+        .toggle-all-paths {
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+        
+        .toggle-all-paths:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .all-paths-list {
+            list-style-type: none;
+            padding-left: 10px;
+            margin-top: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            border-left: 2px solid #ddd;
+        }
+        
+        .all-paths-list li {
+            padding: 3px 5px;
+            margin-bottom: 3px;
+            border-bottom: 1px dotted #eee;
+            font-size: 0.9em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .primary-directories-list {
+            list-style-type: none;
+            padding-left: 0;
+        }
+        
+        .directories-stats {
+            margin-bottom: 10px;
+            font-size: 0.9em;
+            color: #555;
+            background-color: #f0f0f0;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        .file-count {
+            color: #3498db;
+        }
+        .subdir-count {
+            color: #9b59b6;
+        }
+        .matches-count {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .directory-stats-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-top: 15px;
+        }
+        .directory-stat-card {
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            padding: 12px;
+            border-left: 3px solid #3498db;
+            width: calc(50% - 15px);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .directory-stat-card h4 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            color: #2c3e50;
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .stat-details {
+            font-size: 13px;
+        }
+        .stat-details p {
+            margin: 5px 0;
+        }
+        .success {
+            background-color: #4CAF50;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+        .tab {
+            overflow: hidden;
+            border: 1px solid #ccc;
+            background-color: #f1f1f1;
+            border-radius: 3px 3px 0 0;
+        }
+        .tab button {
+            background-color: inherit;
+            float: left;
+            border: none;
+            outline: none;
+            cursor: pointer;
+            padding: 14px 16px;
+            transition: 0.3s;
+            color: #333;
+        }
+        .tab button:hover {
+            background-color: #ddd;
+        }
+        .tab button.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .tabcontent {
+            display: none;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-top: none;
+            border-radius: 0 0 3px 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>YARA Scanner</h1>
+        
+        <div class="card">
+            <h2>YARA Rules Status</h2>
+            <p>Rules Available: <strong>{{ rules_info.available }}</strong></p>
+            <p>Rules Count: <strong>{{ rules_info.count }}</strong></p>
+        </div>
+        
+        <div class="tab">
+            <button class="tablinks active" id="fileScanTab">File Scan</button>
+            <button class="tablinks" id="monitoredFoldersTab">Monitored Folders</button>
+            <button class="tablinks" id="networkMonitorTab">Network Monitoring</button>
+            <button class="tablinks" id="quarantineTab">Quarantine</button>
+            <button class="tablinks" id="mainDashboardTab">Main Dashboard</button>
+            <button class="tablinks" id="threatHandlingTab">Threat Handling</button>
+        </div>
+        
+        <div id="FileScan" class="tabcontent" style="display: block;">
+            <h2>Scan File</h2>
+            <form id="fileScanForm">
+                <div class="form-group">
+                    <label for="file">Select File:</label>
+                    <input type="file" id="file" name="file" required>
+                </div>
+                <button type="submit">Scan File</button>
+            </form>
+        </div>
+        
+        <div id="FolderScan" class="tabcontent">
+            <h2>Scan Folder</h2>
+            <form id="folderScanForm">
+                <div class="form-group">
+                    <label for="folder_path">Folder Path:</label>
+                    <input type="text" id="folder_path" name="folder_path" required>
+                </div>
+                <button type="submit">Scan Folder</button>
+            </form>
+        </div>
+        
+        <div id="MonitoredFolders" class="tabcontent">
+            <h2>Monitored Folders</h2>
+            <p>Manage folders that are monitored for malware.</p>
+            
+            <h3>Current Monitored Folders</h3>
+            <div id="foldersLoading">Loading monitored folders...</div>
+            <ul id="folderList">
+                {% for folder in monitored_directories %}
+                <li>
+                    {{ folder }}
+                </li>
+                {% endfor %}
+            </ul>
+            
+            <h3>Add New Folder</h3>
+            <form id="addFolderForm">
+                <div class="form-group">
+                    <label for="folderPath">Folder Path:</label>
+                    <input type="text" id="folderPath" name="folderPath" required placeholder="C:\path\to\folder">
+                </div>
+                <button type="submit">Add Folder</button>
+            </form>
+            
+            <h3>Scan All Monitored Folders</h3>
+            <button id="scanAllBtn">Scan All Folders</button>
+        </div>
+        
+        <div id="Quarantine" class="tabcontent">
+            <h2>Quarantine Management</h2>
+            <p>View and manage files that have been quarantined due to YARA rule matches.</p>
+            
+            <div class="card">
+                <a href="/quarantine" class="dashboard-button blue">Open Quarantine Manager</a>
+                <p>Manage files that have been quarantined due to detection by YARA rules.</p>
+                <p>From the quarantine manager, you can:</p>
+                <ul>
+                    <li>View details about each quarantined file</li>
+                    <li>Restore files to their original location (use with caution)</li>
+                    <li>Permanently delete quarantined files</li>
+                </ul>
+            </div>
+        </div>
+        
+        <div id="MainDashboard" class="tabcontent">
+            <h2>Main Antivirus Dashboard</h2>
+            <p>Access the main antivirus features directly from this integrated dashboard:</p>
+            
+            <div class="card">
+                <h3>Protection Controls</h3>
+                <div class="button-group">
+                    <a href="/" target="_blank" class="dashboard-button">Open Full Dashboard</a>
+                    <button type="button" id="start_realtime_btn" class="dashboard-button green">Start Real-Time Protection</button>
+                    <button type="button" id="stop_realtime_btn" class="dashboard-button red" style="opacity:0.6;cursor:not-allowed;" disabled title="Disabling real-time protection is not allowed for your security.">Stop Real-Time Protection</button>
+                    <button type="button" id="start_folder_watcher_btn" class="dashboard-button green">Start Folder Monitoring</button>
+                </div>
+                <p style="color:#888;font-size:0.95em;margin-top:0.5em;">For your security, real-time protection cannot be disabled. This ensures continuous protection against threats.</p>
+            </div>
+        </div>
+        
+        <div id="ThreatHandling" class="tabcontent">
+            <h2>Threat Handling</h2>
+            <div class="card">
+                <h3>How Threats Are Handled</h3>
+                <p>When the YARA scanner detects a potential threat, the system now takes these actions:</p>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                    <h4>High-Risk Threats</h4>
+                    <ol>
+                        <li>A copy of the file is saved to the quarantine folder for forensic analysis</li>
+                        <li>The original file is immediately <strong>deleted</strong> from your system</li>
+                        <li>A detailed log entry is created with information about the threat</li>
+                    </ol>
+                </div>
+                
+                <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                    <h4>Moderate-Risk Threats</h4>
+                    <ol>
+                        <li>The file is <strong>moved</strong> to the quarantine folder</li>
+                        <li>The original location is cleared</li>
+                        <li>The threat remains available for review or restoration if needed</li>
+                    </ol>
+                </div>
+                
+                <h4>Quarantine Location</h4>
+                <p>All quarantined files are stored in:</p>
+                <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0;">%USERPROFILE%\AppData\Local\Temp\Defender_Quarantine</code>
+                
+                <div style="background-color: #d1ecf1; padding: 10px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #0c5460;">
+                    <p><strong>Enhanced Security:</strong> All quarantined files are now encrypted with a .enc extension. This provides an extra layer of protection to prevent accidental execution of malicious code.</p>
+                </div>
+                
+                <div style="background-color: #fff3cd; padding: 10px; border-radius: 5px; margin: 15px 0;">
+                    <p><strong>Warning:</strong> Although quarantined files are encrypted, treat the quarantine directory with caution and do not attempt to decrypt files unless necessary for recovery.</p>
+                </div>
+                
+                <h4>Why Quarantine Instead of Direct Deletion?</h4>
+                <p>Quarantine provides several benefits:</p>
+                <ul>
+                    <li>Creates a backup in case of false positives</li>
+                    <li>Preserves evidence for security analysis</li>
+                    <li>Allows for further inspection of suspicious files</li>
+                    <li>Enables restoration if a legitimate file was incorrectly flagged</li>
+                </ul>
+                
+                <h4>Can I Permanently Delete Quarantined Files?</h4>
+                <p>Yes, you can manually delete files from the quarantine folder if you're certain they're malicious and no longer needed for analysis.</p>
+            </div>
+        </div>
+<script>
+document.getElementById('start_realtime_btn').onclick = async function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Starting...';
+    try {
+        const response = await fetch('/start_realtime', {method: 'POST'});
+        const text = await response.text();
+        let data;
+        try {
+            data = JSON.parse(text);
+        } catch (parseErr) {
+            alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
+            btn.disabled = false;
+            btn.textContent = 'Start Real-Time Protection';
+            return;
+        }
+        let msg = '';
+        if (data.status === 'success') {
+            msg = data.message || 'Real-Time Protection started.';
+            // Optionally update a status span if present
+        } else if (data.status === 'warning') {
+            msg = data.message || 'Real-Time Protection is already running.';
+        } else {
+            msg = data.message || data.error || 'Unknown error';
+        }
+        alert(msg);
+    } catch (error) {
+        alert('Error: ' + error);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Start Real-Time Protection';
+    }
+};
+document.getElementById('stop_realtime_btn').onclick = function() {
+    alert('Disabling real-time protection is not allowed for your security.');
+};
+document.getElementById('start_folder_watcher_btn').onclick = function() {
+                    fetch('/toggle_folder_watcher/start', {method: 'POST'})
+                        .then(async response => {
+                            let text = await response.text();
+                            let data;
+                            try {
+                                data = JSON.parse(text);
+                            } catch (e) {
+                                alert('Unexpected server response: ' + text);
+                                return;
+                            }
+                            if (data.status === 'success') {
+                                alert(data.message || 'Folder Watcher started.');
+                                location.reload();
+                            } else {
+                                alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                            }
+                        })
+                        .catch(error => alert('Error: ' + error));
+                };
+                </script>
+            </div>
+            
+            <div class="card">
+                <h3>Security Scans</h3>
+                <div class="button-group">
+                    <a href="/scan" target="_blank" class="dashboard-button blue">Run Full System Scan</a>
+                    <a href="/scan_all_processes" target="_blank" class="dashboard-button blue">Scan Running Processes</a>
+                </div>
+            </div>
+            
+            <div class="card">
+                <h3>Security Reports</h3>
+                <div class="button-group">
+                    <a href="/quarantine" target="_blank" class="dashboard-button orange">Quarantine Manager</a>
+                    <a href="/antivirus_log" target="_blank" class="dashboard-button orange">View Security Logs</a>
+                    <a href="/c2_detector_report" target="_blank" class="dashboard-button orange">Network Threat Report</a>
+                </div>
+            </div>
+            
+            <style>
+                /* Alert styles for feedback messages */
+                .alert {
+                    padding: 12px 15px;
+                    margin-bottom: 15px;
+                    border-radius: 4px;
+                    font-weight: 500;
+                }
+                .alert.error {
+                    color: #721c24;
+                    background-color: #f8d7da;
+                    border: 1px solid #f5c6cb;
+                }
+                .alert.success {
+                    color: #155724;
+                    background-color: #d4edda;
+                    border: 1px solid #c3e6cb;
+                }
+                .alert.info {
+                    color: #0c5460;
+                    background-color: #d1ecf1;
+                    border: 1px solid #bee5eb;
+                }
+                
+                /* Button group styles */
+                .button-group {
+                    display: flex;
+                    flex-wrap: wrap;
+                    gap: 10px;
+                    margin-top: 10px;
+                }
+                .dashboard-button {
+                    display: inline-block;
+                    padding: 10px 15px;
+                    background-color: #2c3e50;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 4px;
+                    font-weight: bold;
+                    transition: background-color 0.3s;
+                }
+                .dashboard-button:hover {
+                    background-color: #34495e;
+                }
+                .dashboard-button.green {
+                    background-color: #27ae60;
+                }
+                .dashboard-button.green:hover {
+                    background-color: #2ecc71;
+                }
+                .dashboard-button.blue {
+                    background-color: #2980b9;
+                }
+                .dashboard-button.blue:hover {
+                    background-color: #3498db;
+                }
+                .dashboard-button.orange {
+                    background-color: #d35400;
+                }
+                .dashboard-button.orange:hover {
+                    background-color: #e67e22;
+                }
+            </style>
+        </div>
+        
+        <div class="loading" id="loadingIndicator">
+            <p>Scanning... Please wait.</p>
+        </div>
+        
+        <div class="results" id="results"></div>
+    </div>
+    
+    <!-- Add Network Monitoring Tab Content -->
+    <div id="NetworkMonitor" class="tabcontent">
+        <h2>Network Monitoring</h2>
+        <p>Monitor network traffic for suspicious activity and potential threats.</p>
+
+        <div class="card">
+            <h3>Monitored Network Directories</h3>
+            <div id="monitored_directories">
+                <p>Loading monitored directories...</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>Traffic Statistics</h3>
+            <div id="traffic_stats">
+                <p>Network monitoring must be enabled to view traffic statistics.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Tab switching function without using inline onclick
+        function openTab(tabElem, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            tabElem.className += " active";
+        }
+        
+        document.getElementById("fileScanForm").addEventListener("submit", function(e) {
+            e.preventDefault();
+            var formData = new FormData();
+            formData.append('scan_type', 'file');
+            formData.append('file', document.getElementById('file').files[0]);
+            
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            fetch('/scan', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+                document.getElementById('loadingIndicator').style.display = 'none';
+            })
+            .catch(error => {
+                document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                document.getElementById('loadingIndicator').style.display = 'none';
+            });
+        });
+        
+        document.getElementById("folderScanForm").addEventListener("submit", function(e) {
+            e.preventDefault();
+            var formData = new FormData();
+            formData.append('scan_type', 'folder');
+            formData.append('folder_path', document.getElementById('folder_path').value);
+            
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            fetch('/scan', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+                document.getElementById('loadingIndicator').style.display = 'none';
+            })
+            .catch(error => {
+                document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                document.getElementById('loadingIndicator').style.display = 'none';
+            });
+        });
+        
+        // Load monitored directories from API
+        function loadMonitoredDirectories() {
+            const foldersList = document.getElementById('folderList');
+            const networkStatusElement = document.getElementById('networkMonitorStatus');
+            const loadingIndicator = document.getElementById('foldersLoading');
+            
+            // Show loading indicator
+            if (loadingIndicator) {
+                loadingIndicator.style.display = 'block';
+            }
+            
+            // Clear current list
+            if (foldersList) {
+                foldersList.innerHTML = '';
+            }
+            
+            // Fetch monitored directories from both network monitor and folder watcher.
+            // fetchJsonSafe() never rejects, and the normalizers always return a
+            // consistent shape whether the request succeeded or failed, so the
+            // rendering code below never has to guess (or crash on) missing fields.
+            const networkMonitorPromise = NetworkDataUtils.fetchJsonSafe('/get_network_monitored_directories')
+                .then(NetworkDataUtils.normalizeNetworkMonitorData);
+
+            const folderWatcherPromise = NetworkDataUtils.fetchJsonSafe('/get_folder_watcher_paths')
+                .then(NetworkDataUtils.normalizeFolderWatcherData);
+
+            Promise.all([networkMonitorPromise, folderWatcherPromise])
+            .then(([networkData, folderData]) => {
+                // Hide loading indicator
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+                
+                // Display network monitor status
+                if (networkStatusElement) {
+                    const status = networkData.monitoring_status.enabled ? 'ENABLED' : 'DISABLED';
+                    networkStatusElement.innerHTML = `<strong>Network Monitor Status:</strong> <span class="${status === 'ENABLED' ? 'enabled' : 'disabled'}">${status}</span>`;
+                    networkStatusElement.innerHTML += `<br><strong>Last Scan:</strong> ${networkData.monitoring_status.last_scan}`;
+                    networkStatusElement.innerHTML += `<br><strong>Total Monitored Directories:</strong> ${networkData.monitoring_status.total_directories}`;
+                    if (networkData.error) {
+                        networkStatusElement.innerHTML += `<br><span class="disabled">Network monitor data unavailable: ${networkData.error}</span>`;
+                    }
+                    if (folderData.error) {
+                        networkStatusElement.innerHTML += `<br><span class="disabled">Folder watcher data unavailable: ${folderData.error}</span>`;
+                    }
+                }
+                
+                // Combine directories from both sources. Use folderData.monitored_paths
+                // (plain path strings) rather than folderData.paths, which holds
+                // detailed {path, exists, accessible, ...} objects, not strings.
+                const allDirectories = new Set([...networkData.monitored_directories, ...folderData.monitored_paths]);
+                
+                // First, add a section for ALL monitored paths (root + subdirectories)
+                if (foldersList) {
+                    // Create a container for all monitored paths
+                    const allPathsSection = document.createElement('div');
+                    allPathsSection.className = 'all-monitored-paths';
+                    const allPathsTitle = document.createElement('h4');
+                    allPathsTitle.textContent = 'All Monitored Paths';
+                    allPathsSection.appendChild(allPathsTitle);
+                    
+                    // Create statistics for directories
+                    const statsDiv = document.createElement('div');
+                    statsDiv.className = 'directories-stats';
+                    statsDiv.innerHTML = `
+                        <p><strong>Network Monitor:</strong> ${networkData.monitored_directories.length} directories</p>
+                        <p><strong>Folder Watcher:</strong> ${folderData.monitored_paths.length} directories</p>
+                        <p><strong>Combined Total:</strong> ${allDirectories.size} unique directories</p>
+                    `;
+                    allPathsSection.appendChild(statsDiv);
+                    
+                    // Add toggle button for all paths
+                    const toggleBtn = document.createElement('button');
+                    toggleBtn.className = 'toggle-all-paths';
+                    toggleBtn.innerText = 'Show All Monitored Paths';
+                    toggleBtn.onclick = function(e) {
+                        e.preventDefault();
+                        const pathsList = this.nextElementSibling;
+                        if (pathsList.style.display === 'none' || !pathsList.style.display) {
+                            pathsList.style.display = 'block';
+                            this.innerText = 'Hide All Monitored Paths';
+                        } else {
+                            pathsList.style.display = 'none';
+                            this.innerText = 'Show All Monitored Paths';
+                        }
+                    };
+                    allPathsSection.appendChild(toggleBtn);
+                    
+                    // Create list for all paths
+                    const allPathsList = document.createElement('ul');
+                    allPathsList.className = 'all-paths-list';
+                    allPathsList.style.display = 'none';
+                    
+                    // Sort all directories for easier readability
+                    const sortedPaths = Array.from(allDirectories).sort();
+                    sortedPaths.forEach(path => {
+                        const pathItem = document.createElement('li');
+                        pathItem.innerText = path;
+                        allPathsList.appendChild(pathItem);
+                    });
+                    
+                    allPathsSection.appendChild(allPathsList);
+                    foldersList.appendChild(allPathsSection);
+                    
+                    // Add a separator
+                    const separator = document.createElement('hr');
+                    foldersList.appendChild(separator);
+                    
+                    // Now add the regular directory list
+                    const regularListTitle = document.createElement('h4');
+                    regularListTitle.textContent = 'Primary Monitored Directories';
+                    foldersList.appendChild(regularListTitle);
+                    
+                    // Create the list for primary directories
+                    const primaryDirsList = document.createElement('ul');
+                    primaryDirsList.className = 'primary-directories-list';
+                    
+                    // Display directories
+                    if (allDirectories.size === 0) {
+                        primaryDirsList.innerHTML = '<li>No monitored directories found</li>';
+                    } else {
+                        // Convert Set back to array for iteration
+                        Array.from(allDirectories).forEach(dir => {
+                            const li = document.createElement('li');
+                            
+                            // Check if this directory has status info from network monitor
+                            const networkDirInfo = networkData.monitoring_status.directories.find(d => d.path === dir);
+                            
+                            // Create directory entry with status indicator
+                            if (networkDirInfo) {
+                                const statusClass = networkDirInfo.exists && networkDirInfo.accessible ? 'directory-active' : 'directory-inactive';
+                                const statusIcon = networkDirInfo.exists && networkDirInfo.accessible ? '✓' : '⚠️';
+                                
+                                li.innerHTML = `<span class="${statusClass}">${statusIcon}</span> ${dir}`;
+                                
+                                // Add file and risk info if available
+                                if (networkDirInfo.exists && networkDirInfo.accessible) {
+                                    const infoDiv = document.createElement('div');
+                                    infoDiv.className = 'directory-details';
+                                    infoDiv.innerHTML = `
+                                        <span class="file-count">Files: ${networkDirInfo.file_count || 0}</span>
+                                        ${networkDirInfo.subdirectory_count ? `<span class="subdir-count">Subdirectories: ${networkDirInfo.subdirectory_count}</span>` : ''}
+                                        ${networkDirInfo.high_risk_files > 0 ? `<span class="high-risk-files">High-risk files: ${networkDirInfo.high_risk_files}</span>` : ''}
+                                    `;
+                                    li.appendChild(infoDiv);
+                                }
+                                
+                                primaryDirsList.appendChild(li);
+                            } else {
+                                // Basic display for folder watcher directories
+                                li.textContent = dir;
+                                primaryDirsList.appendChild(li);
+                            }
+                        });
+                        
+                        // Add the primary directories list to the foldersList
+                        foldersList.appendChild(primaryDirsList);
+                    }
+                } else {
+                    console.error('Folders list element not found');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching monitored directories:', error);
+                if (loadingIndicator) {
+                    loadingIndicator.style.display = 'none';
+                }
+                if (foldersList) {
+                    foldersList.innerHTML = `<li>Error: ${error.message}</li>`;
+                }
+            });
+        }
+        
+        // Folder removal functionality has been disabled for security reasons
+        
+        // Load monitored folders when the tab is clicked
+        // Initialize tab event listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            // Tab switching event listeners
+            document.getElementById('fileScanTab').addEventListener('click', function() {
+                openTab(this, 'FileScan');
+            });
+            
+            document.getElementById('monitoredFoldersTab').addEventListener('click', function() {
+                openTab(this, 'MonitoredFolders');
+                loadMonitoredDirectories();
+            });
+            
+            document.getElementById('networkMonitorTab').addEventListener('click', function() {
+                openTab(this, 'NetworkMonitor');
+                fetchNetworkMonitoredDirectories();
+                fetchTrafficStats();
+            });
+            
+            document.getElementById('quarantineTab').addEventListener('click', function() {
+                openTab(this, 'Quarantine');
+            });
+            
+            document.getElementById('mainDashboardTab').addEventListener('click', function() {
+                openTab(this, 'MainDashboard');
+            });
+            
+            document.getElementById('threatHandlingTab').addEventListener('click', function() {
+                openTab(this, 'ThreatHandling');
+            });
+        });
+        
+        function fetchNetworkMonitoredDirectories() {
+            // fetchJsonSafe() never rejects, and normalizeNetworkMonitorData()
+            // always returns the same shape whether the request succeeded or
+            // failed, so updateNetworkMonitoredDirectoriesDisplay() never has to
+            // guess (or crash on) missing fields.
+            NetworkDataUtils.fetchJsonSafe('/get_network_monitored_directories')
+                .then(NetworkDataUtils.normalizeNetworkMonitorData)
+                .then(updateNetworkMonitoredDirectoriesDisplay);
+        }
+        
+        function updateNetworkMonitoredDirectoriesDisplay(data) {
+            const directoriesContainer = document.getElementById('monitored_directories');
+            if (!directoriesContainer) return;
+            
+            // Clear previous contents
+            directoriesContainer.innerHTML = '';
+            
+            const status = data.monitoring_status;
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'monitoring-status';
+            statusDiv.innerHTML = `
+                <p><strong>Status:</strong> <span class="${status.enabled ? 'enabled' : 'disabled'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></p>
+                <p><strong>Last Scan:</strong> ${status.last_scan}</p>
+                <p><strong>Total Monitored:</strong> ${status.total_directories} directories</p>
+            `;
+            directoriesContainer.appendChild(statusDiv);
+
+            if (data.error) {
+                const warningDiv = document.createElement('div');
+                warningDiv.className = 'alert alert-warning';
+                warningDiv.textContent = `Network monitored directories unavailable: ${data.error}`;
+                directoriesContainer.appendChild(warningDiv);
+                return;
+            }
+
+            // Display directory list
+            if (status.directories && status.directories.length > 0) {
+                const list = document.createElement('ul');
+                list.className = 'directories-list';
+                
+                status.directories.forEach(dir => {
+                    const li = document.createElement('li');
+                    const statusClass = dir.exists && dir.accessible ? 'directory-active' : 'directory-inactive';
+                    const statusIcon = dir.exists && dir.accessible ? '✓' : '⚠️';
+                    
+                    li.innerHTML = `<span class="${statusClass}">${statusIcon}</span> ${dir.path}`;
+                    
+                    // Add file count if available
+                    if (dir.file_count !== undefined) {
+                        li.innerHTML += ` <span class="file-count">(${dir.file_count} files)</span>`;
+                    }
+                    
+                    list.appendChild(li);
+                });
+                
+                directoriesContainer.appendChild(list);
+            } else {
+                directoriesContainer.innerHTML += '<p>No directories currently being monitored.</p>';
+            }
+        }
+
+        function formatBytesForDisplay(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+
+        function fetchTrafficStats() {
+            // fetchJsonSafe() never rejects, and the normalizers always return a
+            // consistent shape whether the request succeeded or failed.
+            Promise.all([
+                NetworkDataUtils.fetchJsonSafe('/get_traffic_stats').then(NetworkDataUtils.normalizeTrafficStats),
+                NetworkDataUtils.fetchJsonSafe('/get_c2_patterns').then(NetworkDataUtils.normalizeC2Patterns)
+            ]).then(([trafficData, c2Data]) => updateTrafficStatsDisplay(trafficData, c2Data));
+        }
+
+        function updateTrafficStatsDisplay(trafficData, c2Data) {
+            const trafficContainer = document.getElementById('traffic_stats');
+            if (!trafficContainer) return;
+
+            if (trafficData.error) {
+                trafficContainer.innerHTML = `<p class="alert alert-warning">Traffic statistics unavailable: ${trafficData.error}</p>`;
+                return;
+            }
+
+            let html = `
+                <p><strong>Total Connections:</strong> ${trafficData.total_connections}</p>
+                <p><strong>Active Remote IPs:</strong> ${trafficData.active_ips.length}</p>
+                <p><strong>Inbound:</strong> ${formatBytesForDisplay(trafficData.inbound)}</p>
+                <p><strong>Outbound:</strong> ${formatBytesForDisplay(trafficData.outbound)}</p>
+            `;
+
+            const protocolEntries = Object.entries(trafficData.protocols);
+            if (protocolEntries.length > 0) {
+                html += '<p><strong>Protocols:</strong></p><ul class="directories-list">';
+                protocolEntries.forEach(([protocol, count]) => {
+                    html += `<li>${protocol}: ${count}</li>`;
+                });
+                html += '</ul>';
+            }
+
+            if (c2Data.suspicious_connections && c2Data.suspicious_connections.length > 0) {
+                html += '<p><strong>Suspicious Connections:</strong></p><ul class="directories-list">';
+                c2Data.suspicious_connections.forEach(conn => {
+                    html += `<li><span class="directory-inactive">⚠️</span> ${conn.process}: ${conn.remote_ip}:${conn.remote_port} - ${conn.reason}</li>`;
+                });
+                html += '</ul>';
+            }
+
+            trafficContainer.innerHTML = html;
+        }
+        
+        // Initial load of monitored folders
+        loadMonitoredDirectories();
+        
+        // Also load on page init if MonitoredFolders is the active tab
+        document.addEventListener('DOMContentLoaded', function() {
+            if (document.getElementById('MonitoredFolders').style.display === 'block') {
+                loadMonitoredDirectories();
+            }
+        });
+        
+        document.getElementById("addFolderForm").addEventListener("submit", function(e) {
+            e.preventDefault();
+            const folderPath = document.getElementById('folderPath').value;
+            const resultDiv = document.getElementById('results');
+            
+            // Show a loading message
+            resultDiv.innerHTML = '<div class="alert info">Adding folder, please wait...</div>';
+            
+            var formData = new FormData();
+            formData.append('folder_path', folderPath);
+            
+            fetch('/add_folder', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Server returned status ' + response.status);
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    resultDiv.innerHTML = `<div class="alert success">Successfully added folder: ${folderPath}</div>`;
+                    document.getElementById('folderPath').value = ''; // Clear the input
+                    // Reload the monitored directories list
+                    loadMonitoredDirectories();
+                } else {
+                    resultDiv.innerHTML = `<div class="alert error">Error: ${data.error || 'Unknown error'}</div>`;
+                }
+            })
+            .catch(error => {
+                console.error('Error adding folder:', error);
+                resultDiv.innerHTML = `<div class="alert error">Error: ${error.message || error}</div>`;
+            });
+        });
+        
+        document.querySelectorAll('.remove-folder').forEach(button => {
+            button.addEventListener('click', function() {
+                var folder = this.getAttribute('data-folder');
+                var formData = new FormData();
+                formData.append('folder_path', folder);
+                
+                fetch('/remove_folder', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        location.reload();
+                    } else {
+                        document.getElementById('results').innerHTML = `<div class="alert">Error: ${data.error}</div>`;
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                });
+            });
+        });
+        
+        document.getElementById("scanAllBtn").addEventListener("click", function() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+            
+            fetch('/scan_all', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayResults(data);
+                document.getElementById('loadingIndicator').style.display = 'none';
+            })
+            .catch(error => {
+                document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                document.getElementById('loadingIndicator').style.display = 'none';
+            });
+        });
+        
+        // Coerce API payloads that may be a single value, an object or JSON text into an array
+        function toArray(value) {
+            if (Array.isArray(value)) return value;
+            if (value === null || value === undefined || value === '') return [];
+            if (typeof value === 'string') {
+                try {
+                    const parsed = JSON.parse(value);
+                    return Array.isArray(parsed) ? parsed : [parsed];
+                } catch (e) {
+                    return [value];
+                }
+            }
+            if (typeof value === 'object') {
+                return Array.isArray(value.results) ? value.results : Object.values(value);
+            }
+            return [value];
+        }
+
+        function displayResults(data) {
+            var resultsHtml = `
+                <div class="card">
+                    <h2>Scan Results</h2>
+                    <p>Scan Time: ${data.scan_time}</p>
+                    <p>Timestamp: ${data.timestamp}</p>
+                    <p>Matches Found: ${data.matches}</p>
+                `;
+            
+            // Add enhanced statistics if available
+            if (data.total_files_scanned !== undefined) {
+                resultsHtml += `<p>Total Files Scanned: <strong>${data.total_files_scanned}</strong></p>`;
+            }
+            
+            if (data.total_high_risk_files !== undefined) {
+                resultsHtml += `<p>High-Risk Files: <strong style="color: #e74c3c;">${data.total_high_risk_files}</strong></p>`;
+            }
+            
+            if (data.total_subdirectories !== undefined) {
+                resultsHtml += `<p>Subdirectories Scanned: <strong>${data.total_subdirectories}</strong></p>`;
+            }
+                
+            if (data.file) {
+                resultsHtml += `<p>File: ${data.file}</p>`;
+            } else if (data.folder) {
+                resultsHtml += `<p>Folder: ${data.folder}</p>`;
+            } else if (data.folders) {
+                resultsHtml += `<p>Folders: ${toArray(data.folders).join(', ')}</p>`;
+            }
+            
+            // Add detailed directory statistics if available
+            const directoryStats = data.stats ? toArray(data.stats.directories) : [];
+            if (directoryStats.length > 0) {
+                resultsHtml += `<h3>Directory Details</h3><div class="directory-stats-container">`;
+                
+                directoryStats.forEach(dir => {
+                    if (dir.exists && dir.accessible) {
+                        resultsHtml += `
+                            <div class="directory-stat-card">
+                                <h4>${dir.path}</h4>
+                                <div class="stat-details">
+                                    <p>Files: <span class="file-count">${dir.file_count || 0}</span></p>
+                                    <p>Subdirectories: <span class="subdir-count">${dir.subdirectory_count || 0}</span></p>
+                                    ${dir.high_risk_files > 0 ? 
+                                      `<p>High-risk files: <span class="high-risk-files">${dir.high_risk_files}</span></p>` : 
+                                      ''}
+                                    ${dir.matches > 0 ? 
+                                      `<p>Threats found: <span class="matches-count">${dir.matches}</span></p>` : 
+                                      '<p>No threats detected</p>'}
+                                    
+                                    <!-- Add subdirectories if available -->
+                                    ${toArray(dir.subdirectories).length > 0 ? `
+                                        <div class="subdirectories-container">
+                                            <button class="toggle-subdirs" onclick="event.preventDefault(); 
+                                                const subdirList = this.nextElementSibling;
+                                                if (subdirList.style.display === 'none' || !subdirList.style.display) {
+                                                    subdirList.style.display = 'block';
+                                                    this.innerText = 'Hide Subdirectories';
+                                                } else {
+                                                    subdirList.style.display = 'none';
+                                                    this.innerText = 'Show Subdirectories';
+                                                }">Show Subdirectories</button>
+                                            <ul class="subdirectories-list" style="display: none;">
+                                                ${toArray(dir.subdirectories).map(subdir => `<li>${subdir}</li>`).join('')}
+                                            </ul>
+                                        </div>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                });
+                
+                resultsHtml += `</div>`;
+            }
+            
+            const matchResults = toArray(data.results);
+            if (matchResults.length > 0) {
+                resultsHtml += `
+                    <h3>Matches</h3>
+                    <ul>
+                `;
+                
+                matchResults.forEach(result => {
+                    if (result && result.rule) {
+                        resultsHtml += `<li>Rule: ${result.rule}, Description: ${result.description}, File: ${result.file}</li>`;
+                    } else {
+                        resultsHtml += `<li>${result}</li>`;
+                    }
+                });
+                
+                resultsHtml += `</ul>`;
+            } else {
+                resultsHtml += `<p>No suspicious files found.</p>`;
+            }
+            
+            resultsHtml += `</div>`;
+            
+            document.getElementById('results').innerHTML = resultsHtml;
+        }
+    </script>
+</body>
+</html>
+    

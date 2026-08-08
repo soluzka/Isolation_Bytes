@@ -1,0 +1,13 @@
+{
+  "features": {
+    "firmware_modification": 0,
+    "secure_boot_violation": 0,
+    "spi_flash_writes": 15,
+    "smm_violations": 1,
+    "bootloader_integrity": 0,
+    "acpi_table_modifications": 1,
+    "dxe_driver_loading": 0,
+    "tpm_measurements": 0.12238194810295622
+  },
+  "label": 1
+}

@@ -1,0 +1,13 @@
+{
+  "features": {
+    "persistence_mechanisms": 3,
+    "c2_communication": 0,
+    "data_staging": 0,
+    "evasion_techniques": 2,
+    "credential_access": 0,
+    "lateral_movement_attempts": 2,
+    "privilege_escalation": 0,
+    "exfiltration_indicators": 0
+  },
+  "label": 0
+}

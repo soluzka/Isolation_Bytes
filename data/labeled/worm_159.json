@@ -1,0 +1,15 @@
+{
+  "features": {
+    "file_size": 6422730,
+    "entropy": 5.063859268179573,
+    "imports": 54,
+    "sections": 3,
+    "has_certificate": 0,
+    "packed": 1,
+    "writes_to_system": 0,
+    "network_connections": 9,
+    "registry_changes": 6,
+    "process_creations": 0
+  },
+  "label": 1
+}

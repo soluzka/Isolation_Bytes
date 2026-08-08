@@ -1,0 +1,13 @@
+{
+  "features": {
+    "isolation_breach": 1,
+    "privilege_escalation": 0,
+    "hypervisor_interaction": 25,
+    "resource_access_violation": 1,
+    "container_breakout": 0,
+    "vm_boundary_violation": 0,
+    "sandbox_integrity": 0.15168612485907004,
+    "suspicious_syscalls": 120
+  },
+  "label": 1
+}

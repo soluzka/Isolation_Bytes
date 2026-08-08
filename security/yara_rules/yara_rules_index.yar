@@ -1,0 +1,66 @@
+/*
+    Minimal YARA Rules Index
+    Created on 2025-05-11
+    Updated to fix loading issues
+    
+    This index only includes rules that are confirmed to load properly.
+*/
+
+// Import the PE module which is needed for certain rules
+import "pe"
+
+// Comment out includes that cause problems or reference files that don't exist
+// include "./pe_module.yar"  // Uncomment if issues are fixed
+
+// We're skipping generic_anomalies.yar due to known loading issues
+// include "./generic_anomalies.yar"
+
+// Basic malware detection rules
+rule SuspiciousFile {
+    meta:
+        description = "Basic detection for potentially suspicious files"
+        author = "Windows Defender Clone"
+        reference = "Internal"
+        date = "2025-05-11"
+    
+    strings:
+        $s1 = "CreateRemoteThread" nocase
+        $s2 = "VirtualAllocEx" nocase
+        $s3 = "mimikatz" nocase
+        $s4 = "password" nocase
+        $s5 = "hack" nocase
+        $s6 = "inject" nocase
+    
+    condition:
+        2 of them
+}
+
+rule AntiDebugCheck {
+    meta:
+        description = "Detect anti-debugging code"
+        author = "Windows Defender Clone"
+        date = "2025-05-11"
+    
+    strings:
+        $a1 = "IsDebuggerPresent" nocase
+        $a2 = "CheckRemoteDebuggerPresent" nocase
+        $a3 = "OutputDebugString" nocase
+    
+    condition:
+        any of them
+}
+
+rule AntiVMCheck {
+    meta:
+        description = "Detect anti-VM code"
+        author = "Windows Defender Clone"
+        date = "2025-05-11"
+    
+    strings:
+        $vm1 = "vmware" nocase
+        $vm2 = "virtualbox" nocase
+        $vm3 = "qemu" nocase
+    
+    condition:
+        any of them
+}

@@ -1,0 +1,13 @@
+{
+  "features": {
+    "memory_access_pattern": 2285,
+    "power_fluctuation": 2.1302872952954623,
+    "temperature_anomaly": 28.552609950301907,
+    "bus_activity": 300,
+    "dma_operations": 0,
+    "memory_errors": 16,
+    "firmware_integrity": 0,
+    "hardware_interrupts": 2532
+  },
+  "label": 1
+}

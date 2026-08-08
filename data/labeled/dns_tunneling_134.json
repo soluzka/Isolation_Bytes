@@ -1,0 +1,13 @@
+{
+  "features": {
+    "query_entropy": 2.585797345352569,
+    "query_length": 108,
+    "subdomain_depth": 8,
+    "txt_record_usage": 0,
+    "request_frequency": 98.66111947766872,
+    "unique_query_patterns": 11,
+    "cache_violation_attempts": 0,
+    "response_manipulation": 0
+  },
+  "label": 0
+}

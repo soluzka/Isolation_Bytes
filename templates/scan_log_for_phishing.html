@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Scan Log for Phishing</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Scan Log File for Phishing Indicators</h1>
+    <form method="post" enctype="multipart/form-data">
+        <label for="file">Select log file:</label>
+        <input type="file" name="file" id="file" required>
+        <button type="submit">Scan</button>
+    </form>
+    {% if findings is not none %}
+        <h2>Results for {{ filename }}</h2>
+        {% if findings %}
+            <ul>
+            {% for kind, value in findings %}
+                <li><strong>{{ kind|capitalize }}:</strong> {{ value }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No phishing indicators detected.</p>
+        {% endif %}
+    {% endif %}
+    <p><a href="/">Back to Home</a></p>
+</body>
+</html>

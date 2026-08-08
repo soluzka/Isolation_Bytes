@@ -1,0 +1,13 @@
+{
+  "features": {
+    "ticket_manipulation": 0,
+    "service_ticket_requests": 90,
+    "directory_replication": 1,
+    "privileged_account_usage": 0,
+    "authentication_errors": 147,
+    "ticket_encryption_downgrade": 0,
+    "replication_requests": 12,
+    "credential_extraction_attempt": 1
+  },
+  "label": 1
+}

@@ -1,0 +1,15 @@
+{
+    "signatures": {
+        "example_signature": {
+            "pattern": "example_pattern",
+            "description": "Example signature",
+            "severity": 10,
+            "last_updated": "2025-05-08T19:27:00Z"
+        }
+    },
+    "metadata": {
+        "version": "1.0",
+        "last_update": "2025-05-08T19:27:00Z",
+        "source": "local"
+    }
+}

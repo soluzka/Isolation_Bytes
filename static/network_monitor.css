@@ -1,0 +1,50 @@
+
+.network-monitored-directories {
+    margin-top: 20px;
+    padding: 10px;
+    border-top: 1px solid #eee;
+}
+
+.monitoring-status {
+    margin-bottom: 15px;
+}
+
+.monitoring-status .enabled {
+    color: #27ae60;
+    font-weight: bold;
+}
+
+.monitoring-status .disabled {
+    color: #c0392b;
+    font-weight: bold;
+}
+
+.directories-list {
+    list-style-type: none;
+    padding-left: 0;
+    margin-top: 10px;
+}
+
+.directories-list li {
+    padding: 5px;
+    margin-bottom: 3px;
+    border-left: 3px solid #eee;
+    padding-left: 10px;
+}
+
+.directory-active {
+    color: #27ae60;
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.directory-inactive {
+    color: #e74c3c;
+    font-weight: bold;
+    margin-right: 5px;
+}
+
+.file-count {
+    color: #7f8c8d;
+    font-size: 0.9em;
+}

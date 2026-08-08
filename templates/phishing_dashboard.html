@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Phishing Alerts Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        h2 { color: #b30000; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ccc; padding: 0.5em; }
+        th { background: #f5f5f5; }
+        tr.phishing { background: #ffeaea; }
+        .type { font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h2>Phishing Alerts Dashboard</h2>
+    <table>
+        <tr>
+            <th>Time</th>
+            <th>Source</th>
+            <th>Summary</th>
+            <th>Details</th>
+        </tr>
+        {% for alert in alerts %}
+        <tr class="{{ 'phishing' if alert.phishing else '' }}">
+            <td>{{ alert.timestamp }}</td>
+            <td>{{ alert.source }}</td>
+            <td>{{ alert.summary }}</td>
+            <td><pre>{{ alert.details }}</pre></td>
+        </tr>
+        {% endfor %}
+    </table>
+    {% if not alerts %}<p>No phishing alerts yet.</p>{% endif %}
+</body>
+</html>

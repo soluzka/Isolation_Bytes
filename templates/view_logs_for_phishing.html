@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>View Log Files for Phishing</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>View Log Files for Phishing Indicators</h1>
+    <form method="get" action="">
+        <label for="logfile">Select log file:</label>
+        <select name="logfile" id="logfile" onchange="this.form.submit()">
+            <option value="">-- Choose a log file --</option>
+            {% for log in log_files %}
+                <option value="{{ log }}" {% if log == selected_log %}selected{% endif %}>{{ log }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% if findings is not none and selected_log %}
+        <h2>Results for {{ selected_log }}</h2>
+        {% if findings %}
+            <ul>
+            {% for kind, value in findings %}
+                <li><strong>{{ kind|capitalize }}:</strong> {{ value }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No phishing indicators detected.</p>
+        {% endif %}
+    {% endif %}
+    <p><a href="/">Back to Home</a></p>
+</body>
+</html>

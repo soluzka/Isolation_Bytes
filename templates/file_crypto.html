@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>File Encrypt/Decrypt</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 700px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        form { margin-bottom: 1em; }
+        nav a { margin-right: 1em; }
+        .error { color: #c00; }
+        .success { color: #080; }
+        .result { background: #e8ffe8; padding: 0.5em; border-radius: 5px; }
+        .analysis { background: #f5f5f5; padding: 0.5em; border-radius: 5px; margin-top: 1em; }
+    </style>
+</head>
+<body>
+    <h2>File Encryption / Decryption</h2>
+    <p style="color:#555;font-size:0.9em;">Maximum file size: 125MB.</p>
+    <form method="post" action="/encrypt" enctype="multipart/form-data">
+        <label for="file">Choose file to encrypt:</label>
+        <input type="file" name="file" id="file" required>
+        <label for="key">Key (optional):</label>
+        <input type="text" name="key" id="key">
+        <button type="submit">Encrypt</button>
+    </form>
+    <form method="post" action="/decrypt" enctype="multipart/form-data">
+        <label for="file">Choose file to decrypt:</label>
+        <input type="file" name="file" id="file" required>
+        <label for="key">Key (optional):</label>
+        <input type="text" name="key" id="key">
+        <button type="submit">Decrypt</button>
+    </form>
+    {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    {% if success %}<div class="success">{{ success }}</div>{% endif %}
+    {% if download_url %}
+        <div class="result"><a href="{{ download_url }}">Download Result</a></div>
+    {% endif %}
+    {% if input_analysis %}
+        <div class="analysis"><strong>Input Analysis:</strong><br>{{ input_analysis }}</div>
+    {% endif %}
+    {% if output_analysis %}
+        <div class="analysis"><strong>Output Analysis:</strong><br>{{ output_analysis }}</div>
+    {% endif %}
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/logs">View Antivirus Logs</a>
+    </nav>
+    <script>
+        // Give instant feedback for oversized files instead of waiting for the
+        // server's 413 response, which only arrives after the whole file has
+        // already been uploaded.
+        var MAX_FILE_SIZE_BYTES = 125 * 1024 * 1024;
+        document.querySelectorAll('form').forEach(function (form) {
+            form.addEventListener('submit', function (e) {
+                var fileInput = form.querySelector('input[type="file"]');
+                var file = fileInput && fileInput.files[0];
+                if (file && file.size > MAX_FILE_SIZE_BYTES) {
+                    e.preventDefault();
+                    alert('File is too large. Maximum allowed size is 125MB.');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

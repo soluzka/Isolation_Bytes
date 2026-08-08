@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Antivirus Logs</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 700px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        pre { background: #eee; padding: 1em; border-radius: 6px; }
+        nav a { margin-right: 1em; }
+    </style>
+</head>
+<body>
+    <h2>Antivirus Event Log</h2>
+    <pre>{{ log_content }}</pre>
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/quarantine">Manage Quarantine</a>
+    </nav>
+</body>
+</html>

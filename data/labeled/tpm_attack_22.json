@@ -1,0 +1,13 @@
+{
+  "features": {
+    "firmware_integrity": 0,
+    "secure_boot_state": 1,
+    "tpm_measurements": 0.5177939355576052,
+    "microcode_version": 0,
+    "sgx_enclave_violation": 0,
+    "me_state_anomaly": 0,
+    "psp_integrity": 0,
+    "privileged_operation": 50
+  },
+  "label": 1
+}

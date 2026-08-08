@@ -1,0 +1,13 @@
+{
+  "features": {
+    "package_integrity": 0,
+    "version_anomaly": 1,
+    "signature_mismatch": 1,
+    "unusual_dependencies": 1,
+    "code_changes_volume": 1833,
+    "network_callbacks": 32,
+    "build_process_tampering": 0,
+    "repository_anomalies": 0
+  },
+  "label": 1
+}

@@ -1,0 +1,13 @@
+{
+  "features": {
+    "gadget_chain_detected": 0,
+    "stack_manipulation": 0,
+    "return_address_override": 0,
+    "jump_table_abuse": 0,
+    "sigreturn_frame": 1,
+    "stack_pivot_attempt": 0,
+    "control_flow_integrity": 0.13365958064262526,
+    "gadget_execution_pattern": 375
+  },
+  "label": 1
+}

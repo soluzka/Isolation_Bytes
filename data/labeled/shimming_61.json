@@ -1,0 +1,13 @@
+{
+  "features": {
+    "dll_injection_attempts": 1,
+    "registry_modifications": 0,
+    "api_hooking": 1,
+    "sdb_files_created": 0,
+    "custom_shim_databases": 0,
+    "application_compatibility": 0,
+    "process_tampering": 9,
+    "persistence_mechanisms": 4
+  },
+  "label": 1
+}

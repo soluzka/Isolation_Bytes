@@ -1,0 +1,13 @@
+{
+  "features": {
+    "syscall_hooking": 1,
+    "idt_modification": 0,
+    "kernel_memory_access": 305,
+    "privilege_escalation": 0,
+    "driver_loading": 0,
+    "page_table_modification": 0,
+    "interrupt_handling": 36,
+    "suspicious_kernel_calls": 0.16754658231414155
+  },
+  "label": 1
+}

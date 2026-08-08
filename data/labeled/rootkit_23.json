@@ -1,0 +1,13 @@
+{
+  "features": {
+    "hidden_processes": 1,
+    "kernel_modification": 1,
+    "syscall_hooking": 0,
+    "device_driver_manipulation": 1,
+    "file_hiding": 0,
+    "registry_stealth": 1,
+    "network_hiding": 1,
+    "anti_detection": 1.9764179985081478
+  },
+  "label": 1
+}

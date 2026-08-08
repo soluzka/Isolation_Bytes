@@ -1,0 +1,13 @@
+{
+  "features": {
+    "packet_count": 9440,
+    "packet_size_var": 457.3110446345411,
+    "unique_ports": 1,
+    "unique_ips": 282,
+    "packet_rate": 552.5667773115447,
+    "flow_duration": 20.589295651918867,
+    "avg_packet_size": 893.0780365432387,
+    "payload_entropy": 4.980590201972558
+  },
+  "label": 0
+}

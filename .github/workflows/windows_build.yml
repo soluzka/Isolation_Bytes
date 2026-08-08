@@ -1,0 +1,29 @@
+name: Windows build and test
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install pyinstaller pyssdeep yara-python
+
+      - name: Build standalone ssdeep runner
+        run: |
+          python tools/build_runner_exe.py
+
+      - name: Run built runner (smoke test)
+        run: |
+          .\\dist\\ssdeep_runner.exe --rules security\\yara_rules\\yara_rules.yar --dir security\\yara_rules --threshold 60

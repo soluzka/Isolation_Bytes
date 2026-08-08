@@ -1,0 +1,13 @@
+{
+  "features": {
+    "memory_execution": 0,
+    "powershell_usage": 0,
+    "wmi_usage": 0,
+    "registry_persistence": 0,
+    "process_hollowing": 0,
+    "reflective_dll_loading": 0,
+    "script_based_execution": 0,
+    "behavioral_anomaly": 0.21598434785888065
+  },
+  "label": 0
+}

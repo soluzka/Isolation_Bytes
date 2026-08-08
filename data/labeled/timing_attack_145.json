@@ -1,0 +1,13 @@
+{
+  "features": {
+    "cache_misses": 15145,
+    "branch_mispredictions": 340,
+    "execution_time_variance": 56.595920773066055,
+    "memory_access_timing": 175.68273047349334,
+    "cpu_utilization_pattern": 72.41293897771955,
+    "speculative_execution": 1,
+    "cache_flush_operations": 285,
+    "power_consumption_pattern": 1.8599948610051908
+  },
+  "label": 1
+}

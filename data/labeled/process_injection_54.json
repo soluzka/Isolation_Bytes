@@ -1,0 +1,13 @@
+{
+  "features": {
+    "virtual_alloc_calls": 12,
+    "write_process_memory": 1,
+    "create_remote_thread": 0,
+    "memory_protection_changes": 2,
+    "parent_child_violation": 0,
+    "suspicious_loaded_dlls": 0,
+    "memory_mapped_files": 1,
+    "hollowing_indicators": 0.03972598636824287
+  },
+  "label": 1
+}

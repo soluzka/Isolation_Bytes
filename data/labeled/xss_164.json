@@ -1,0 +1,13 @@
+{
+  "features": {
+    "script_tags": 0,
+    "event_handlers": 1,
+    "javascript_uri": 1,
+    "obfuscation": 1,
+    "dom_manipulation": 0,
+    "suspicious_attributes": 3,
+    "html_entities": 68,
+    "xss_pattern_score": 1.346934551646439
+  },
+  "label": 1
+}

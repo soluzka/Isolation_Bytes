@@ -1,0 +1,13 @@
+{
+  "features": {
+    "unusual_process_behavior": 0,
+    "memory_corruption": 1,
+    "code_injection": 1,
+    "unusual_api_calls": 36,
+    "anomaly_score": 1.797650797197563,
+    "suspicious_network_activity": 1,
+    "process_hollowing": 0,
+    "behavior_anomaly": 1.8635885082693906
+  },
+  "label": 1
+}

@@ -1,0 +1,13 @@
+{
+  "features": {
+    "cpu_usage": 161.35463826506324,
+    "gpu_usage": 23.275171149551696,
+    "mining_pool_connections": 0,
+    "crypto_mining_api_calls": 40,
+    "power_consumption": 196.230788200611,
+    "suspicious_processes": 12,
+    "network_connections": 14,
+    "mining_signature_detected": 1
+  },
+  "label": 1
+}

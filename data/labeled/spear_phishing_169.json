@@ -1,0 +1,13 @@
+{
+  "features": {
+    "url_length": 172,
+    "num_dots": 9,
+    "has_ip": 1,
+    "special_chars": 28,
+    "redirects": 1,
+    "sensitive_keywords": 1,
+    "ssl_verified": 1,
+    "domain_age_days": 3203
+  },
+  "label": 1
+}

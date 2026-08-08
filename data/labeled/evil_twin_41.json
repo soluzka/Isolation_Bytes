@@ -1,0 +1,13 @@
+{
+  "features": {
+    "rogue_ap_detected": 0,
+    "deauth_packets": 7190,
+    "beacon_spam": 0,
+    "client_probes": 85,
+    "channel_switching": 0,
+    "signal_strength_variation": 2.1597333306778843,
+    "encryption_downgrade": 1,
+    "suspicious_management_frames": 172
+  },
+  "label": 1
+}

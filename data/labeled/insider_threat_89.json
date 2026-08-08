@@ -1,0 +1,13 @@
+{
+  "features": {
+    "after_hours_access": 0,
+    "data_access_rate": 40.58249136062688,
+    "sensitive_files_accessed": 11,
+    "failed_auth_attempts": 1,
+    "external_device_use": 0,
+    "unusual_downloads": 0,
+    "privilege_escalation": 0,
+    "access_pattern_score": 0.9576540696574644
+  },
+  "label": 0
+}

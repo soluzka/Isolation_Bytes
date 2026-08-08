@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Delete Temp Files</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h2>Delete All Local Temp Files</h2>
+    <form method="POST" action="/delete_temp_files">
+        <button type="submit" class="danger">Delete All Temp Files</button>
+    </form>
+    {% if deleted %}
+        <div class="success">All temp files have been deleted.</div>
+    {% elif error %}
+        <div class="error">Error: {{ error }}</div>
+    {% endif %}
+    <a href="/">Back to Home</a>
+</body>
+</html>

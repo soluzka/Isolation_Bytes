@@ -1,0 +1,123 @@
+<!-- filepath: c:\Users\bpier\Desktop\antivirus\antivirus\antivirus\templates\quarantine.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quarantine Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 700px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #b36200; }
+        ul { padding-left: 1.2em; }
+        li { margin-bottom: 0.5em; }
+        nav a { margin-right: 1em; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1em; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background-color: #f4f4f4; }
+        .actions a { margin-right: 0.5em; }
+    </style>
+</head>
+<body>
+    <h2>Quarantine Management</h2>
+    <p>Manage quarantined files below. You can view details, download files, release them, or delete them permanently.</p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>File Name</th>
+                <th>Detection Type</th>
+                <th>Date Quarantined</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in quarantined_files %}
+            <tr>
+                <td>{{ file.filename }}</td>
+                <td>{% if file.detection_info and file.detection_info.matches %}{{ file.detection_info.matches|join(', ') }}{% else %}Unknown{% endif %}</td>
+                <td>{{ file.quarantine_time }}</td>
+                <td class="actions">
+                    <button onclick="restoreFile('{{ file.quarantine_path }}', '{{ file.original_path }}')" class="btn-restore">Restore</button>
+                    <button onclick="deleteFile('{{ file.quarantine_path }}')" class="btn-delete">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not quarantined_files %}
+            <tr>
+                <td colspan="4" style="text-align: center;">No files in quarantine.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+
+    <h3>Recent Quarantine/Deletion Events</h3>
+    <pre style="background:#fff3cd;color:#856404;padding:0.5em 1em;border-radius:6px;max-height:250px;overflow:auto;">{{ quarantine_log|default('No recent events found.') }}</pre>
+
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/yara_scanner.html">YARA Scanner</a>
+    </nav>
+    
+    <script>
+        function restoreFile(filePath, originalPath) {
+            if (confirm('Are you sure you want to restore this file? It may contain malware.')) {
+                const formData = new FormData();
+                formData.append('file_path', filePath);
+                if (originalPath) {
+                    formData.append('destination', originalPath);
+                }
+                
+                fetch('/restore_file', {
+                    method: 'POST',
+                    body: formData
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('File restored successfully to: ' + data.restored_to);
+                        location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+        
+        function deleteFile(quarantinePath) {
+            if (confirm('Are you sure you want to permanently delete this file?')) {
+                // Extract filename from path if needed
+                let filename = quarantinePath.split(/[\\/]/).pop();
+                fetch(`/quarantine/delete/${encodeURIComponent(filename)}`, {
+                    method: 'POST'
+                })
+                .then(async response => {
+                    const text = await response.text();
+                    if (response.status === 404) {
+                        alert('File not found or already deleted.');
+                        return;
+                    }
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert('File deleted successfully');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error);
+                });
+            }
+        }
+    </script>
+</body>
+</html>

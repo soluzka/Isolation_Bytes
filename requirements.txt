@@ -1,0 +1,115 @@
+# Flask web framework
+Flask
+flask-cors
+flask-sqlalchemy
+Flask-Login>=0.6.3
+markupsafe
+itsdangerous
+click
+Jinja2
+
+# Flask-WTF for CSRF protection
+Flask-WTF
+
+# Cryptography for file encryption/decryption
+cffi>=1.15.1
+cryptography
+
+# Requests for HTTP file download
+requests
+
+# Watchdog for real-time folder monitoring
+watchdog
+
+# psutil for process management
+psutil
+
+# pandas, matplotlib, seaborn, numpy, scipy for data analysis (used in data_analysis.py)
+pandas
+matplotlib
+seaborn
+numpy>=1.20.0
+scipy>=1.7.0
+scikit-learn==1.6.1
+
+# Optional: clamd for ClamAV integration on Linux/macOS
+clamd>=1.0
+
+# For automated testing
+pytest>=7.0
+
+# For loading .env files
+python-dotenv>=1.0
+
+# For Windows-specific packages for admin privileges
+# Note: pywin32 needs special installation:
+# pip install pywin32==306 --no-deps --only-binary=:all: --force-reinstall
+# OR Install manually from: https://github.com/mhammond/pywin32/releases
+pywin32==306; platform_system=="Windows"
+pywin32-ctypes>=0.2.0
+wmi>=1.5.1; platform_system=="Windows"
+
+# Werkzeug for secure_filename (if used directly)
+Werkzeug>=2.0
+
+# Archive extraction support
+rarfile>=4.0
+
+# YARA for signature scanning
+yara-python>=4.0
+
+dnslib>=0.9.26
+
+# For secure password hashing
+bcrypt>=4.0
+
+# For TOTP-based 2FA
+pyotp>=2.9
+rarfile>=1.0
+py7zr>=0.21.1
+
+# DNS resolution for Project Honey Pot
+dnslib>=0.9.22
+
+# For DNS-based reputation services
+dnspython>=2.0
+
+# Machine Learning dependencies
+# YARA for advanced malware scanning
+scikit-learn>=1.3.0
+joblib<1.3.0
+requests>=2.31.0
+psutil>=5.9.0
+
+# Network monitoring and analysis
+flask-limiter<4.0
+limits<6.0
+ordered-set<4.2
+rich<14.0
+pygments<3.0
+typing_extensions<4.14
+wrapt<1.18
+markdown-it-py<3.1
+mdurl<0.3
+yara-python
+python-magic>=0.4.27 ; platform_system!="Windows"
+python-magic-bin>=0.4.14 ; platform_system=="Windows"
+pefile>=2022.5.30
+
+# For VirusTotal API integration
+# (requests already included)
+
+# For logging rotation
+# (logging is stdlib, but logging.handlers is used)
+
+# For Windows Firewall (no pip package, uses subprocess)
+
+# For inspecting file metadata
+pefile>=2023.2.7
+redis>=5.0.1
+
+# Fuzzy matching dependencies
+pyssdeep>=1.0.0
+# 'ssdeep' package may require native build tools on Windows; use pyssdeep on Windows
+ssdeep>=3.4.2; platform_system!='Windows'
+setuptools>=68.0.0

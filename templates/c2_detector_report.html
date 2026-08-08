@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>C2 Detector Report</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 800px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+        th, td { padding: 0.5em; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f8f9fa; }
+        .severity-Critical { background-color: #ffebee; }
+        .severity-High { background-color: #fff8e1; }
+    </style>
+</head>
+<body>
+    <h2>C2 (Command & Control) Detection Report</h2>
+    
+    {% if c2_detections %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Source IP</th>
+                    <th>Destination</th>
+                    <th>Protocol</th>
+                    <th>Severity</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for detection in c2_detections %}
+                <tr class="severity-{{ detection.severity }}">
+                    <td>{{ detection.timestamp }}</td>
+                    <td>{{ detection.source_ip }}</td>
+                    <td>{{ detection.destination_ip }}:{{ detection.destination_port }}</td>
+                    <td>{{ detection.protocol }}</td>
+                    <td>{{ detection.severity }}</td>
+                    <td>{{ detection.reason }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No C2 detection events have been recorded.</p>
+    {% endif %}
+    
+    <a href="/" style="display:inline-block;background:#2d5f9a;color:#fff;padding:0.5em 1em;border-radius:5px;text-decoration:none;">Back to Dashboard</a>
+</body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "features": {
+    "unauthorized_ports": 0,
+    "hidden_services": 0,
+    "reverse_shell": 1,
+    "persistence_mechanism": 0,
+    "c2_communication": 9,
+    "suspicious_listening": 0,
+    "abnormal_connections": 0,
+    "stealth_score": 1.9435351802136585
+  },
+  "label": 1
+}

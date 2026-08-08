@@ -1,0 +1,13 @@
+{
+  "features": {
+    "vulnerable_service_running": 0,
+    "exploit_pattern_match": 1,
+    "payload_signature": 1,
+    "network_scan_detected": 0,
+    "suspicious_connections": 48,
+    "system_calls_pattern": 117,
+    "privilege_elevation": 1,
+    "vulnerability_score": 1.529754277258688
+  },
+  "label": 1
+}

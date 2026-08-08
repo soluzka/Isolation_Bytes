@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Quarantine List</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 800px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        table { width: 100%; border-collapse: collapse; margin: 1em 0; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f2f2f2; }
+        .button { display: inline-block; padding: 6px 12px; margin: 2px; background: #2d5f9a; color: white; 
+                 text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
+        .button.restore { background: #27ae60; }
+        .button.delete { background: #c0392b; }
+        .empty-message { padding: 20px; background: #f8f9fa; border-radius: 4px; text-align: center; }
+        .log-section { margin-top: 2em; background: #f8f9fa; padding: 1em; border-radius: 4px; }
+        .log-content { white-space: pre-wrap; font-family: monospace; background: #eee; padding: 1em; max-height: 300px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h2>Quarantined Files</h2>
+    
+    {% if quarantined_files %}
+        <table>
+            <thead>
+                <tr>
+                    <th>File Name</th>
+                    <th>Size</th>
+                    <th>Date Quarantined</th>
+                    <th>Original Path</th>
+                    <th>Reason</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in quarantined_files %}
+                <tr>
+                    <td>{{ file.name }}</td>
+                    <td>{{ file.size }} bytes</td>
+                    <td>{{ file.date_quarantined }}</td>
+                    <td>{{ file.original_path }}</td>
+                    <td>{{ file.reason }}</td>
+                    <td>
+                        <button type="button" class="button restore" onclick="restoreFile('{{ file.path|e }}', '{{ file.original_path|e }}')">Restore</button>
+<button type="button" class="button delete" onclick="deleteFile('{{ file.path|e }}')">Delete</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="empty-message">
+            <p>No files in quarantine.</p>
+        </div>
+    {% endif %}
+    
+    {% if quarantine_log %}
+    <div class="log-section">
+        <h3>Recent Quarantine Events</h3>
+        <div class="log-content">{{ quarantine_log }}</div>
+    </div>
+    {% endif %}
+    
+    <p style="margin-top: 20px;">
+        <a href="/" class="button">Back to Dashboard</a>
+        <a href="/quarantine" class="button">Quarantine Management</a>
+    </p>
+</body>
+<script>
+function restoreFile(filePath, originalPath) {
+    if (confirm('Are you sure you want to restore this file? It may contain malware.')) {
+        const formData = new FormData();
+        formData.append('file_path', filePath);
+        if (originalPath) {
+            formData.append('destination', originalPath);
+        }
+        fetch('/restore_file', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('File restored successfully to: ' + data.restored_to);
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => alert('Error: ' + error));
+    }
+}
+function deleteFile(filePath) {
+    if (confirm('Are you sure you want to permanently delete this file?')) {
+        const formData = new FormData();
+        formData.append('file_path', filePath);
+        fetch('/delete_file', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                alert('File deleted from quarantine.');
+                location.reload();
+            } else {
+                alert('Error: ' + data.error);
+            }
+        })
+        .catch(error => alert('Error: ' + error));
+    }
+}
+</script>
+</html>
