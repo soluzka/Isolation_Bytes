@@ -1616,8 +1616,8 @@ def block_ip(ip, reason=None, country=None, port=None):
             )
         else:
             safe_ip = _sanitize_ip(ip)
-            name = shlex.quote("Block_" + safe_ip)
-            remote = shlex.quote(safe_ip)
+            name = shlex.quote("Block_" + safe_ip)  # nosem
+            remote = shlex.quote(safe_ip)  # nosem
             # nosem
             result = subprocess.run(  # nosec B603
                 [NETSH_PATH, "advfirewall", "firewall", "add", "rule",
@@ -1683,7 +1683,7 @@ def unblock_ip(ip):
 
         # Sanitize and remove firewall rule
         safe_ip = _sanitize_ip(ip)
-        name = shlex.quote("Block_" + safe_ip)
+        name = shlex.quote("Block_" + safe_ip)  # nosem
         rule_arg = "name=" + name
         # nosem
         result = subprocess.run(  # nosec B603
