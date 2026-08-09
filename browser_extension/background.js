@@ -1,6 +1,6 @@
 /* global chrome */
-// Simple real-time phishing check (template)
-// Replace the phishingCheck function with your own logic or API call
+// Simple real-time phishing check and download scanner for the local dashboard.
+// Replace the phishingCheck and downloadScan functions with your own logic or API calls.
 
 async function backendPhishingCheck(url) {
     try {
@@ -45,3 +45,47 @@ chrome.webRequest.onBeforeRequest.addListener(
     requestFilter,
     ["blocking"]
 );
+
+// ---- Download scanner ----
+
+async function backendDownloadScan(info) {
+    try {
+        const response = await fetch('http://localhost:5000/api/scan_download', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                url: info.url,
+                filename: info.filename,
+                file_size: info.fileSize,
+                source: 'browser_extension'
+            })
+        });
+        const data = await response.json();
+        return data.threat === true;
+    } catch (e) {
+        // Fail open if backend is unreachable
+        return false;
+    }
+}
+
+function notifyDownloadThreat(filename, url) {
+    chrome.notifications.create('download-threat-' + Date.now(), {
+        type: 'basic',
+        iconUrl: 'icon48.png',
+        title: 'Download blocked',
+        message: `The file "${filename}" from ${new URL(url).hostname} was flagged by the antivirus.`
+    });
+}
+
+if (chrome.downloads) {
+    chrome.downloads.onCreated.addListener(function(downloadItem) {
+        backendDownloadScan(downloadItem).then(isThreat => {
+            if (isThreat) {
+                chrome.downloads.cancel(downloadItem.id);
+                notifyDownloadThreat(downloadItem.filename, downloadItem.url);
+            }
+        }).catch(() => {
+            // fail open
+        });
+    });
+}

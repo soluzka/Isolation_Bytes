@@ -3742,6 +3742,43 @@ folder_watcher_process = None
 rtp_status_flag = None  # 'STARTING', 'ENABLED', or None
 safe_download_service = None
 
+@app.route('/api/scan_download', methods=['POST'])
+@requires_auth
+def scan_download():
+    """Scan a download URL/filename for threats from the browser extension."""
+    data = request.get_json() or {}
+    url = data.get('url', '')
+    filename = data.get('filename', '')
+
+    try:
+        threat = False
+        reason = None
+
+        if url:
+            # Re-use the phishing/URL scanner
+            with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt', prefix='antivirus_') as tmp:
+                tmp.write(url)
+                tmp.flush()
+                findings = scan_file_for_phishing(tmp.name)
+            os.remove(tmp.name)
+
+            if findings and any(isinstance(f, dict) and f.get('severity') in ('high', 'critical') for f in findings):
+                threat = True
+                reason = 'phishing_or_malicious_url'
+
+        # Optional: also flag suspicious extensions
+        suspicious_exts = {'.exe', '.scr', '.bat', '.cmd', '.js', '.vbs', '.ps1', '.zip'}
+        if not threat and filename:
+            ext = os.path.splitext(filename)[-1].lower()
+            if ext in suspicious_exts:
+                threat = True
+                reason = 'suspicious_file_extension'
+
+        return jsonify({'threat': threat, 'reason': reason, 'url': url, 'filename': filename})
+    except Exception as e:
+        return jsonify({'threat': False, 'error': str(e)}), 500
+
+
 @app.route('/phishing_check', methods=['POST'])
 def phishing_check():
     from flask import request, jsonify
