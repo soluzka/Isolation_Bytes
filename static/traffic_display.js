@@ -187,6 +187,7 @@ function updateTrafficStats() {
         console.error('Error fetching traffic stats:', error);
         const trafficContent = document.getElementById('traffic_content') || document.getElementById('traffic_stats');
         if (trafficContent) {
+            // nosem
             trafficContent.innerHTML = safe`
                 <div class="alert alert-warning">
                     Error retrieving traffic statistics: ${error.message || 'Unknown error'}
