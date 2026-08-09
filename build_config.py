@@ -89,6 +89,8 @@ hidden_imports = [
     'lightgbm.basic',
     'lightgbm.sklearn',
     'pefile',
+    'security.process_security',
+    'security.process_monitor',
 ]
 
 # Path separator based on platform
