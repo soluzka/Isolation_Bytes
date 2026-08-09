@@ -461,10 +461,10 @@ class NetworkMonitor:
                                                         destination=destination,
                                                         pid=proc.pid
                                                     )
-                                    except:
-                                        continue
+                                    except Exception:
+                                        pass
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        continue
+                        pass
                 
                 time.sleep(1)  # Check every second
                 
