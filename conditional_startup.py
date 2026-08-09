@@ -1128,6 +1128,23 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
 
     def on_process_event(event):
         results["process_events"].append(event)
+
+        exe = event.get('exe')
+        if exe:
+            if event['type'] == 'process_scanned':
+                results["scanned_files"][exe] = {
+                    "malware_found": False,
+                    "quarantined": False,
+                    "error": None
+                }
+                _run_ml_and_ransomware_checks(exe, results, output)
+            elif event['type'] == 'malware_found':
+                results["scanned_files"][exe] = {
+                    "malware_found": True,
+                    "quarantined": False,
+                    "error": None
+                }
+
         # Report progress per-event, not just once after the whole process
         # scan finishes -- scanning a handful of large executables against
         # every YARA rule can take minutes, so waiting until the end would
