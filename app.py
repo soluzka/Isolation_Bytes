@@ -3786,6 +3786,7 @@ def phishing_check():
 import zipfile
 import tarfile
 import io
+from utils.extract import _safe_members
 import traceback
 from contextlib import redirect_stdout
 from data_analysis import analyze_data
@@ -3943,7 +3944,7 @@ def extract_archive(filepath, temp_dir):
                 zip_ref.extractall(temp_dir)
         elif filepath.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(filepath) as tar_ref:
-                tar_ref.extractall(temp_dir, filter="data")
+                tar_ref.extractall(temp_dir, members=_safe_members(tar_ref), filter="data")
         elif filepath.lower().endswith('.rar'):
             with rarfile.RarFile(filepath) as rar_ref:
                 rar_ref.extractall(temp_dir)
@@ -4100,7 +4101,7 @@ def safe_download():
                     zip_ref.extractall(extract_dir)
             elif filename.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
                 with tarfile.open(download_path) as tar_ref:
-                    tar_ref.extractall(extract_dir, filter="data")
+                    tar_ref.extractall(extract_dir, members=_safe_members(tar_ref), filter="data")
             else:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 return render_template('safe_download.html', error=f'Unsupported archive format: {filename}')

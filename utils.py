@@ -4,6 +4,19 @@ import tarfile
 import os
 import shutil
 
+
+def _safe_members(tar):
+    """Filter tar members to prevent path traversal and symlink attacks."""
+    safe = []
+    for m in tar.getmembers():
+        if m.issym() or m.islnk():
+            continue
+        name = m.name.replace('\\', '/')
+        if name.startswith('/') or '..' in name.split('/'):
+            continue
+        safe.append(m)
+    return safe
+
 def import_module_from_path(module_name, file_path):
     """
     Dynamically import a module from a given file path.
@@ -33,7 +46,7 @@ def extract_archive(filepath, extract_to):
                 zip_ref.extractall(extract_to)
         elif filepath.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(filepath) as tar_ref:
-                tar_ref.extractall(extract_to, filter="data")
+                tar_ref.extractall(extract_to, members=_safe_members(tar_ref), filter="data")
         elif filepath.lower().endswith(('.rar', '.7z')):
             # For .rar and .7z, you might need additional libraries
             # This is a placeholder for those formats

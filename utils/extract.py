@@ -1,9 +1,19 @@
 from utils.paths import get_resource_path
 import os
-
-import os
 import zipfile
 import tarfile
+
+def _safe_members(tar):
+    """Filter tar members to prevent path traversal and symlink attacks."""
+    safe = []
+    for m in tar.getmembers():
+        if m.issym() or m.islnk():
+            continue
+        name = m.name.replace('\\', '/')
+        if name.startswith('/') or '..' in name.split('/'):
+            continue
+        safe.append(m)
+    return safe
 
 def extract_archive(path, destination=None):
     """
@@ -34,7 +44,7 @@ def extract_archive(path, destination=None):
             zip_ref.extractall(destination)
     elif ext in ('.tar', '.gz', '.bz2', '.tar.gz', '.tar.bz2'):
         with tarfile.open(get_resource_path(os.path.join(path)), 'r:*') as tar_ref:
-            tar_ref.extractall(destination, filter="data")
+            tar_ref.extractall(destination, members=_safe_members(tar_ref), filter="data")
     else:
         raise ValueError(f"Unsupported archive format: {ext}")
 

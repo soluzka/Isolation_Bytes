@@ -10,6 +10,7 @@ import tempfile
 import shutil
 from file_crypto import encrypt_file
 from scan_utils import scan_file_for_viruses
+from utils.extract import _safe_members
 
 def get_basedir():
     if getattr(sys, 'frozen', False):
@@ -28,7 +29,7 @@ def extract_archive(filepath, extract_dir):
                 zip_ref.extractall(extract_dir)
         elif filename.endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(get_resource_path(os.path.join(filepath)), 'r:*') as tar:
-                tar.extractall(extract_dir, filter="data")
+                tar.extractall(extract_dir, members=_safe_members(tar), filter="data")
         return True
     except Exception as e:
         logging.error(f"Extraction failed for {filepath}: {e}")
