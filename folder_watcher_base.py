@@ -59,10 +59,6 @@ class FolderWatcher:
                 self.observer.join()
                 self.logger.info("Folder monitoring stopped")
 
-    def is_running(self):
-        """Check if folder monitoring is running."""
-        return self.running
-
     def load_scan_directories(self):
         """Load directories to monitor."""
         directories = []
