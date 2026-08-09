@@ -24,7 +24,8 @@ def run_cli(args, input_text=None):
 
 def test_scan_nonexistent_file():
     result = run_cli(['scan', 'not_a_real_file.txt'])
-    assert 'Path not found' in result.stdout
+    if 'Path not found' not in result.stdout:
+        raise AssertionError("Expected 'Path not found' in output")
 
 def test_quarantine_and_release():
     import os, time
@@ -46,7 +47,8 @@ def test_quarantine_and_release():
         pass
     # Quarantine the file (simulate user confirmation)
     result = run_cli(['scan', test_file], input_text='y\n')
-    assert 'quarantine' in result.stdout.lower() or 'infected file' in result.stdout.lower()
+    if 'quarantine' not in result.stdout.lower() and 'infected file' not in result.stdout.lower():
+        raise AssertionError("Expected 'quarantine' or 'infected file' in output")
     # Check that the file is gone (delete if not)
     if os.path.exists(test_file):
         os.unlink(test_file)
@@ -57,14 +59,16 @@ def test_quarantine_and_release():
     if not os.path.exists(enc_file):
         # Enc file not found; this might indicate an issue with the quarantine process
         raise FileNotFoundError(f"Expected file not found in quarantine: {enc_file}")
-    assert os.path.exists(enc_file)
+    if not os.path.exists(enc_file):
+        raise AssertionError("Encrypted quarantine file should exist")
     # Release the file
     released_dir = os.path.join(os.getcwd(), 'released')
     os.makedirs(released_dir, exist_ok=True)
     result = run_cli(['quarantine', 'release', 'dummy.txt.enc', released_dir])
     # Check that the file is released
     released_file = os.path.join(released_dir, 'dummy.txt')
-    assert os.path.exists(released_file)
+    if not os.path.exists(released_file):
+        raise AssertionError("Released file should exist")
     # Cleanup
     if os.path.exists(enc_file):
         os.unlink(enc_file)
@@ -94,11 +98,12 @@ def test_delete_from_quarantine():
     enc_file = os.path.join(quarantine_dir, 'delete_me.txt.enc')
     if not os.path.exists(enc_file):
         raise FileNotFoundError(f"Expected file not found in quarantine: {enc_file}")
-    assert os.path.exists(enc_file)
     # Delete from quarantine (simulate user confirmation)
     result = run_cli(['quarantine', 'delete', 'delete_me.txt.enc'], input_text='y\n')
-    assert 'deleted' in result.stdout.lower()
-    assert not os.path.exists(enc_file)
+    if 'deleted' not in result.stdout.lower():
+        raise AssertionError("Expected 'deleted' in output")
+    if os.path.exists(enc_file):
+        raise AssertionError("Expected encrypted file to be deleted")
 
 
 def test_quarantine_cancel(tmp_path):
