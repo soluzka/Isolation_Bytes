@@ -2118,7 +2118,7 @@ if __name__ == "__main__":
 
     while True:
         monitor_bandwidth()
-        monitor_connections()
+        monitor_connections(monitor)
         time.sleep(BANDWIDTH_CHECK_INTERVAL)
         
 def run_scan_active_connections_periodically(interval=60):
