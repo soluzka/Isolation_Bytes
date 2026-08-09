@@ -145,7 +145,7 @@ def match_yara(rules_obj, path):
                     matches = obj.match(data=data)
                     results.update(m.rule for m in matches)
                 except Exception:
-                    continue
+                    print('YARA match failed for data buffer', file=sys.stderr)
         return list(results)
 
     # single compiled object
@@ -222,7 +222,7 @@ def main():
                     if score >= args.threshold:
                         fuzzy_hits.append((rname, score))
                 except Exception:
-                    continue
+                    print('ssdeep comparison failed for rule', rname, file=sys.stderr)
 
         if fuzzy_hits:
             fuzzy_hits.sort(key=lambda x: -x[1])

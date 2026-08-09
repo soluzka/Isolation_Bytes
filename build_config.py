@@ -174,7 +174,7 @@ def add_extension_binaries(module_names):
                             candidates.append(match)
                             logging.info(f'Found binary candidate for {name}: {match}')
                 except Exception:
-                    continue
+                    logging.warning(f'Binary candidate rejected for {name}', exc_info=False)
 
     # Add unique candidates
     for c in sorted(set(candidates)):

@@ -345,7 +345,7 @@ def network_monitored_directories():
                     try:
                         file_count = len([f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))])
                     except Exception:
-                        pass
+                        logging.warning(f"Failed to count files in {dir_path}", exc_info=False)
                 
                 directories.append({
                     'path': dir_path,
@@ -4164,7 +4164,7 @@ def quarantine_list():
                         original_path = info.get('original_path', '')
                         reason = info.get('reason', '') or ', '.join(info.get('detection_info', {}).get('matches', []))
                 except Exception:
-                    pass
+                    logging.warning('Failed to build quarantine reason', exc_info=False)
             quarantined_files.append({
                 'name': filename,
                 'size': size,

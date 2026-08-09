@@ -1551,7 +1551,7 @@ def geoip_lookup(ip):
             data = resp.json()
             return data.get("country_code"), data.get("country_name")
     except Exception:
-        pass
+        logging.warning('GeoIP lookup failed', exc_info=False)
     return None, None
 
 

@@ -1418,7 +1418,7 @@ def _open_browser_when_ready(output):
                 webbrowser.open(url)
                 return
         except Exception:
-            pass
+            logging.warning('Conditional startup check failed', exc_info=False)
         time.sleep(interval)
         waited += interval
     output.write(f"[conditional_startup] Warning: Server not available after {timeout} seconds.\n")

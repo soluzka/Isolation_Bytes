@@ -1967,7 +1967,7 @@ def run_scheduled_scans():
                                         ml_score = detector.get_anomaly_score(file_path)
                                         cache_entry['legacy_ml_score'] = ml_score
                                     except Exception:
-                                        pass
+                                        print('Failed to compute legacy ML score')
                                 
                                 # Quarantine only when the ML model (EMBER or legacy)
                                 # agrees that the file is malicious.  Pure YARA matches
@@ -2280,7 +2280,7 @@ if __name__ == '__main__':
                     import webbrowser
                     webbrowser.open(url, new=2)
             except Exception:
-                pass
+                print('Failed to open browser')
     else:
         print("\nCould not detect which port the server is running on.")
         print("The server is likely running on one of: 5000, 5001, 8080, 8000")

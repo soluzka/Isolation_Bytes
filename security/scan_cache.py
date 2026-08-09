@@ -118,7 +118,7 @@ class FileScanCache:
                 self.cache_path.rename(backup)
                 logger.info(f'Backed up corrupt scan cache to {backup}')
             except Exception:
-                pass
+                logger.warning('Failed to back up corrupt scan cache', exc_info=False)
             return {}
 
     def _save(self):
