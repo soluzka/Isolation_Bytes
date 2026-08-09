@@ -1314,11 +1314,22 @@ def run_process_hardening_monitor():
     while True:
         try:
             from security.process_security import scan_processes_with_hardening
+            hardening_events = []
+
+            def on_hardening_event(event):
+                hardening_events.append(event)
+
             scan_processes_with_hardening(
                 terminate_on_malware=False,
                 block_connections=False,
-                entropy_threshold=7.5
+                entropy_threshold=7.5,
+                event_callback=on_hardening_event
             )
+            conditional_startup_state.update({
+                'process_events': len(hardening_events),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+            logger.info(f"Process hardening monitor completed; {len(hardening_events)} events")
         except Exception as e:
             logger.error(f"Error in process hardening monitor: {e}")
         time.sleep(300)  # 5 minutes

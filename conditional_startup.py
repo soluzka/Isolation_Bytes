@@ -1099,6 +1099,7 @@ def _load_scan_utilities(basedir, output):
     scan_utils_path = os.path.join(basedir, 'scan_utils.py')
     yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
     process_monitor_path = os.path.join(basedir, 'security', 'process_monitor.py')
+    process_security_path = os.path.join(basedir, 'security', 'process_security.py')
     quarantine_utils_path = os.path.join(basedir, 'quarantine_utils.py')
 
     try:
@@ -1106,6 +1107,7 @@ def _load_scan_utilities(basedir, output):
             'scan_utils': import_module_from_path('scan_utils', scan_utils_path),
             'yara_scanner': import_module_from_path('yara_scanner', yara_scanner_path),
             'process_monitor': import_module_from_path('process_monitor', process_monitor_path),
+            'process_security': import_module_from_path('process_security', process_security_path),
             'quarantine_utils': import_module_from_path('quarantine_utils', quarantine_utils_path),
         }
         output.write("[conditional_startup] Successfully loaded scan utilities.\n")
@@ -1164,6 +1166,32 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
     except Exception as e:
         output.write(f"[ERROR] Process scan failed: {e}\n")
         results["errors"].append({"stage": "process_scan", "error": str(e)})
+
+
+def _scan_processes_hardening_step(process_security, results, output, progress_callback):
+    """Run the process hardening scanner (YARA, entropy, signatures, memory)
+    and report notable findings into the same process_events stream."""
+    output.write("[conditional_startup] Running process hardening scan...\n")
+
+    def on_hardening_event(event):
+        results["process_events"].append(event)
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception as e:
+                output.write(f"[WARNING] progress_callback raised during hardening scan: {e}\n")
+
+    try:
+        process_security.scan_processes_with_hardening(
+            terminate_on_malware=False,
+            block_connections=False,
+            entropy_threshold=7.5,
+            event_callback=on_hardening_event
+        )
+        output.write(f"[conditional_startup] Hardening scan reported {len(results['process_events'])} total process event(s).\n")
+    except Exception as e:
+        output.write(f"[ERROR] Process hardening scan failed: {e}\n")
+        results["errors"].append({"stage": "process_hardening", "error": str(e)})
 
 
 def _check_persistence_indicators_step(results, output):
@@ -1491,6 +1519,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         return output.getvalue()
 
     _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
+    _scan_processes_hardening_step(modules['process_security'], results, output, progress_callback)
     _check_persistence_indicators_step(results, output)
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
