@@ -108,8 +108,10 @@ def test_quarantine_cancel(tmp_path):
     test_file.write_text(malware_string)
     # User cancels quarantine
     result = run_cli(['scan', str(test_file)], input_text='n\n')
-    assert 'cancelled' in result.stdout.lower()
-    assert test_file.exists()
+    if 'cancelled' not in result.stdout.lower():
+        raise AssertionError("Expected 'cancelled' in output")
+    if not test_file.exists():
+        raise AssertionError("Test file should still exist after cancellation")
 
 # Additional edge case tests can be added as needed.
 
