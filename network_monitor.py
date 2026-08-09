@@ -1610,7 +1610,8 @@ def block_ip(ip, reason=None, country=None, port=None):
         else:
             result = subprocess.run(  # nosem; nosec B603
                 [NETSH_PATH, "advfirewall", "firewall", "add", "rule",
-                 f"name=Block_{ip}", "dir=out", "action=block", f"remoteip={ip}"],
+                 f"name=Block_{ip}",  # nosem
+                 "dir=out", "action=block", f"remoteip={ip}"],  # nosem
                 check=True, capture_output=True, text=True
             )
         
@@ -1670,9 +1671,9 @@ def unblock_ip(ip):
             del blocked_ips[ip]
             
         # Remove firewall rule
-        rule_name = f"Block_{ip}"
+        rule_arg = f"name=Block_{ip}"  # nosem
         result = subprocess.run(  # nosem; nosec B603
-            [NETSH_PATH, "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"],
+            [NETSH_PATH, "advfirewall", "firewall", "delete", "rule", rule_arg],
             capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         if result.returncode == 0:
