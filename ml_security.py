@@ -82,8 +82,8 @@ class SecurityMLModel:
             logging.error(f"Error loading model: {e}")
             self.create_new_model()
             
-    def train_model(self, X, y=None):
-        """Train the model with new data."""
+    def retrain_model(self, X, y=None):
+        """Retrain the model with new data."""
         try:
             self.pipeline.fit(X)
             self.save_model()

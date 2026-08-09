@@ -79,8 +79,8 @@ class ThreatDetectionModel:
             logging.error(f"Error initializing models: {str(e)}")
             raise
         
-    def initialize_models(self):
-        """Initialize and load saved ML models for different threat types."""
+    def initialize_and_train_models(self):
+        """Initialize and train saved ML models for different threat types."""
         self.models = {}
         self.scalers = {}
         self.pcas = {}
