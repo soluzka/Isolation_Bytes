@@ -80,6 +80,7 @@ def _is_signed_windows(path: str) -> bool:
         import subprocess
         env = os.environ.copy()
         env['TARGET_EXE'] = path
+        # nosem; nosec B603: path is passed via env var, command list is static
         out = subprocess.run(
             [
                 'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
