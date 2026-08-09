@@ -3440,6 +3440,32 @@ def scan_file():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/scan_processes', methods=['POST'])
+@requires_auth
+def scan_processes():
+    """On-demand process hardening scan: hashes, entropy, YARA, signatures, memory."""
+    import threading
+    data = request.get_json() or {}
+
+    def _scan():
+        try:
+            from security.process_security import scan_processes_with_hardening
+            results = scan_processes_with_hardening(
+                terminate_on_malware=data.get('terminate', False),
+                block_connections=data.get('block', False),
+                entropy_threshold=data.get('entropy_threshold', 7.5)
+            )
+            logger = logging.getLogger('scan_processes')
+            logger.info(f'On-demand process scan completed; {len(results)} processes scanned.')
+        except Exception as e:
+            logging.getLogger('scan_processes').error(f'On-demand process scan failed: {e}')
+
+    thread = threading.Thread(target=_scan, daemon=True)
+    thread.start()
+
+    return jsonify({'status': 'started', 'message': 'Process hardening scan started in background.'})
+
+
 
 # Note: Routes are already decorated with @requires_auth, no need to wrap again
 
