@@ -70,8 +70,8 @@ def get_network_downloads():
                                             for path in file_paths:
                                                 try:
                                                     mod_times[path] = os.path.getmtime(path)
-                                                except:
-                                                    continue
+                                                except Exception:
+                                                    pass
                                             
                                             # Find the most recently modified file
                                             if mod_times:
