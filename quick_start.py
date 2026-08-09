@@ -339,6 +339,7 @@ conditional_startup_state = {
 }
 conditional_startup_lock = threading.Lock()
 scanning_lock = threading.Lock()
+conditional_startup_thread = None  # Background scan thread, used to detect dead scans
 
 
 def _count_persistence_indicators(scan_data):
@@ -414,6 +415,14 @@ def run_conditional_startup_background():
 @app.route('/api/conditional_startup/status', methods=['GET'])
 def conditional_startup_status():
     """Status of the last conditional startup run."""
+    global conditional_startup_thread
+    if conditional_startup_state.get('running'):
+        if conditional_startup_thread is None or not conditional_startup_thread.is_alive():
+            conditional_startup_state.update({
+                'running': False,
+                'last_error': 'Scan thread terminated unexpectedly',
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+            })
     resp = dict(conditional_startup_state)
     resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
     return jsonify(resp)
@@ -437,8 +446,9 @@ def run_startup():
             conditional_startup_state['last_updated'] = conditional_startup_state['started_at']
 
         logger.info("Starting conditional startup scan in background")
-        thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
-        thread.start()
+        global conditional_startup_thread
+        conditional_startup_thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+        conditional_startup_thread.start()
 
         return jsonify({
             "status": "success",
@@ -2208,6 +2218,7 @@ if __name__ == '__main__':
     logger.info("Process hardening monitor thread started")
 
     # Start conditional startup scan automatically the first time the app runs
+    global conditional_startup_thread
     with conditional_startup_lock:
         if not conditional_startup_state['running']:
             conditional_startup_state.update({
@@ -2215,8 +2226,8 @@ if __name__ == '__main__':
                 'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
             })
-            cs_thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
-            cs_thread.start()
+            conditional_startup_thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+            conditional_startup_thread.start()
             logger.info("Conditional startup scan auto-started")
 
     # Create a queue for passing the port from server thread to main thread
