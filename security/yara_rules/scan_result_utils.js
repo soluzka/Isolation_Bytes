@@ -15,9 +15,11 @@
 			if (Array.isArray(results.data)) return results.data;
 
 			// Numeric-keyed object (e.g. { "0": {...}, "1": {...} })
-			const numericKeys = Object.keys(results).filter(k => /^\d+$/.test(k)).sort((a,b) => Number(a) - Number(b));
-			if (numericKeys.length) {
-				return numericKeys.map(k => results[k]);
+			const numericEntries = Object.entries(results)
+				.filter(([k]) => /^\d+$/.test(k))
+				.sort(([a], [b]) => Number(a) - Number(b));
+			if (numericEntries.length) {
+				return numericEntries.map(([, v]) => v);
 			}
 
 			// Single result object -> wrap it

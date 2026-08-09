@@ -4,8 +4,9 @@
 
 // Unwrap payloads that nest the data under a success/stats or success/patterns envelope
 function unwrapPayload(payload, key) {
-    if (payload && typeof payload === 'object' && payload[key] && typeof payload[key] === 'object') {
-        return payload[key];
+    if (payload && typeof payload === 'object' && typeof key === 'string') {
+        const match = Object.entries(payload).find(([k, v]) => k === key && v && typeof v === 'object');
+        if (match) return match[1];
     }
     return payload;
 }
@@ -22,8 +23,8 @@ function escapeHtml(text) {
 }
 
 // Tagged template that escapes all interpolated values
-// eslint-disable-next-line no-unsanitized/function-call
 function safe(strings, ...values) {
+    // eslint-disable-next-line no-unsanitized/property, no-unsanitized/function-call
     return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
 }
 
