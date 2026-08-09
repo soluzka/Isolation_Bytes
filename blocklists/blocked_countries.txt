@@ -1,0 +1,10 @@
+# Blocked ISO 3166-1 alpha-2 country codes
+# Uncomment the countries you want to block outbound/inbound connections to.
+# Each line should contain one 2-letter country code.
+
+# Example high-risk regions for demo/testing:
+# KP  # North Korea
+# RU  # Russia
+# BY  # Belarus
+# IR  # Iran
+# CN  # China

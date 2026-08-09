@@ -13,6 +13,7 @@ import math
 from datetime import datetime
 import requests
 import ipaddress
+from security.network_threat_feed import NetworkThreatFeed
 
 class C2Detector:
     def __init__(self, logger=None):
@@ -50,6 +51,7 @@ class C2Detector:
         # Load threat intelligence data
         self.malicious_ip_ranges = self._load_malicious_ip_ranges()
         self.malicious_ips = self._load_malicious_ips()
+        self.feed = NetworkThreatFeed()
         
     def _load_malicious_ip_ranges(self):
         """Load known malicious IP ranges"""
@@ -216,14 +218,18 @@ class C2Detector:
         score = 0
         
         # Factor 1: Known malicious IP or range (highest weight)
-        if ip in self.malicious_ips:
+        if ip in self.malicious_ips or self.feed.is_malicious_ip(ip):
             score += 50
         elif self._is_ip_in_malicious_ranges(ip):
             score += 40
             
         # Factor 2: Known C2 port
-        if port in self.known_c2_ports:
+        if port in self.known_c2_ports or self.feed.is_c2_port(port):
             score += 25
+
+        # Factor 2b: Blocked geo-IP country
+        if self.feed.is_blocked_country(ip):
+            score += 30
             
         # Factor 3: Consistency of beaconing (lower std_dev = more consistent = more suspicious)
         consistency_ratio = std_dev / interval if interval > 0 else 1
@@ -277,12 +283,15 @@ class C2Detector:
         """Get human-readable reasons for the severity score"""
         reasons = []
         
-        if ip in self.malicious_ips:
-            reasons.append("IP address is in known malicious list")
+        if ip in self.malicious_ips or self.feed.is_malicious_ip(ip):
+            reasons.append("IP address is in known malicious list or threat feed")
         elif self._is_ip_in_malicious_ranges(ip):
             reasons.append("IP address is in known malicious range")
+
+        if self.feed.is_blocked_country(ip):
+            reasons.append("Remote IP is in a user-blocked country")
             
-        if port in self.known_c2_ports:
+        if port in self.known_c2_ports or self.feed.is_c2_port(port):
             reasons.append(f"Port {port} is commonly used for C2 communications")
             
         consistency_ratio = std_dev / interval if interval > 0 else 1
