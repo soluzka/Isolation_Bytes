@@ -28,9 +28,9 @@ psutil
 pandas
 matplotlib
 seaborn
-numpy>=1.20.0
+numpy>=1.26.4,<2.0
 scipy>=1.7.0
-scikit-learn==1.6.1
+scikit-learn>=1.7.0
 
 # Optional: clamd for ClamAV integration on Linux/macOS
 clamd>=1.0
@@ -72,7 +72,7 @@ py7zr>=1.1.3
 dnslib>=0.9.22
 
 # For DNS-based reputation services
-dnspython>=2.0
+dnspython>=2.7.0
 
 # Machine Learning dependencies
 # YARA for advanced malware scanning
@@ -117,4 +117,4 @@ setuptools>=83.0.0
 # Static-file malware classifier (security/detector.py, security/ember_vendor/,
 # train_ember_classifier.py, train_malware_classifier.py)
 lief>=0.17.2
-lightgbm>=4.0.0
+lightgbm>=4.7.0
