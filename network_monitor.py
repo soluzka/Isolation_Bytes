@@ -12,8 +12,19 @@ from redis.exceptions import ConnectionError
 from httpbl_utils import build_httpbl_query
 import dns.resolver
 import shutil
+import ipaddress
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
+
+
+def _validate_ip(ip):
+    """Return (valid, sanitized_ip) for an IPv4/IPv6 address.
+    Rejects anything that isn't a plain IP to prevent command injection."""
+    try:
+        addr = ipaddress.ip_address(ip)
+        return True, str(addr)
+    except ValueError:
+        return False, None
 
 class NetworkMonitor:
     def __init__(self, use_redis=False):
@@ -1579,6 +1590,11 @@ def block_ip(ip, reason=None, country=None, port=None):
         country (str, optional): Country of origin. Defaults to None.
         port (int, optional): Port associated with the block. Defaults to None.
     """
+    valid, ip = _validate_ip(ip)
+    if not valid:
+        logging.error(f"Refusing to block invalid IP: {ip!r}")
+        return False
+
     if not is_admin():
         logging.warning(f"Cannot block {ip}: Administrator privileges required.")
         return False
@@ -1643,6 +1659,11 @@ def unblock_ip(ip):
     Returns:
         bool: True if unblocked successfully, False otherwise
     """
+    valid, ip = _validate_ip(ip)
+    if not valid:
+        logging.error(f"Refusing to unblock invalid IP: {ip!r}")
+        return False
+
     try:
         # Remove from tracking dictionary first
         if ip in blocked_ips:

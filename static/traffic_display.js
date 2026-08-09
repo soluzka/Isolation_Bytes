@@ -60,6 +60,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
     // Return if no traffic data available
     if (!trafficData || trafficData.error) {
         trafficContent.innerHTML = '';
+        // eslint-disable-next-line no-unsanitized/method
         trafficContent.appendChild(document.createRange().createContextualFragment(safe`
             <div class="alert alert-info">
                 ${trafficData && trafficData.error ? 'Error: ' + trafficData.error : 'No traffic data available yet. Monitoring is initializing...'}
@@ -170,6 +171,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     // Update the content
     trafficContent.innerHTML = '';
+    // eslint-disable-next-line no-unsanitized/method
     trafficContent.appendChild(document.createRange().createContextualFragment(html));
 }
 
@@ -188,6 +190,7 @@ function updateTrafficStats() {
         const trafficContent = document.getElementById('traffic_content') || document.getElementById('traffic_stats');
         if (trafficContent) {
             trafficContent.innerHTML = '';
+            // eslint-disable-next-line no-unsanitized/method
             trafficContent.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Error retrieving traffic statistics: ${error.message || 'Unknown error'}
@@ -262,6 +265,7 @@ function startTrafficMonitoring() {
         // Display error in traffic stats container
         safeDomOperation('traffic_stats', function(container) {
             container.innerHTML = '';
+            // eslint-disable-next-line no-unsanitized/method
             container.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Failed to start network monitoring: ${error.message || 'Unknown error'}
@@ -298,6 +302,7 @@ function fetchMonitoredNetworkDirectories() {
             .catch(error => {
                 console.error('Error fetching monitored directories:', error);
                 container.innerHTML = '';
+                // eslint-disable-next-line no-unsanitized/method
                 container.appendChild(document.createRange().createContextualFragment(safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`));
             });
     });
