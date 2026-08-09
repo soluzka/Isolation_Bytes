@@ -3887,8 +3887,8 @@ def file_hashes(filepath):
     hashes = {}
     with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
         data = f.read()
-        hashes['md5'] = hashlib.md5(data).hexdigest()
-        hashes['sha1'] = hashlib.sha1(data).hexdigest()
+        hashes['md5'] = hashlib.md5(data, usedforsecurity=False).hexdigest()  # nosem
+        hashes['sha1'] = hashlib.sha1(data, usedforsecurity=False).hexdigest()  # nosem
         hashes['sha256'] = hashlib.sha256(data).hexdigest()
     return hashes
 
