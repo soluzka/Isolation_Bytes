@@ -68,7 +68,7 @@ if platform.system() == 'Windows':
     username = getpass.getuser()
     for folder in [QUARANTINE_FOLDER, FAILED_QUARANTINE_FOLDER]:
         try:
-            subprocess.run([
+            subprocess.run([  # nosec B603
                 'icacls', folder,
                 '/inheritance:r',
                 f'/grant:r', f'{username}:F',

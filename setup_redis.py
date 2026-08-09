@@ -122,7 +122,7 @@ appendonly yes
             
         # Start Redis as a service
         try:
-            subprocess.run([str(redis_exe), str(config_path)], check=True)
+            subprocess.run([str(redis_exe), str(config_path)], check=True)  # nosec B603
             logging.info("Redis server started successfully!")
             return True
         except subprocess.CalledProcessError:

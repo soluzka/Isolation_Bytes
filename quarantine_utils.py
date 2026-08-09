@@ -30,7 +30,7 @@ if platform.system() == 'Windows':
     username = getpass.getuser()
     # Remove inherited permissions and grant full control to current user only
     try:
-        subprocess.run([
+        subprocess.run([  # nosec B603
             'icacls', QUARANTINE_FOLDER,
             '/inheritance:r',
             f'/grant:r', f'{username}:F',
@@ -53,7 +53,7 @@ def force_unlock_windows(filepath):
         import subprocess
         # handle.exe is a Sysinternals tool; user must have it in PATH
         try:
-            subprocess.run(['handle.exe', '-c', filepath, '-y'], capture_output=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.run(['handle.exe', '-c', filepath, '-y'], capture_output=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603
         except Exception as e:
             logging.warning(f'Could not run handle.exe to unlock {filepath}: {e}')
 

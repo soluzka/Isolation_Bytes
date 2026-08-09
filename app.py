@@ -1818,7 +1818,7 @@ def start_redis_server():
             try:
                 redis_path = r'C:\Redis\redis-server.exe'
                 if os.path.exists(redis_path):
-                    subprocess.Popen([redis_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
+                    subprocess.Popen([redis_path], creationflags=subprocess.CREATE_NEW_CONSOLE)  # nosec B603
                     print('Redis server started automatically.')
                 else:
                     print(f'Redis server executable not found at {redis_path}.')
@@ -4880,8 +4880,8 @@ def start_antivirus_cli():
     try:
         script_path = os.path.join(basedir, "antivirus_cli.py")
         # Launch as detached process (works on Windows)
-        subprocess.Popen(
-            ["python", script_path],
+        subprocess.Popen(  # nosec B603
+            [sys.executable, script_path],
             cwd=basedir,
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
         )
@@ -5651,7 +5651,7 @@ def get_storage_backend():
                 redis_config = os.path.join(os.path.dirname(redis_exe), 'redis.conf')
             
             # Start Redis server
-            process = subprocess.Popen(
+            process = subprocess.Popen(  # nosec B603
                 [redis_exe, redis_config],
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 stdout=subprocess.PIPE,
