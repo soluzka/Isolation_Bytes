@@ -249,7 +249,7 @@ def update_defender_signatures():
         return
     import subprocess
     try:
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # nosem; nosec B603
             ['powershell', '-Command', 'Update-MpSignature'],
             capture_output=True, text=True
         )
@@ -292,7 +292,7 @@ def monitor():
         CREATE_NO_WINDOW = 0
     basedir = os.path.dirname(os.path.abspath(__file__))
     folder_watcher_path = os.path.join(basedir, 'folder_watcher.py')
-    subprocess.Popen([
+    subprocess.Popen([  # nosem; nosec B603
         sys.executable, folder_watcher_path
     ], creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

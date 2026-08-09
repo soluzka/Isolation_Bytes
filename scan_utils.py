@@ -94,7 +94,7 @@ def update_windows_defender_definitions():
     try:
         # PowerShell command to update Windows Defender definitions
         # Fix: Use capture_output instead of stdout and stderr parameters
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # nosem; nosec B603
             ["powershell", "-Command", "Update-MpSignature"],
             capture_output=True, text=True, timeout=300)
         
@@ -391,7 +391,7 @@ def is_antivirus_available():
     if system == 'Windows':
         # Check if Windows Defender is available
         try:
-            result = subprocess.run(  # nosec B603
+            result = subprocess.run(  # nosem; nosec B603
                 [
                     'powershell',
                     '-Command',

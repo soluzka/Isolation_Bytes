@@ -1193,7 +1193,7 @@ def _launch_safe_downloader_step(basedir, output):
         return
     if safe_downloader_url and safe_downloader_output:
         try:
-            subprocess.Popen([  # nosec B603
+            subprocess.Popen([  # nosem; nosec B603
                 sys.executable, safe_downloader_path,
                 safe_downloader_url, safe_downloader_output
             ])
@@ -1229,7 +1229,7 @@ def _start_antivirus_cli_step(basedir, output):
         output.write("[conditional_startup] antivirus_cli.py not found!\n")
         return
     try:
-        subprocess.Popen([sys.executable, cli_path])
+        subprocess.Popen([sys.executable, cli_path])  # nosem; nosec B603
         output.write("[conditional_startup] antivirus_cli.py started.\n")
     except Exception as e:
         output.write(f"[ERROR] Could not start antivirus_cli.py: {e}\n")

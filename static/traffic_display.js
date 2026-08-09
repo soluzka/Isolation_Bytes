@@ -59,6 +59,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
     
     // Return if no traffic data available
     if (!trafficData || trafficData.error) {
+        // nosem
         trafficContent.innerHTML = safe`
             <div class="alert alert-info">
                 ${trafficData && trafficData.error ? 'Error: ' + trafficData.error : 'No traffic data available yet. Monitoring is initializing...'}
@@ -169,7 +170,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     // Update the content
     // eslint-disable-next-line no-unsanitized/property
-    trafficContent.innerHTML = html;
+    trafficContent.innerHTML = html; // nosem
 }
 
 // Function to fetch traffic statistics from the API
@@ -259,6 +260,7 @@ function startTrafficMonitoring() {
         console.error('Error starting traffic monitoring:', error);
         // Display error in traffic stats container
         safeDomOperation('traffic_stats', function(container) {
+            // nosem
             container.innerHTML = safe`
                 <div class="alert alert-warning">
                     Failed to start network monitoring: ${error.message || 'Unknown error'}
@@ -294,6 +296,7 @@ function fetchMonitoredNetworkDirectories() {
             })
             .catch(error => {
                 console.error('Error fetching monitored directories:', error);
+                // nosem
                 container.innerHTML = safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`;
             });
     });

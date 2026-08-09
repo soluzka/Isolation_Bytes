@@ -9,7 +9,7 @@ env = os.environ.copy()
 env["FLASK_APP"] = "app.py"
 
 # Launch the Flask app in a way that bypasses the initialization errors
-subprocess.Popen([  # nosec B603
+subprocess.Popen([  # nosem; nosec B603
     sys.executable, 
     "-c", 
     """

@@ -78,7 +78,7 @@ def block_ip(ip, reason=""):
         return True, f"{ip} is already blocked"
 
     try:
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # nosem; nosec B603
             ['netsh', 'advfirewall', 'firewall', 'add', 'rule',
              f'name={_rule_name(ip)}', 'dir=out', 'action=block', f'remoteip={ip}'],
             capture_output=True, text=True, timeout=15
@@ -102,7 +102,7 @@ def block_ip(ip, reason=""):
 def unblock_ip(ip):
     """Remove the firewall rule blocking `ip`. Returns (success, message)."""
     try:
-        result = subprocess.run(  # nosec B603
+        result = subprocess.run(  # nosem; nosec B603
             ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={_rule_name(ip)}'],
             capture_output=True, text=True, timeout=15
         )

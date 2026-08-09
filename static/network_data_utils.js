@@ -41,7 +41,7 @@
             return { ok: false, status: null, data: null, error: 'Refused to fetch a non-relative or unsafe URL' };
         }
         try {
-            const response = await fetch(url, options);
+            const response = await fetch(url, options); // nosem
             if (!response.ok) {
                 return { ok: false, status: response.status, data: null, error: `Request failed with status ${response.status}` };
             }

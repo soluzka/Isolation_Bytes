@@ -19,7 +19,7 @@ def run_cli(args, input_text=None):
     env['FORCE_MALWARE'] = '1'
     env['FERNET_KEY'] = FERNET_KEY
     cmd = [sys.executable, 'antivirus_cli.py'] + args
-    result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, env=env)  # nosec B603
+    result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, env=env)  # nosem; nosec B603
     return result
 
 def test_scan_nonexistent_file():

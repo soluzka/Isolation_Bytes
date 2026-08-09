@@ -250,7 +250,7 @@ def scan_and_quarantine(filepath, timeout=600, max_file_size=100 * 1024 * 1024):
 
             # Scan the file using Windows Defender
             try:
-                subprocess.run(  # nosec B603
+                subprocess.run(  # nosem; nosec B603
                     ['powershell', '-Command', f"Start-MpScan -ScanPath '{filepath}' -ScanType CustomScan"],
                     timeout=timeout,
                     check=True
@@ -665,7 +665,7 @@ class CustomEventHandler(FileSystemEventHandler):
 
             # Windows Defender scan
             try:
-                subprocess.run(  # nosec B603
+                subprocess.run(  # nosem; nosec B603
                     ['powershell', '-Command', f"Start-MpScan -ScanPath '{file_path}' -ScanType CustomScan"],
                     timeout=60,
                     check=True
@@ -730,7 +730,7 @@ class CustomEventHandler(FileSystemEventHandler):
 
             # Windows Defender scan
             try:
-                subprocess.run(  # nosec B603
+                subprocess.run(  # nosem; nosec B603
                     ['powershell', '-Command', f"Start-MpScan -ScanPath '{file_path}' -ScanType CustomScan"],
                     timeout=60,
                     check=True

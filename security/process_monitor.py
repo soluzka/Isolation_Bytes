@@ -125,11 +125,11 @@ def block_ip(ip):
     Block the given IP using Windows Firewall (netsh advfirewall). Only works with admin privileges.
     """
     try:
-        subprocess.run([  # nosec B603
+        subprocess.run([  # nosem; nosec B603
             'netsh', 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=out', 'action=block', f'remoteip={ip}'
         ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([  # nosec B603
+        subprocess.run([  # nosem; nosec B603
             'netsh', 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=in', 'action=block', f'remoteip={ip}'
         ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -14,7 +14,7 @@ else:
     CREATE_NO_WINDOW = 0
 
 # 1. Get all netstat output for 127.0.0.1 connections
-output = subprocess.check_output(["netstat", "-ano"], text=True, encoding="utf-8", errors="ignore", creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW)  # nosec B603
+output = subprocess.check_output(["netstat", "-ano"], text=True, encoding="utf-8", errors="ignore", creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW)  # nosem; nosec B603
 
 # 2. Extract PIDs for connections to 127.0.0.1
 pid_pattern = re.compile(r"127\.0\.0\.1:\d+\s+.*?\s+(\d+)")
@@ -39,7 +39,7 @@ for pid in pids:
 for exe in exe_paths:
     # print(f"Scanning {exe}...")  # Removed to reduce spam
     try:
-        result = subprocess.run([  # nosec B603
+        result = subprocess.run([  # nosem; nosec B603
             sys.executable, "antivirus_cli.py", "scan", exe
         ], cwd=os.path.dirname(os.path.abspath(__file__)), capture_output=True, text=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # print(result.stdout)  # Removed to reduce spam

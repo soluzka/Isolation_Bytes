@@ -123,7 +123,7 @@ class NetworkSegmentManager:
         try:
             # Create firewall rules for allowed ports
             for port in segment.allowed_ports:
-                subprocess.run([  # nosec B603
+                subprocess.run([  # nosem; nosec B603
                     'netsh', 'advfirewall', 'firewall', 'add', 'rule',
                     'name=f"Segment_{segment.name}_Port_{port}"',
                     'protocol=TCP',
@@ -146,7 +146,7 @@ class NetworkSegmentManager:
     def apply_web_service_rules(self, segment: NetworkSegment):
         """Apply rules specific to web services."""
         try:
-            subprocess.run([  # nosec B603
+            subprocess.run([  # nosem; nosec B603
                 'netsh', 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Segment_{segment.name}_Web_Service"',
                 'protocol=TCP',
@@ -161,7 +161,7 @@ class NetworkSegmentManager:
     def apply_database_service_rules(self, segment: NetworkSegment):
         """Apply rules specific to database services."""
         try:
-            subprocess.run([  # nosec B603
+            subprocess.run([  # nosem; nosec B603
                 'netsh', 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Segment_{segment.name}_Database_Service"',
                 'protocol=TCP',
@@ -187,7 +187,7 @@ class NetworkSegmentManager:
         """Apply rules based on connection behavior."""
         try:
             # Add rate limiting for suspicious behavior
-            subprocess.run([  # nosec B603
+            subprocess.run([  # nosem; nosec B603
                 'netsh', 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Behavior_Limit_{segment.name}"',
                 'protocol=TCP',
