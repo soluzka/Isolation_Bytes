@@ -409,6 +409,7 @@ if __name__ == "__main__":
     print(f"Starting DNS server on port {args.port}")
     print(f"Network access: {'Enabled for ' + args.range if args.network else 'Disabled (localhost only)'}")
     
+    server = None
     try:
         server, resolver = start_dns_server(args.range, args.network, args.port)
         

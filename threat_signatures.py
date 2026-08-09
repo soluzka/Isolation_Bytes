@@ -152,8 +152,8 @@ class ThreatSignatureDatabase:
             
     def update_from_local_database(self):
         """Update from local threat database. Create if it doesn't exist."""
+        signature_file = os.path.join(self.signature_dir, 'local_signatures.json')
         try:
-            signature_file = os.path.join(self.signature_dir, 'local_signatures.json')
             # Load existing signatures
             self.load_signatures()
         except Exception as e:
