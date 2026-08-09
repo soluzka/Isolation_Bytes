@@ -1,21 +1,21 @@
 # Core deployment requirements
 cffi>=1.15.1
 wheel>=0.37.1
-setuptools>=65.5.1
+setuptools>=83.0.0
 
 # Flask web framework
-Flask
+Flask>=3.1.3
 flask-cors
 flask-sqlalchemy
 Flask-Login>=0.6.3
 Flask-WTF
 markupsafe
 itsdangerous
-click
+click>=8.3.3
 Jinja2
 
 # Cryptography for file encryption/decryption
-cryptography
+cryptography>=50.0.0
 
 # Requests for HTTP file download
 requests
@@ -38,17 +38,17 @@ scikit-learn>=1.3.0
 clamd>=1.0
 
 # For automated testing
-pytest>=7.0
+pytest>=9.0.3
 
 # For loading .env files
-python-dotenv>=1.0
+python-dotenv>=1.2.2
 
 # These Windows-specific packages won't be used on Render (Linux) but included for completeness
 # pywin32 and wmi are Windows-only and will be skipped on Linux
 pywin32-ctypes>=0.2.0
 
 # Werkzeug for secure_filename
-Werkzeug>=2.0
+Werkzeug>=3.1.6
 
 # Archive extraction support
 rarfile>=4.0
@@ -63,14 +63,14 @@ bcrypt>=4.0
 
 # For TOTP-based 2FA
 pyotp>=2.9
-py7zr>=0.21.1
+py7zr>=1.1.3
 
 # For DNS-based reputation services
 dnspython>=2.0
 
 # Machine Learning dependencies
 joblib<1.3.0
-requests>=2.31.0
+requests>=2.33.0
 psutil>=5.9.0
 
 # Network monitoring and analysis

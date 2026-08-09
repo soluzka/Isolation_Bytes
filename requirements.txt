@@ -1,11 +1,11 @@
 # Flask web framework
-Flask
+Flask>=3.1.3
 flask-cors
 flask-sqlalchemy
 Flask-Login>=0.6.3
 markupsafe
 itsdangerous
-click
+click>=8.3.3
 Jinja2
 
 # Flask-WTF for CSRF protection
@@ -13,7 +13,7 @@ Flask-WTF
 
 # Cryptography for file encryption/decryption
 cffi>=1.15.1
-cryptography
+cryptography>=50.0.0
 
 # Requests for HTTP file download
 requests
@@ -36,10 +36,10 @@ scikit-learn==1.6.1
 clamd>=1.0
 
 # For automated testing
-pytest>=7.0
+pytest>=9.0.3
 
 # For loading .env files
-python-dotenv>=1.0
+python-dotenv>=1.2.2
 
 # For Windows-specific packages for admin privileges
 # Note: pywin32 needs special installation:
@@ -50,7 +50,7 @@ pywin32-ctypes>=0.2.0
 wmi>=1.5.1; platform_system=="Windows"
 
 # Werkzeug for secure_filename (if used directly)
-Werkzeug>=2.0
+Werkzeug>=3.1.6
 
 # Archive extraction support
 rarfile>=4.0
@@ -66,7 +66,7 @@ bcrypt>=4.0
 # For TOTP-based 2FA
 pyotp>=2.9
 rarfile>=1.0
-py7zr>=0.21.1
+py7zr>=1.1.3
 
 # DNS resolution for Project Honey Pot
 dnslib>=0.9.22
@@ -78,7 +78,7 @@ dnspython>=2.0
 # YARA for advanced malware scanning
 scikit-learn>=1.3.0
 joblib<1.3.0
-requests>=2.31.0
+requests>=2.33.0
 psutil>=5.9.0
 
 # Network monitoring and analysis
@@ -112,9 +112,9 @@ redis>=5.0.1
 pyssdeep>=1.0.0
 # 'ssdeep' package may require native build tools on Windows; use pyssdeep on Windows
 ssdeep>=3.4.2; platform_system!='Windows'
-setuptools>=68.0.0
+setuptools>=83.0.0
 
 # Static-file malware classifier (security/detector.py, security/ember_vendor/,
 # train_ember_classifier.py, train_malware_classifier.py)
-lief>=0.14.0
+lief>=0.17.2
 lightgbm>=4.0.0
