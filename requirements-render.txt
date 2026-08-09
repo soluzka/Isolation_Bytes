@@ -30,7 +30,7 @@ psutil
 pandas
 matplotlib
 seaborn
-numpy>=1.26.4,<2.0
+numpy>=2.0.0,<2.3.0
 scipy<1.13.0
 scikit-learn>=1.7.0
 
@@ -80,7 +80,7 @@ limits<6.0
 ordered-set<4.2
 rich<14.0
 pygments<3.0
-typing_extensions<4.14
+typing_extensions>=4.14.1
 wrapt<1.18
 markdown-it-py<3.1
 mdurl<0.3
