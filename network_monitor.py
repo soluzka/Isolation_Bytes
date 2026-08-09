@@ -137,9 +137,9 @@ def get_network_downloads():
                                         logging.getLogger('network_monitor').info(f"HTTPBL check for {conn.raddr.ip}: {httpbl_status}")
                                         downloads.append(download_entry)
                         except Exception as e:
-                            continue
+                            pass
         except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
+            pass
     
     return downloads
 
