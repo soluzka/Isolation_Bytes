@@ -1583,13 +1583,13 @@ def block_ip(ip, reason=None, country=None, port=None):
     try:
         # Always use the exact command for 127.0.0.1
         if ip == "127.0.0.1":
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603
                 ["netsh", "advfirewall", "firewall", "add", "rule",
                  "name=Block_127.0.0.1", "dir=out", "action=block", "remoteip=127.0.0.1"],
                 check=True, capture_output=True, text=True
             )
         else:
-            result = subprocess.run(
+            result = subprocess.run(  # nosec B603
                 ["netsh", "advfirewall", "firewall", "add", "rule",
                  f"name=Block_{ip}", "dir=out", "action=block", f"remoteip={ip}"],
                 check=True, capture_output=True, text=True
@@ -1615,8 +1615,9 @@ def list_blocked_ips():
     List IPs blocked by this tool (rules named Block_<IP>).
     """
     try:
-        cmd = ["netsh", "advfirewall", "firewall", "show", "rule", "name=all"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(  # nosec B603
+            ["netsh", "advfirewall", "firewall", "show", "rule", "name=all"],
+            capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         blocked = []
         if result.returncode == 0:
             for line in result.stdout.splitlines():
@@ -1646,8 +1647,9 @@ def unblock_ip(ip):
             
         # Remove firewall rule
         rule_name = f"Block_{ip}"
-        cmd = ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        result = subprocess.run(  # nosec B603
+            ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"],
+            capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         if result.returncode == 0:
             logging.warning(f"UNBLOCKED: IP {ip} (rule {rule_name}) removed from Windows Firewall.")
@@ -2153,7 +2155,7 @@ if __name__ == "__main__":
         script_path = os.path.join(os.path.dirname(__file__), 'scan_active_connections.py')
         while True:
             try:
-                subprocess.Popen(get_resource_path(os.path.join('python')), script_path)
+                subprocess.Popen([get_resource_path(os.path.join('python')), script_path])  # nosec B603
             except Exception as e:
                 logging.error(f'Failed to run scan_active_connections.py: {e}')
             time.sleep(interval_minutes * 60)

@@ -1193,7 +1193,7 @@ def _launch_safe_downloader_step(basedir, output):
         return
     if safe_downloader_url and safe_downloader_output:
         try:
-            subprocess.Popen([
+            subprocess.Popen([  # nosec B603
                 sys.executable, safe_downloader_path,
                 safe_downloader_url, safe_downloader_output
             ])

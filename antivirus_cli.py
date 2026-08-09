@@ -249,7 +249,7 @@ def update_defender_signatures():
         return
     import subprocess
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603
             ['powershell', '-Command', 'Update-MpSignature'],
             capture_output=True, text=True
         )

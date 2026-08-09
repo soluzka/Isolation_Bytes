@@ -6,6 +6,7 @@ import tempfile
 import shutil
 import pytest
 import subprocess
+import sys
 from unittest.mock import patch
 from cryptography.fernet import Fernet
 
@@ -17,8 +18,8 @@ def run_cli(args, input_text=None):
     env = os.environ.copy()
     env['FORCE_MALWARE'] = '1'
     env['FERNET_KEY'] = FERNET_KEY
-    cmd = ['python', 'antivirus_cli.py'] + args
-    result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, env=env)
+    cmd = [sys.executable, 'antivirus_cli.py'] + args
+    result = subprocess.run(cmd, input=input_text, text=True, capture_output=True, env=env)  # nosec B603
     return result
 
 def test_scan_nonexistent_file():

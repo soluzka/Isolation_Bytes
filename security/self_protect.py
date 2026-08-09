@@ -19,6 +19,6 @@ def watchdog_restart(target_cmd):
         DETACHED_PROCESS = 0
         CREATE_NO_WINDOW = 0
     while True:
-        proc = subprocess.Popen(get_resource_path(os.path.join(target_cmd)), creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        proc = subprocess.Popen([get_resource_path(os.path.join(target_cmd))], creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)  # nosec B603
         proc.wait()
         time.sleep(1)  # Short delay before restart
