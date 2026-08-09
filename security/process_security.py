@@ -78,16 +78,16 @@ def _is_signed_windows(path: str) -> bool:
         return False
     try:
         import subprocess
-        import shutil
-        ps = shutil.which('powershell') or 'powershell'
-        cmd = [
-            ps, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-            'Get-AuthenticodeSignature -Path $env:TARGET_EXE | Select-Object -ExpandProperty Status -ErrorAction Stop'
-        ]
         env = os.environ.copy()
         env['TARGET_EXE'] = path
-        out = subprocess.run(cmd, capture_output=True, text=True, check=False,
-                             creationflags=0x08000000, env=env).stdout.strip()
+        out = subprocess.run(
+            [
+                'powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                'Get-AuthenticodeSignature -Path $env:TARGET_EXE | Select-Object -ExpandProperty Status -ErrorAction Stop'
+            ],
+            capture_output=True, text=True, check=False,
+            creationflags=0x08000000, env=env
+        ).stdout.strip()
         return 'Valid' in out
     except Exception:
         return False
