@@ -2259,8 +2259,9 @@ if __name__ == '__main__':
                     detected_port = port
                     print(f"Found a service on port {port} - assuming it's our server")
                     break
-            except:
-                continue
+            except Exception:
+                # Port check failed; the for-loop will continue to the next candidate
+                pass
     
     # Show a popup with the URL; clicking OK opens the browser.
     if detected_port is not None:
