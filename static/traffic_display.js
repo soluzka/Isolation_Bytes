@@ -10,6 +10,22 @@ function unwrapPayload(payload, key) {
     return payload;
 }
 
+// Escape a string so it can be safely embedded in HTML
+function escapeHtml(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+}
+
+// Tagged template that escapes all interpolated values
+function safe(strings, ...values) {
+    return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
+}
+
 // Update traffic statistics display
 function updateTrafficDisplay(trafficData, c2Data) {
     trafficData = unwrapPayload(trafficData, 'stats');
@@ -43,7 +59,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
     
     // Return if no traffic data available
     if (!trafficData || trafficData.error) {
-        trafficContent.innerHTML = `
+        trafficContent.innerHTML = safe`
             <div class="alert alert-info">
                 ${trafficData && trafficData.error ? 'Error: ' + trafficData.error : 'No traffic data available yet. Monitoring is initializing...'}
             </div>`;
@@ -54,7 +70,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
     const timestamp = trafficData.timestamp ? new Date(trafficData.timestamp * 1000).toLocaleString() : 'N/A';
     
     // Build statistics HTML
-    let html = `
+    let html = safe`
         <div style="margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;">
             <h4>Connection Summary</h4>
             <div style="display: flex; flex-wrap: wrap; gap: 15px;">
@@ -75,38 +91,38 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     // Active IP addresses
     if (trafficData.active_ips && trafficData.active_ips.length > 0) {
-        html += `
+        html += safe`
             <div style="margin-bottom: 15px;">
                 <h4>Active IP Connections (${trafficData.active_ips.length})</h4>
                 <div style="max-height: 150px; overflow-y: auto; padding: 5px; background: #f8f8f8; border-radius: 4px;">`;
         
         trafficData.active_ips.forEach(ip => {
-            html += `<div style="margin: 3px 0; padding: 2px 5px;">${ip}</div>`;
+            html += safe`<div style="margin: 3px 0; padding: 2px 5px;">${ip}</div>`;
         });
         
-        html += `</div></div>`;
+        html += safe`</div></div>`;
     }
 
     // Protocol breakdown
     if (trafficData.protocols && Object.keys(trafficData.protocols).length > 0) {
-        html += `
+        html += safe`
             <div style="margin-bottom: 15px;">
                 <h4>Protocol Breakdown</h4>
                 <div style="display: flex; flex-wrap: wrap; gap: 10px;">`;
         
         for (const [protocol, count] of Object.entries(trafficData.protocols)) {
-            html += `
+            html += safe`
                 <div style="flex: 1; min-width: 100px; padding: 8px; background: #f0f0f0; border-radius: 4px; text-align: center;">
                     <strong>${protocol}:</strong> ${count}
                 </div>`;
         }
         
-        html += `</div></div>`;
+        html += safe`</div></div>`;
     }
 
     // Process information
     if (trafficData.processes && Object.keys(trafficData.processes).length > 0) {
-        html += `
+        html += safe`
             <div style="margin-bottom: 15px;">
                 <h4>Process Network Activity</h4>
                 <div style="max-height: 200px; overflow-y: auto;">
@@ -120,26 +136,26 @@ function updateTrafficDisplay(trafficData, c2Data) {
                         <tbody>`;
         
         for (const [process, data] of Object.entries(trafficData.processes)) {
-            html += `
+            html += safe`
                 <tr style="border-bottom: 1px solid #eee;">
                     <td style="padding: 8px;">${process}</td>
                     <td style="text-align: center; padding: 8px;">${data.connections || 0}</td>
                 </tr>`;
         }
         
-        html += `</tbody></table></div></div>`;
+        html += safe`</tbody></table></div></div>`;
     }
 
     // Display C2 detection information if available
     if (c2Data && !c2Data.error) {
         if (c2Data.suspicious_connections && c2Data.suspicious_connections.length > 0) {
-            html += `
+            html += safe`
                 <div style="margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;">
                     <h4 style="color: #e74c3c;">Suspicious Connection Alerts</h4>
                     <div style="max-height: 200px; overflow-y: auto;">`;
             
             c2Data.suspicious_connections.forEach(conn => {
-                html += `
+                html += safe`
                     <div style="margin: 8px 0; padding: 8px; background: #fff3f3; border-left: 3px solid #e74c3c; border-radius: 4px;">
                         <div><strong>Process:</strong> ${conn.process} (PID: ${conn.pid})</div>
                         <div><strong>Remote:</strong> ${conn.remote_ip}:${conn.remote_port}</div>
@@ -147,11 +163,12 @@ function updateTrafficDisplay(trafficData, c2Data) {
                     </div>`;
             });
             
-            html += `</div></div>`;
+            html += safe`</div></div>`;
         }
     }
 
     // Update the content
+    // eslint-disable-next-line no-unsanitized/property
     trafficContent.innerHTML = html;
 }
 
@@ -169,7 +186,7 @@ function updateTrafficStats() {
         console.error('Error fetching traffic stats:', error);
         const trafficContent = document.getElementById('traffic_content') || document.getElementById('traffic_stats');
         if (trafficContent) {
-            trafficContent.innerHTML = `
+            trafficContent.innerHTML = safe`
                 <div class="alert alert-warning">
                     Error retrieving traffic statistics: ${error.message || 'Unknown error'}
                 </div>`;
@@ -242,7 +259,7 @@ function startTrafficMonitoring() {
         console.error('Error starting traffic monitoring:', error);
         // Display error in traffic stats container
         safeDomOperation('traffic_stats', function(container) {
-            container.innerHTML = `
+            container.innerHTML = safe`
                 <div class="alert alert-warning">
                     Failed to start network monitoring: ${error.message || 'Unknown error'}
                 </div>`;
@@ -277,7 +294,7 @@ function fetchMonitoredNetworkDirectories() {
             })
             .catch(error => {
                 console.error('Error fetching monitored directories:', error);
-                container.innerHTML = `<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`;
+                container.innerHTML = safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`;
             });
     });
 }

@@ -48,7 +48,7 @@ class ConnectionTracker:
             conn_info.get('protocol', ''),
             conn_info.get('process', '')
         ]
-        return hashlib.md5(''.join(parts).encode()).hexdigest()
+        return hashlib.md5(''.join(parts).encode(), usedforsecurity=False).hexdigest()
         
     def _cleanup_old_connections(self):
         """Clean up old connection history."""

@@ -75,8 +75,8 @@ def main():
         payload = {'url': url}
         logging.info(f"Requesting API: {api_url} with url={url}")
         resp = requests.post(
-            api_url, headers=headers, data=json.dumps(payload), verify=False
-        )  # verify=False for self-signed certs
+            api_url, headers=headers, data=json.dumps(payload)
+        )
         if resp.status_code != 200:
             try:
                 error = resp.json().get('error', resp.text)
@@ -91,7 +91,7 @@ def main():
             # print('No download URL returned from API.')  # Removed to reduce spam
             sys.exit(1)
         logging.info(f"Downloading encrypted file from {download_url}")
-        r = requests.get(download_url, stream=True, verify=False)
+        r = requests.get(download_url, stream=True)
         if r.status_code == 200:
             temp_dir = tempfile.mkdtemp()
             download_path = os.path.join(temp_dir, os.path.basename(download_url))

@@ -2063,12 +2063,12 @@ def start_server(port=5000):
         # Check if port is available with a direct bind attempt
         test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            test_socket.bind(('0.0.0.0', port))
+            test_socket.bind(('127.0.0.1', port))
             test_socket.close()
             # Port is available
             print(f"Server running at http://127.0.0.1:{port}")
             # Start server in non-debug mode to avoid reloader issues
-            app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False, threaded=True)
+            app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
             return port
         except OSError:
             # Port is already in use, try fallback ports
@@ -2079,7 +2079,7 @@ def start_server(port=5000):
                 try:
                     print(f"Port {port} is in use. Trying port {fallback_port}...")
                     print(f"Server running at http://127.0.0.1:{fallback_port if fallback_port != 0 else '<assigned by OS>'}")
-                    app.run(host='0.0.0.0', port=fallback_port, debug=False, threaded=True, use_reloader=False)
+                    app.run(host='127.0.0.1', port=fallback_port, debug=False, threaded=True, use_reloader=False)
                     return fallback_port
                 except OSError as e:
                     print(f"Port {fallback_port} also unavailable: {e}")

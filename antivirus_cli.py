@@ -15,8 +15,8 @@ def file_hashes(filepath):
     try:
         with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
             data = f.read()
-            hashes['md5'] = hashlib.md5(data).hexdigest()
-            hashes['sha1'] = hashlib.sha1(data).hexdigest()
+            hashes['md5'] = hashlib.md5(data, usedforsecurity=False).hexdigest()
+            hashes['sha1'] = hashlib.sha1(data, usedforsecurity=False).hexdigest()
             hashes['sha256'] = hashlib.sha256(data).hexdigest()
             hashes['sha512'] = hashlib.sha512(data).hexdigest()  # Add SHA-512 hash
     except Exception as e:

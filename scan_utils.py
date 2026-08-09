@@ -470,7 +470,7 @@ def calculate_file_hashes(filepath):
     """
     import hashlib
     
-    md5 = hashlib.md5()
+    md5 = hashlib.md5(usedforsecurity=False)
     sha256 = hashlib.sha256()
     
     try:
