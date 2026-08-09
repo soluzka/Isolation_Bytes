@@ -1,0 +1,1 @@
+Defend your Windows PC with Windows Defender — a YARA-powered antivirus dashboard that scans files, monitors live processes and network traffic, detects C2 beacons, blocks malicious IPs, quarantines threats, and gives you a real-time web dashboard — all from one portable app.
