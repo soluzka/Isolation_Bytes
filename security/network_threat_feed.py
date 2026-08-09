@@ -124,7 +124,7 @@ class NetworkThreatFeed:
             return cached["country"]
 
         try:
-            resp = requests.get(f"http://ip-api.com/json/{ip}", timeout=timeout)
+            resp = requests.get(f"https://ip-api.com/json/{ip}", timeout=timeout)
             resp.raise_for_status()
             data = resp.json()
             country = data.get("countryCode") or data.get("country")
