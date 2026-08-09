@@ -73,6 +73,7 @@ def _memory_regions(pid: int, max_bytes: int = 8192) -> List[Dict]:
 def _is_signed_windows(path: str) -> bool:
     """Best-effort check for a Windows Authenticode signature using PowerShell."""
     import platform
+    import os
     if platform.system() != 'Windows':
         return False
     try:
@@ -81,10 +82,12 @@ def _is_signed_windows(path: str) -> bool:
         ps = shutil.which('powershell') or 'powershell'
         cmd = [
             ps, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-            f'Get-AuthenticodeSignature -Path "{path}" | Select-Object -ExpandProperty Status -ErrorAction Stop'
+            'Get-AuthenticodeSignature -Path $env:TARGET_EXE | Select-Object -ExpandProperty Status -ErrorAction Stop'
         ]
+        env = os.environ.copy()
+        env['TARGET_EXE'] = path
         out = subprocess.run(cmd, capture_output=True, text=True, check=False,
-                             creationflags=0x08000000).stdout.strip()
+                             creationflags=0x08000000, env=env).stdout.strip()
         return 'Valid' in out
     except Exception:
         return False
