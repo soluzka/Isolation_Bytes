@@ -104,6 +104,7 @@ pyinstaller_args = [
     '--clean',
     '--log-level=DEBUG',
     '--noupx',
+    '--uac-admin',  # Request admin at launch; no Python self-restart loop
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
     '--windowed'  # Hide console window (no console)
@@ -121,6 +122,23 @@ if redis_available:
 
 # Add hidden imports
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
+
+# Exclude large/unnecessary packages that bloat the one-file EXE and can fail
+# extraction (e.g. TensorFlow's long internal paths / huge binaries).
+EXCLUDE_MODULES = [
+    'tensorflow',
+    'torch',
+    'torchvision',
+    'torchaudio',
+    'h5py',
+    'numba',
+    'IPython',
+    'ipykernel',
+    'notebook',
+    'pytest',
+    'scikit-learn-main',  # local source tree, not a package
+]
+pyinstaller_args += [f'--exclude-module={mod}' for mod in EXCLUDE_MODULES]
 
 # Add data directories
 for directory in data_dirs:
@@ -171,6 +189,11 @@ malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')
 if os.path.exists(malware_signatures_file):
     pyinstaller_args.append(f'--add-data={malware_signatures_file}{sep}.')
 
+# Add scan_directories.txt so the EXE knows which folders to scan
+scan_directories_file = os.path.join(base_dir, 'scan_directories.txt')
+if os.path.exists(scan_directories_file):
+    pyinstaller_args.append(f'--add-data={scan_directories_file}{sep}.')
+
 # Add scheduled_scan_state.json file
 scheduled_scan_state_file = os.path.join(base_dir, 'scheduled_scan_state.json')
 if os.path.exists(scheduled_scan_state_file):
@@ -189,9 +212,30 @@ for model_filename in ('file_malware_classifier.pkl', 'ember_malware_model.txt')
         logging.info(f'Including trained model in build: {model_filename}')
 
 # Optional: Add non-entry-point .py files if needed
+# Avoid packaging scripts that conditional_startup tries to launch as
+# subprocesses (e.g. antivirus_cli.py, safe_downloader.py), because inside the
+# one-file EXE sys.executable is the same dashboard EXE and launching them
+# would restart the app instead of running the intended script.
+SKIP_DATA_SCRIPTS = {
+    'antivirus_cli.py',
+    'safe_downloader.py',
+    'build_config.py',
+}
+SKIP_DIRS = {
+    'scikit-learn-main',
+    'build',
+    'dist',
+    'venv',
+    '__pycache__',
+    '.git',
+    '.github',
+}
 for root, _, files in os.walk(base_dir):
+    rel_root = os.path.relpath(root, base_dir)
+    if any(part in SKIP_DIRS for part in rel_root.split(os.sep)):
+        continue
     for file in files:
-        if file.endswith('.py') and file != entry_point:
+        if file.endswith('.py') and file != entry_point and file not in SKIP_DATA_SCRIPTS:
             file_path = os.path.join(root, file)
             rel_path = os.path.relpath(root, base_dir)
             pyinstaller_args.append(f'--add-data={file_path}{sep}{rel_path}')

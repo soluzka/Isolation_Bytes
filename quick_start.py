@@ -31,6 +31,10 @@ def _request_admin_elevation():
     """Prompt for UAC elevation on Windows and relaunch if not running as admin."""
     if sys.platform != 'win32':
         return
+    # The built EXE uses the PyInstaller --uac-admin manifest; don't try to
+    # self-restart from inside the frozen bundle (it causes loop/new tabs).
+    if getattr(sys, 'frozen', False):
+        return
     # Only attempt UAC elevation once. The relaunched process carries this
     # flag so it cannot recurse and spam UAC prompts / new browser windows.
     if '--elevation-attempted' in sys.argv:
@@ -69,6 +73,30 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('antivirus')
+
+
+def _ensure_single_instance():
+    """Create a Windows named mutex so only one app instance runs at a time."""
+    if sys.platform != 'win32':
+        return None
+    try:
+        name = 'Local\\AntivirusYaraRulesC_SingleInstance'
+        handle = ctypes.windll.kernel32.CreateMutexW(None, False, name)
+        err = ctypes.windll.kernel32.GetLastError()
+        if err == 183:  # ERROR_ALREADY_EXISTS
+            ctypes.windll.kernel32.CloseHandle(handle)
+            print('Another antivirus instance is already running. Exiting.')
+            sys.exit(0)
+        if not handle and err == 5:  # ERROR_ACCESS_DENIED
+            print('Another antivirus instance is already running. Exiting.')
+            sys.exit(0)
+        if not handle:
+            raise ctypes.WinError(err)
+        return handle
+    except Exception as e:
+        logger.warning(f'Could not create single-instance mutex: {e}')
+        return None
+
 
 # Persistent scan cache: avoid rescanning unchanged files on every background
 # pass and gives the operator a hash -> verdict record.
@@ -308,6 +336,7 @@ conditional_startup_state = {
     'last_error': None
 }
 conditional_startup_lock = threading.Lock()
+scanning_lock = threading.Lock()
 
 
 def _count_persistence_indicators(scan_data):
@@ -322,6 +351,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     if not isinstance(scan_data, dict):
         scan_data = {}
     conditional_startup_state.update({
+        'running': False,
         'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
         'scanned_files': len(scan_data.get('scanned_files', [])),
@@ -336,9 +366,9 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
 
 
 def run_conditional_startup_background():
-    """Run the conditional startup scan in a background thread, looping until the app exits."""
+    """Run the conditional startup scan once in a background thread."""
     from conditional_startup import run_conditional_startup_logic
-    interval = int(os.environ.get('AV_SCAN_INTERVAL_SECONDS', '60'))
+    start_time = time.time()
 
     def report_progress(partial_results):
         """Update shared state with in-progress counts so the status API
@@ -358,32 +388,25 @@ def run_conditional_startup_background():
             'persistence_indicators': _count_persistence_indicators(partial_results),
         })
 
-    while True:
-        start_time = time.time()
-        with conditional_startup_lock:
-            conditional_startup_state.update({
-                'running': True,
-                'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-            })
-
-        try:
-            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
-            record_conditional_startup_run(scan_data, time.time() - start_time)
-            logger.info("Conditional startup scan completed")
-        except BaseException as e:
-            # BaseException so SystemExit raised by imported modules (e.g. missing
-            # FERNET_KEY) is recorded instead of leaving the state stuck on running
-            logger.error(f"Error running conditional startup: {e!r}")
-            record_conditional_startup_run(error=e, duration=time.time() - start_time)
-
-        # Keep the scanner in an active state; it will re-scan after the interval.
+    with conditional_startup_lock:
         conditional_startup_state.update({
             'running': True,
+            'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
         })
-        logger.info(f"Next conditional startup scan in {interval} seconds")
-        time.sleep(interval)
+
+    try:
+        with scanning_lock:
+            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
+        with conditional_startup_lock:
+            record_conditional_startup_run(scan_data, time.time() - start_time)
+        logger.info("Conditional startup scan completed")
+    except BaseException as e:
+        # BaseException so SystemExit raised by imported modules (e.g. missing
+        # FERNET_KEY) is recorded instead of leaving the state stuck on running
+        logger.error(f"Error running conditional startup: {e!r}")
+        with conditional_startup_lock:
+            record_conditional_startup_run(error=e, duration=time.time() - start_time)
 
 
 @app.route('/api/conditional_startup/status', methods=['GET'])
@@ -1874,6 +1897,15 @@ def status():
 def run_scheduled_scans():
     """Run scheduled security scans in the background with continuous YARA scanning."""
     while True:
+        # Don't start continuous scans until the startup scan has completed,
+        # and don't run concurrently with another scan.
+        with conditional_startup_lock:
+            if conditional_startup_state['last_run'] is None:
+                time.sleep(1)
+                continue
+        if not scanning_lock.acquire(blocking=False):
+            time.sleep(1)
+            continue
         try:
             # Run YARA scan on all files in monitored directories
             try:
@@ -1978,6 +2010,8 @@ def run_scheduled_scans():
         
         except Exception as e:
             logger.error(f"Error in scheduled scan: {str(e)}")
+        finally:
+            scanning_lock.release()
         
         # Continuous scanning - short pause to prevent CPU overload
         time.sleep(5)
@@ -2110,6 +2144,7 @@ class ServerInfo:
         self.port = None
 
 if __name__ == '__main__':
+    _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
     
     # Initialize DNS server and start it automatically
@@ -2132,7 +2167,19 @@ if __name__ == '__main__':
     auto_block_thread = threading.Thread(target=run_auto_block_monitor, daemon=True)
     auto_block_thread.start()
     logger.info("Auto-block monitor thread started (inactive until enabled)")
-    
+
+    # Start conditional startup scan automatically the first time the app runs
+    with conditional_startup_lock:
+        if not conditional_startup_state['running']:
+            conditional_startup_state.update({
+                'running': True,
+                'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            })
+            cs_thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+            cs_thread.start()
+            logger.info("Conditional startup scan auto-started")
+
     # Create a queue for passing the port from server thread to main thread
     port_queue = queue.Queue()
     
@@ -2216,10 +2263,24 @@ if __name__ == '__main__':
             except:
                 continue
     
-    # Open browser window with the detected port
+    # Show a popup with the URL; clicking OK opens the browser.
     if detected_port is not None:
-        print(f"Opening browser to http://127.0.0.1:{detected_port}")
-        open_browser(detected_port)
+        url = f"http://127.0.0.1:{detected_port}"
+        print(f"Server is ready at {url}")
+        if sys.platform == 'win32':
+            try:
+                result = ctypes.windll.user32.MessageBoxW(
+                    0,
+                    f"Antivirus dashboard is ready at {url}\n\n"
+                    "Click OK to open it and view the live scan indicators.",
+                    "Antivirus Dashboard",
+                    0x00000000  # MB_OK
+                )
+                if result == 1:  # IDOK
+                    import webbrowser
+                    webbrowser.open(url, new=2)
+            except Exception:
+                pass
     else:
         print("\nCould not detect which port the server is running on.")
         print("The server is likely running on one of: 5000, 5001, 8080, 8000")

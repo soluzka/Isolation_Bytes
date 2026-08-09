@@ -71,6 +71,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                 if is_system_folder(exe):
                     continue  # Skip system/Windows default folders
                 # Only scan user processes from user-created folders
+                emit('process_scanned', pid=pid, name=name, exe=exe, malware_found=False)
                 result = scan_func(exe)
                 if result and len(result) >= 3:  # Ensure result tuple has enough elements
                     if isinstance(result, (tuple, list)) and len(result) >= 3:
@@ -78,7 +79,6 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                     else:
                         logging.error(f'Unexpected scan result format for {exe}: {result}')
                         continue
-                    emit('process_scanned', pid=pid, name=name, exe=exe, malware_found=bool(malware_found))
                     if not scan_success:
                         logging.warning(f'Scan failed for {exe}: {msg}')
                     elif malware_found:

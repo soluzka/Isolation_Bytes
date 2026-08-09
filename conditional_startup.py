@@ -39,9 +39,9 @@ def get_resource_path(relative_path):
     """
     Returns the absolute path to a resource, handling both normal and frozen environments (e.g., PyInstaller).
     """
-    if getattr(sys, 'frozen', False):
-        # If running in a frozen environment (PyInstaller)
-        base_path = os.path.dirname(sys.executable)
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        # PyInstaller one-file extracts to a temp folder
+        base_path = sys._MEIPASS
     else:
         # If running as a script
         base_path = os.path.dirname(os.path.abspath(__file__))
@@ -1207,7 +1207,7 @@ def _launch_safe_downloader_step(basedir, output):
 def _load_scheduled_scan_state(state_file, output):
     """Read scheduled_scan_state.json, returning whether scans are enabled."""
     try:
-        with open(get_resource_path(os.path.join(state_file)), 'r') as f:
+        with open(state_file, 'r') as f:
             state = json.load(f)
         return state.get('enabled', False)
     except Exception as e:
