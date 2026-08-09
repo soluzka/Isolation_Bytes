@@ -5341,8 +5341,9 @@ def get_login_attempts():
                 # Windows Defender scan if available
                 if platform.system() == "Windows":
                     try:
-                        defender_result = subprocess.run(
-                            ["powershell", "-Command", f"Start-MpScan -ScanPath '{filepath}' -ScanType CustomScan"],
+                        safe_path = filepath.replace("'", "''")
+                        defender_result = subprocess.run(  # nosem; nosec B603
+                            ["powershell", "-Command", f"Start-MpScan -ScanPath '{safe_path}' -ScanType CustomScan"],
                             capture_output=True,
                             text=True,
                             timeout=300
