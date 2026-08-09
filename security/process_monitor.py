@@ -3,6 +3,9 @@ import os
 import logging
 import sys
 import subprocess
+import shutil
+
+NETSH_PATH = shutil.which('netsh') or 'netsh'
 
 # --- Windows subprocess window suppression ---
 import sys
@@ -126,11 +129,11 @@ def block_ip(ip):
     """
     try:
         subprocess.run([  # nosem; nosec B603
-            'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+            NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=out', 'action=block', f'remoteip={ip}'
         ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         subprocess.run([  # nosem; nosec B603
-            'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+            NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=in', 'action=block', f'remoteip={ip}'
         ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:

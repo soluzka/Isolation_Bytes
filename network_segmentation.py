@@ -6,6 +6,9 @@ import subprocess
 import time
 from dataclasses import dataclass
 from enum import Enum
+import shutil
+
+NETSH_PATH = shutil.which('netsh') or 'netsh'
 
 class ServiceType(Enum):
     WEB = "web"
@@ -124,7 +127,7 @@ class NetworkSegmentManager:
             # Create firewall rules for allowed ports
             for port in segment.allowed_ports:
                 subprocess.run([  # nosem; nosec B603
-                    'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                    NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
                     'name=f"Segment_{segment.name}_Port_{port}"',
                     'protocol=TCP',
                     'dir=in',
@@ -147,7 +150,7 @@ class NetworkSegmentManager:
         """Apply rules specific to web services."""
         try:
             subprocess.run([  # nosem; nosec B603
-                'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Segment_{segment.name}_Web_Service"',
                 'protocol=TCP',
                 'dir=in',
@@ -162,7 +165,7 @@ class NetworkSegmentManager:
         """Apply rules specific to database services."""
         try:
             subprocess.run([  # nosem; nosec B603
-                'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Segment_{segment.name}_Database_Service"',
                 'protocol=TCP',
                 'dir=in',
@@ -188,7 +191,7 @@ class NetworkSegmentManager:
         try:
             # Add rate limiting for suspicious behavior
             subprocess.run([  # nosem; nosec B603
-                'netsh', 'advfirewall', 'firewall', 'add', 'rule',
+                NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
                 'name=f"Behavior_Limit_{segment.name}"',
                 'protocol=TCP',
                 'dir=in',

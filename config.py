@@ -3,8 +3,11 @@ Central configuration module for all network and crypto settings.
 Import this module wherever you need access to API keys, endpoints, or encryption settings.
 """
 import os
+import shutil
 from dotenv import load_dotenv
 load_dotenv()
+
+ICACLS_PATH = shutil.which('icacls') or 'icacls'
 
 # --- Base Directory ---
 BASEDIR = os.path.dirname(os.path.abspath(__file__))
@@ -69,7 +72,7 @@ if platform.system() == 'Windows':
     for folder in [QUARANTINE_FOLDER, FAILED_QUARANTINE_FOLDER]:
         try:
             subprocess.run([  # nosem; nosec B603
-                'icacls', folder,
+                ICACLS_PATH, folder,
                 '/inheritance:r',
                 f'/grant:r', f'{username}:F',
                 '/remove', 'Users', 'Everyone'

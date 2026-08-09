@@ -1,8 +1,10 @@
 from utils.paths import get_resource_path
 import os
-import os
+import shutil
 import sys
 import argparse
+
+POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
 import os
 import logging
 import os
@@ -250,7 +252,7 @@ def update_defender_signatures():
     import subprocess
     try:
         result = subprocess.run(  # nosem; nosec B603
-            ['powershell', '-Command', 'Update-MpSignature'],
+            [POWERSHELL_PATH, '-Command', 'Update-MpSignature'],
             capture_output=True, text=True
         )
         if result.returncode == 0:

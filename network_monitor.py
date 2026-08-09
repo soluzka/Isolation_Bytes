@@ -11,6 +11,9 @@ import redis
 from redis.exceptions import ConnectionError
 from httpbl_utils import build_httpbl_query
 import dns.resolver
+import shutil
+
+NETSH_PATH = shutil.which('netsh') or 'netsh'
 
 class NetworkMonitor:
     def __init__(self, use_redis=False):
@@ -1584,13 +1587,13 @@ def block_ip(ip, reason=None, country=None, port=None):
         # Always use the exact command for 127.0.0.1
         if ip == "127.0.0.1":
             result = subprocess.run(  # nosem; nosec B603
-                ["netsh", "advfirewall", "firewall", "add", "rule",
+                [NETSH_PATH, "advfirewall", "firewall", "add", "rule",
                  "name=Block_127.0.0.1", "dir=out", "action=block", "remoteip=127.0.0.1"],
                 check=True, capture_output=True, text=True
             )
         else:
             result = subprocess.run(  # nosem; nosec B603
-                ["netsh", "advfirewall", "firewall", "add", "rule",
+                [NETSH_PATH, "advfirewall", "firewall", "add", "rule",
                  f"name=Block_{ip}", "dir=out", "action=block", f"remoteip={ip}"],
                 check=True, capture_output=True, text=True
             )
@@ -1616,7 +1619,7 @@ def list_blocked_ips():
     """
     try:
         result = subprocess.run(  # nosem; nosec B603
-            ["netsh", "advfirewall", "firewall", "show", "rule", "name=all"],
+            [NETSH_PATH, "advfirewall", "firewall", "show", "rule", "name=all"],
             capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         blocked = []
         if result.returncode == 0:
@@ -1648,7 +1651,7 @@ def unblock_ip(ip):
         # Remove firewall rule
         rule_name = f"Block_{ip}"
         result = subprocess.run(  # nosem; nosec B603
-            ["netsh", "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"],
+            [NETSH_PATH, "advfirewall", "firewall", "delete", "rule", f"name={rule_name}"],
             capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         
         if result.returncode == 0:

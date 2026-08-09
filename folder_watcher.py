@@ -2,6 +2,7 @@ import os
 import logging
 import threading
 import subprocess
+import shutil
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 from utils.paths import get_resource_path
@@ -12,6 +13,8 @@ import shutil
 import rarfile
 from hash_verify import HashVerifier
 from ml_security import SecurityMLModel
+
+POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
 from network_monitor import BLACKLISTED_IPS, is_blacklisted, analyze_connection_pattern
 from datetime import datetime
 
@@ -251,7 +254,7 @@ def scan_and_quarantine(filepath, timeout=600, max_file_size=100 * 1024 * 1024):
             # Scan the file using Windows Defender
             try:
                 subprocess.run(  # nosem; nosec B603
-                    ['powershell', '-Command', f"Start-MpScan -ScanPath '{filepath.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{filepath.replace(\"'\", \"''\")}' -ScanType CustomScan"],
                     timeout=timeout,
                     check=True
                 )
@@ -666,7 +669,7 @@ class CustomEventHandler(FileSystemEventHandler):
             # Windows Defender scan
             try:
                 subprocess.run(  # nosem; nosec B603
-                    ['powershell', '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
                     timeout=60,
                     check=True
                 )
@@ -731,7 +734,7 @@ class CustomEventHandler(FileSystemEventHandler):
             # Windows Defender scan
             try:
                 subprocess.run(  # nosem; nosec B603
-                    ['powershell', '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
                     timeout=60,
                     check=True
                 )

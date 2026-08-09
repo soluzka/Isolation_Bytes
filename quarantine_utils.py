@@ -3,6 +3,8 @@ import os
 import logging
 import shutil
 import tempfile
+
+ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
 import sys
 
@@ -31,7 +33,7 @@ if platform.system() == 'Windows':
     # Remove inherited permissions and grant full control to current user only
     try:
         subprocess.run([  # nosem; nosec B603
-            'icacls', QUARANTINE_FOLDER,
+            ICACLS_PATH, QUARANTINE_FOLDER,
             '/inheritance:r',
             f'/grant:r', f'{username}:F',
             '/remove', 'Users', 'Everyone'

@@ -4,6 +4,8 @@ import os
 import os
 import shutil
 import logging
+
+POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
 import platform
 import subprocess
 from secure_message import encrypt_message  # Ensure encrypt_message is imported
@@ -393,7 +395,7 @@ def is_antivirus_available():
         try:
             result = subprocess.run(  # nosem; nosec B603
                 [
-                    'powershell',
+                    POWERSHELL_PATH,
                     '-Command',
                     'Get-MpComputerStatus'
                 ],

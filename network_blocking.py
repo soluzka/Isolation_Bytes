@@ -25,6 +25,9 @@ import json
 import logging
 import os
 import subprocess
+import shutil
+
+NETSH_PATH = shutil.which('netsh') or 'netsh'
 
 logger = logging.getLogger('network_blocking')
 
@@ -79,7 +82,7 @@ def block_ip(ip, reason=""):
 
     try:
         result = subprocess.run(  # nosem; nosec B603
-            ['netsh', 'advfirewall', 'firewall', 'add', 'rule',
+            [NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
              f'name={_rule_name(ip)}', 'dir=out', 'action=block', f'remoteip={ip}'],
             capture_output=True, text=True, timeout=15
         )
@@ -103,7 +106,7 @@ def unblock_ip(ip):
     """Remove the firewall rule blocking `ip`. Returns (success, message)."""
     try:
         result = subprocess.run(  # nosem; nosec B603
-            ['netsh', 'advfirewall', 'firewall', 'delete', 'rule', f'name={_rule_name(ip)}'],
+            [NETSH_PATH, 'advfirewall', 'firewall', 'delete', 'rule', f'name={_rule_name(ip)}'],
             capture_output=True, text=True, timeout=15
         )
         combined = (result.stdout + result.stderr).strip()
