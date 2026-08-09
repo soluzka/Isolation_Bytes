@@ -2155,7 +2155,7 @@ if __name__ == "__main__":
         script_path = os.path.join(os.path.dirname(__file__), 'scan_active_connections.py')
         while True:
             try:
-                subprocess.Popen([get_resource_path(os.path.join('python')), script_path])  # nosem; nosec B603
+                subprocess.Popen([sys.executable, script_path])  # nosem; nosec B603
             except Exception as e:
                 logging.error(f'Failed to run scan_active_connections.py: {e}')
             time.sleep(interval_minutes * 60)
