@@ -1306,6 +1306,21 @@ def run_auto_block_monitor():
         time.sleep(30)
 
 
+def run_process_hardening_monitor():
+    """Background loop: periodically scan running processes for YARA matches,
+    high entropy, missing code signatures, and suspicious memory regions."""
+    while True:
+        try:
+            from security.process_security import scan_processes_with_hardening
+            scan_processes_with_hardening(
+                terminate_on_malware=False,
+                block_connections=False,
+                entropy_threshold=7.5
+            )
+        except Exception as e:
+            logger.error(f"Error in process hardening monitor: {e}")
+        time.sleep(300)  # 5 minutes
+
 @app.route('/toggle_auto_block/<action>', methods=['POST'])
 def toggle_auto_block(action):
     """Opt-in toggle for automatically blocking connections the C2 heuristic
@@ -2166,6 +2181,12 @@ if __name__ == '__main__':
     auto_block_thread = threading.Thread(target=run_auto_block_monitor, daemon=True)
     auto_block_thread.start()
     logger.info("Auto-block monitor thread started (inactive until enabled)")
+
+    # Process hardening monitor thread -- scans running EXEs for YARA, entropy,
+    # missing signatures, and memory-region anomalies.
+    process_hardening_thread = threading.Thread(target=run_process_hardening_monitor, daemon=True)
+    process_hardening_thread.start()
+    logger.info("Process hardening monitor thread started")
 
     # Start conditional startup scan automatically the first time the app runs
     with conditional_startup_lock:
