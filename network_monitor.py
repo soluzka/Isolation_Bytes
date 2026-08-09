@@ -1337,8 +1337,8 @@ def fetch_external_blacklists():
                                 ip, mask = line.split("/")
                                 if is_valid_ipv4(ip) and 0 <= int(mask) <= 32:
                                     fallback_ips.add(line)
-                            except:
-                                continue
+                            except Exception:
+                                pass
                         else:
                             if is_valid_ipv4(line):
                                 fallback_ips.add(line)
