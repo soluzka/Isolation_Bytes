@@ -1,4 +1,4 @@
-/* eslint-disable no-unsanitized */
+/* eslint-disable no-unsanitized/method, no-unsanitized/property, no-unsanitized/function-call */
 /**
  * Network traffic monitoring display functions
  */
