@@ -1206,13 +1206,20 @@ def _launch_safe_downloader_step(basedir, output):
 
 def _load_scheduled_scan_state(state_file, output):
     """Read scheduled_scan_state.json, returning whether scans are enabled."""
-    try:
-        with open(state_file, 'r') as f:
-            state = json.load(f)
-        return state.get('enabled', False)
-    except Exception as e:
-        output.write(f"[conditional_startup] Failed to read scheduled scan state: {e}\n")
-        return False
+    candidates = [state_file, get_resource_path('scheduled_scan_state.json')]
+    for path in candidates:
+        try:
+            with open(path, 'r') as f:
+                state = json.load(f)
+            output.write(f"[conditional_startup] Loaded scheduled scan state from {path}\n")
+            return state.get('enabled', False)
+        except FileNotFoundError:
+            continue
+        except Exception as e:
+            output.write(f"[conditional_startup] Failed to read {path}: {e}\n")
+    # Default to enabled so the full scan still runs if the JSON is missing/wrong.
+    output.write("[conditional_startup] scheduled_scan_state.json not found; defaulting scans to enabled.\n")
+    return True
 
 
 def _start_antivirus_cli_step(basedir, output):
