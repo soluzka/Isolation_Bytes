@@ -2238,8 +2238,9 @@ if __name__ == '__main__':
                             # Mark as potential port but continue checking others
                             if detected_port is None:
                                 detected_port = port
-                except:
-                    continue
+                except Exception:
+                    # Connection or request failed; the for-loop will move to the next port
+                    pass
             
             if detected_port:
                 break
