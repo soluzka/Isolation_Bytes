@@ -118,7 +118,7 @@ def compile_ruleset(rule_path):
                         compiled[f] = yara.compile(filepath=fp)
                     except Exception:
                         # skip files that don't compile standalone
-                        continue
+                        pass
         if compiled:
             print(f'Compiled {len(compiled)} individual rule files as a fallback')
             return compiled
