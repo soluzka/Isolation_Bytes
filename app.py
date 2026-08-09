@@ -2006,6 +2006,9 @@ conditional_startup_state = {
     'quarantined_files': 0,
     'errors': 0,
     'process_events': 0,
+    'ml_detections': 0,
+    'ransomware_indicators': 0,
+    'persistence_indicators': 0,
     'last_error': None,
 }
 
@@ -2032,6 +2035,9 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         value = results.get(key) or []
         return len(value) if isinstance(value, (list, tuple, dict)) else 0
 
+    persistence = results.get('persistence_indicators') or {}
+    persistence_count = sum(len(v) for v in persistence.values() if isinstance(v, (list, tuple, dict)))
+
     conditional_startup_state.update({
         'running': False,
         'last_run': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -2040,6 +2046,9 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'quarantined_files': count('quarantined_files'),
         'errors': count('errors'),
         'process_events': count('process_events'),
+        'ml_detections': count('ml_detections'),
+        'ransomware_indicators': count('ransomware_indicators'),
+        'persistence_indicators': persistence_count,
         'last_error': str(error) if error else None,
     })
     return conditional_startup_state
