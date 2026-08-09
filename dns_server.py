@@ -365,7 +365,7 @@ def start_dns_server(network_range="192.168.1.0/24", allow_network=False, port=5
         server = DNSServer(
             resolver,
             port=port,
-            address="0.0.0.0",  # Listen on all interfaces
+            address="127.0.0.1",  # Listen on localhost by default
             tcp=True              # Support both UDP and TCP
         )
         
