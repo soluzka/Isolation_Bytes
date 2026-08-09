@@ -2124,10 +2124,9 @@ def open_browser(port):
 
     # Wait for the server to be responding before opening the browser
     try:
-        import urllib.request
-        with urllib.request.urlopen(browser_url, timeout=2) as response:
-            if response.getcode() == 200:
-                print("Server confirmed ready")
+        import requests
+        if requests.get(browser_url, timeout=2).status_code == 200:
+            print("Server confirmed ready")
     except Exception:
         print("Waiting for server to fully initialize...")
         time.sleep(3)
@@ -2229,12 +2228,11 @@ if __name__ == '__main__':
                     if result == 0:  # Port is in use (our server should be running here)
                         # Additional verification - try to get a response
                         try:
-                            import urllib.request
-                            with urllib.request.urlopen(f"http://127.0.0.1:{port}", timeout=2) as response:
-                                if response.getcode() == 200:
-                                    detected_port = port
-                                    print(f"Verified server running on port {port} with HTTP request")
-                                    break
+                            import requests
+                            if requests.get(f"http://127.0.0.1:{port}", timeout=2).status_code == 200:
+                                detected_port = port
+                                print(f"Verified server running on port {port} with HTTP request")
+                                break
                         except:
                             # If we can connect but not get a response, it might be our server still starting
                             # Mark as potential port but continue checking others
