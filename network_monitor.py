@@ -13,8 +13,14 @@ from httpbl_utils import build_httpbl_query
 import dns.resolver
 import shutil
 import ipaddress
+import re
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
+
+
+def _sanitize_ip(ip):
+    """Strip any non-IP characters to prevent command injection in netsh args."""
+    return re.sub(r'[^0-9a-fA-F.:]', '', str(ip))
 
 
 def _validate_ip(ip):
@@ -1608,10 +1614,11 @@ def block_ip(ip, reason=None, country=None, port=None):
                 check=True, capture_output=True, text=True
             )
         else:
+            safe_ip = _sanitize_ip(ip)
             result = subprocess.run(  # nosem; nosec B603
                 [NETSH_PATH, "advfirewall", "firewall", "add", "rule",
-                 f"name=Block_{ip}",  # nosem
-                 "dir=out", "action=block", f"remoteip={ip}"],  # nosem
+                 f"name=Block_{safe_ip}",
+                 "dir=out", "action=block", f"remoteip={safe_ip}"],
                 check=True, capture_output=True, text=True
             )
         
@@ -1669,9 +1676,10 @@ def unblock_ip(ip):
         # Remove from tracking dictionary first
         if ip in blocked_ips:
             del blocked_ips[ip]
-            
-        # Remove firewall rule
-        rule_arg = f"name=Block_{ip}"  # nosem
+
+        # Sanitize and remove firewall rule
+        safe_ip = _sanitize_ip(ip)
+        rule_arg = f"name=Block_{safe_ip}"
         result = subprocess.run(  # nosem; nosec B603
             [NETSH_PATH, "advfirewall", "firewall", "delete", "rule", rule_arg],
             capture_output=True, text=True, check=False, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
