@@ -1456,6 +1456,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         "persistence_indicators": {}  # Processes/autostart entries in unusual locations (report-only)
     }
     scanned_file_status = {}  # Track status for each scanned file
+    results['scanned_files'] = scanned_file_status  # used for progress/idle counts
 
     # Run comprehensive routine maintenance and system recovery.
     # NOTE: routine_maintenance_and_system_recovery() performs 8+ full recursive
