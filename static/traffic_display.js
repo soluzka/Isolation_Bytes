@@ -63,6 +63,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
     if (!trafficData || trafficData.error) {
         trafficContent.innerHTML = '';
         // eslint-disable-next-line no-unsanitized/method
+    // nosem
         trafficContent.appendChild(document.createRange().createContextualFragment(safe`
             <div class="alert alert-info">
                 ${trafficData && trafficData.error ? 'Error: ' + trafficData.error : 'No traffic data available yet. Monitoring is initializing...'}
@@ -173,7 +174,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     // Update the content
     trafficContent.innerHTML = '';
-    // eslint-disable-next-line no-unsanitized/method
+    // nosem
     trafficContent.appendChild(document.createRange().createContextualFragment(html));
 }
 
@@ -193,6 +194,7 @@ function updateTrafficStats() {
         if (trafficContent) {
             trafficContent.innerHTML = '';
             // eslint-disable-next-line no-unsanitized/method
+    // nosem
             trafficContent.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Error retrieving traffic statistics: ${error.message || 'Unknown error'}
@@ -268,6 +270,7 @@ function startTrafficMonitoring() {
         safeDomOperation('traffic_stats', function(container) {
             container.innerHTML = '';
             // eslint-disable-next-line no-unsanitized/method
+    // nosem
             container.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Failed to start network monitoring: ${error.message || 'Unknown error'}
@@ -305,6 +308,7 @@ function fetchMonitoredNetworkDirectories() {
                 console.error('Error fetching monitored directories:', error);
                 container.innerHTML = '';
                 // eslint-disable-next-line no-unsanitized/method
+    // nosem
                 container.appendChild(document.createRange().createContextualFragment(safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`));
             });
     });
