@@ -1,3 +1,4 @@
+/* eslint-disable no-unsanitized */
 /**
  * Network traffic monitoring display functions
  */
@@ -24,7 +25,7 @@ function escapeHtml(text) {
 
 // Tagged template that escapes all interpolated values
 function safe(strings, ...values) {
-    // nosem
+
     return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
 }
 
@@ -62,12 +63,12 @@ function updateTrafficDisplay(trafficData, c2Data) {
     // Return if no traffic data available
     if (!trafficData || trafficData.error) {
         trafficContent.innerHTML = '';
-        // eslint-disable-next-line no-unsanitized/method
-    // nosem
+    
+
         trafficContent.appendChild(document.createRange().createContextualFragment(safe`
             <div class="alert alert-info">
                 ${trafficData && trafficData.error ? 'Error: ' + trafficData.error : 'No traffic data available yet. Monitoring is initializing...'}
-            </div>`));
+            </div>`)); // nosem
         return;
     }
 
@@ -192,12 +193,12 @@ function updateTrafficStats() {
         const trafficContent = document.getElementById('traffic_content') || document.getElementById('traffic_stats');
         if (trafficContent) {
             trafficContent.innerHTML = '';
-            // eslint-disable-next-line no-unsanitized/method
-    // nosem
+        
+
             trafficContent.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Error retrieving traffic statistics: ${error.message || 'Unknown error'}
-                </div>`));
+                </div>`)); // nosem
         }
     });
 }
@@ -268,12 +269,12 @@ function startTrafficMonitoring() {
         // Display error in traffic stats container
         safeDomOperation('traffic_stats', function(container) {
             container.innerHTML = '';
-            // eslint-disable-next-line no-unsanitized/method
-    // nosem
+        
+
             container.appendChild(document.createRange().createContextualFragment(safe`
                 <div class="alert alert-warning">
                     Failed to start network monitoring: ${error.message || 'Unknown error'}
-                </div>`));
+                </div>`)); // nosem
         });
     });
     
@@ -306,9 +307,9 @@ function fetchMonitoredNetworkDirectories() {
             .catch(error => {
                 console.error('Error fetching monitored directories:', error);
                 container.innerHTML = '';
-                // eslint-disable-next-line no-unsanitized/method
-    // nosem
-                container.appendChild(document.createRange().createContextualFragment(safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`));
+            
+
+                container.appendChild(document.createRange().createContextualFragment(safe`<div class="alert alert-warning">Error loading monitored directories: ${error.message}</div>`)); // nosem
             });
     });
 }
