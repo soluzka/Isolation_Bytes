@@ -107,7 +107,7 @@ pyinstaller_args = [
     '--uac-admin',  # Request admin at launch; no Python self-restart loop
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
-    '--windowed'  # Hide console window (no console)
+    '--console'  # Keep console for debugging
 ]
 
 # Add Redis configuration
