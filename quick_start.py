@@ -413,8 +413,9 @@ def run_conditional_startup_background():
 
 
 @app.route('/api/conditional_startup/status', methods=['GET'])
+@app.route('/api/conditional_startup/refresh', methods=['POST'])
 def conditional_startup_status():
-    """Status of the last conditional startup run."""
+    """Status of the last conditional startup run; also used by Refresh Status."""
     global conditional_startup_thread
     if conditional_startup_state.get('running'):
         if conditional_startup_thread is None or not conditional_startup_thread.is_alive():
@@ -424,6 +425,7 @@ def conditional_startup_status():
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
             })
     resp = dict(conditional_startup_state)
+    resp['status'] = 'RUNNING' if conditional_startup_state.get('running') else 'IDLE'
     resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
     return jsonify(resp)
 
