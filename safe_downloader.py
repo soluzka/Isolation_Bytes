@@ -28,7 +28,7 @@ def extract_archive(filepath, extract_dir):
                 zip_ref.extractall(extract_dir)
         elif filename.endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(get_resource_path(os.path.join(filepath)), 'r:*') as tar:
-                tar.extractall(extract_dir)
+                tar.extractall(extract_dir, filter="data")
         return True
     except Exception as e:
         logging.error(f"Extraction failed for {filepath}: {e}")
@@ -75,7 +75,7 @@ def main():
         payload = {'url': url}
         logging.info(f"Requesting API: {api_url} with url={url}")
         resp = requests.post(
-            api_url, headers=headers, data=json.dumps(payload)
+            api_url, headers=headers, data=json.dumps(payload), timeout=30
         )
         if resp.status_code != 200:
             try:
@@ -91,7 +91,7 @@ def main():
             # print('No download URL returned from API.')  # Removed to reduce spam
             sys.exit(1)
         logging.info(f"Downloading encrypted file from {download_url}")
-        r = requests.get(download_url, stream=True)
+        r = requests.get(download_url, stream=True, timeout=60)
         if r.status_code == 200:
             temp_dir = tempfile.mkdtemp()
             download_path = os.path.join(temp_dir, os.path.basename(download_url))

@@ -1413,7 +1413,7 @@ def _open_browser_when_ready(output):
     waited = 0
     while waited < timeout:
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=30)
             if response.status_code == 200:
                 webbrowser.open(url)
                 return

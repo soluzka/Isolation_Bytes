@@ -1,0 +1,8 @@
+name: "CodeQL config"
+paths-ignore:
+  - 'scikit-learn-main/**'
+  - 'build/**'
+  - 'dist/**'
+  - 'uploads/**'
+  - 'data/**'
+  - 'models/**'

@@ -81,7 +81,7 @@ def update_signatures():
         with open(get_resource_path(os.path.join(SIGNATURE_DB)), 'w') as f:
             for source in signature_sources:
                 try:
-                    response = requests.get(source)
+                    response = requests.get(source, timeout=30)
                     if response.status_code == 200:
                         signatures = response.text.splitlines()
                         for sig in signatures:

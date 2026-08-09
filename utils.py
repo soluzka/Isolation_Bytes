@@ -33,7 +33,7 @@ def extract_archive(filepath, extract_to):
                 zip_ref.extractall(extract_to)
         elif filepath.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(filepath) as tar_ref:
-                tar_ref.extractall(extract_to)
+                tar_ref.extractall(extract_to, filter="data")
         elif filepath.lower().endswith(('.rar', '.7z')):
             # For .rar and .7z, you might need additional libraries
             # This is a placeholder for those formats

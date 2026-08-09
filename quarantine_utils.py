@@ -41,7 +41,7 @@ if platform.system() == 'Windows':
 else:
     import stat
     try:
-        os.chmod(QUARANTINE_FOLDER, 0o700)
+        os.chmod(QUARANTINE_FOLDER, 0o700)  # nosec B103
     except Exception as e:
         logging.warning(f'Could not set chmod 700 on quarantine folder: {e}')
 

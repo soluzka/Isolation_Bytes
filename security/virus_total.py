@@ -25,7 +25,7 @@ def scan_file_virustotal(filepath):
     with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
         file_hash = hashlib.sha256(f.read()).hexdigest()
     headers = {'x-apikey': API_KEY}
-    resp = requests.get(VT_URL + file_hash, headers=headers)
+    resp = requests.get(VT_URL + file_hash, headers=headers, timeout=10)
     if resp.status_code == 200:
         return resp.json()
     return None

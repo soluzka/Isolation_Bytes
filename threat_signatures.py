@@ -125,7 +125,7 @@ class ThreatSignatureDatabase:
                 'limit': 100
             }
             
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, headers=headers, params=params, timeout=30)
             if response.status_code == 200:
                 data = response.json()
                 self.process_signatures(data.get('data', []))
@@ -142,7 +142,7 @@ class ThreatSignatureDatabase:
                 'Accept': 'application/json'
             }
             
-            response = requests.get(url, headers=headers)
+            response = requests.get(url, headers=headers, timeout=30)
             if response.status_code == 200:
                 data = response.json()
                 self.process_signatures(data.get('data', []))

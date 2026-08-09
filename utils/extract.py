@@ -34,7 +34,7 @@ def extract_archive(path, destination=None):
             zip_ref.extractall(destination)
     elif ext in ('.tar', '.gz', '.bz2', '.tar.gz', '.tar.bz2'):
         with tarfile.open(get_resource_path(os.path.join(path)), 'r:*') as tar_ref:
-            tar_ref.extractall(destination)
+            tar_ref.extractall(destination, filter="data")
     else:
         raise ValueError(f"Unsupported archive format: {ext}")
 

@@ -3131,7 +3131,7 @@ def safe_download_service():
                 with tempfile.TemporaryDirectory() as temp_dir:
                     # Download file
                     try:
-                        response = requests.get(url, stream=True)
+                        response = requests.get(url, stream=True, timeout=30)
                         response.raise_for_status()
                         
                         # Save to temporary file
@@ -3369,7 +3369,7 @@ if __name__ == '__main__':
             print(f"Failed to open browser: {e}")
             
         # Run the Flask app (this must be the last line as it blocks)
-        app.run(host='0.0.0.0', port=5000, threaded=True, debug=True)
+        app.run(host='127.0.0.1', port=5000, threaded=True, debug=True)
     except KeyboardInterrupt:
         # Clean up Redis connection on exit
         if redis_client:
@@ -3943,7 +3943,7 @@ def extract_archive(filepath, temp_dir):
                 zip_ref.extractall(temp_dir)
         elif filepath.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
             with tarfile.open(filepath) as tar_ref:
-                tar_ref.extractall(temp_dir)
+                tar_ref.extractall(temp_dir, filter="data")
         elif filepath.lower().endswith('.rar'):
             with rarfile.RarFile(filepath) as rar_ref:
                 rar_ref.extractall(temp_dir)
@@ -4100,7 +4100,7 @@ def safe_download():
                     zip_ref.extractall(extract_dir)
             elif filename.lower().endswith(('.tar', '.tar.gz', '.tgz', '.tar.bz2', '.tbz', '.tar.xz', '.txz')):
                 with tarfile.open(download_path) as tar_ref:
-                    tar_ref.extractall(extract_dir)
+                    tar_ref.extractall(extract_dir, filter="data")
             else:
                 shutil.rmtree(temp_dir, ignore_errors=True)
                 return render_template('safe_download.html', error=f'Unsupported archive format: {filename}')
@@ -5784,7 +5784,7 @@ network_monitor.start()
 
 def start_flask_server():
     # Get the IP address to bind to
-    home_ip = '0.0.0.0'  # Listen on all interfaces
+    home_ip = '127.0.0.1'  # Listen on all interfaces
     
     try:
         print(encrypt_message(f"[INFO] Starting Flask server on {home_ip}:{port}"))

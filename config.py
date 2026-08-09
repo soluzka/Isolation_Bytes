@@ -80,6 +80,6 @@ else:
     import stat
     for folder in [QUARANTINE_FOLDER, FAILED_QUARANTINE_FOLDER]:
         try:
-            os.chmod(folder, 0o700)
+            os.chmod(folder, 0o700)  # nosec B103
         except Exception as e:
             print(f'Could not set chmod 700 on {folder}: {e}')
