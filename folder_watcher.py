@@ -743,23 +743,6 @@ class CustomEventHandler(FileSystemEventHandler):
         except Exception as e:
             logging.error(f"Error processing {event_type} event for {file_path}: {str(e)}")
 
-# Update the observer setup in start_monitoring
-def start_monitoring():
-    """Start monitoring the directories for file system events."""
-    event_handler = CustomEventHandler()
-    observer = Observer()
-    for folder in MONITORED_FOLDERS:
-        observer.schedule(event_handler, folder, recursive=True)
-    observer.start()
-    try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        observer.stop()
-    observer.join()
-    if scan_file_with_yara(event.src_path):
-        logging.warning(f"YARA match: {event.src_path}")
-
 def start_monitoring():
     """
     Start monitoring the directories for file system events.
