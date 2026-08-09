@@ -2209,22 +2209,6 @@ if __name__ == "__main__":
         monitor_connections()
         time.sleep(BANDWIDTH_CHECK_INTERVAL)
         
-# Update fallback file regularly
-def update_fallback_file():
-    """
-    Periodically update the local fallback file with the latest blacklist.
-    """
-    try:
-        with open(get_resource_path(os.path.join(LOCAL_BLACKLIST_FILE)), "w") as f:
-            for ip in BLACKLISTED_IPS:
-                f.write(f"{ip}\n")
-        logging.info("Updated local fallback file with the latest blacklist.")
-    except Exception as e:
-        logging.error(f"Failed to update fallback file: {e}")
-
-import time
-import logging
-
 def run_scan_active_connections_periodically(interval=60):
     """
     Periodically scan active network connections.
