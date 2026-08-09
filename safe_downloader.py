@@ -94,7 +94,7 @@ def main():
         logging.info(f"Downloading encrypted file from {download_url}")
         r = requests.get(download_url, stream=True, timeout=60)
         if r.status_code == 200:
-            temp_dir = tempfile.mkdtemp()
+            temp_dir = tempfile.mkdtemp(prefix='safe_downloader_')
             download_path = os.path.join(temp_dir, os.path.basename(download_url))
             with open(get_resource_path(os.path.join(download_path)), 'wb') as f:
                 for chunk in r.iter_content(chunk_size=8192):

@@ -1557,10 +1557,10 @@ def encrypt_file_route():
     try:
         from file_crypto import encrypt_file as encrypt_file_util
 
-        with tempfile.NamedTemporaryFile(delete=False) as temp_in:
+        with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_in:
             file.save(temp_in.name)
             temp_in_path = temp_in.name
-        temp_out_fd, temp_out_path = tempfile.mkstemp()
+        temp_out_fd, temp_out_path = tempfile.mkstemp(prefix='antivirus_')
         os.close(temp_out_fd)
 
         encrypt_file_util(temp_in_path, temp_out_path)
@@ -1588,10 +1588,10 @@ def decrypt_file_route():
     try:
         from file_crypto import decrypt_file as decrypt_file_util
 
-        with tempfile.NamedTemporaryFile(delete=False) as temp_in:
+        with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_in:
             file.save(temp_in.name)
             temp_in_path = temp_in.name
-        temp_out_fd, temp_out_path = tempfile.mkstemp()
+        temp_out_fd, temp_out_path = tempfile.mkstemp(prefix='antivirus_')
         os.close(temp_out_fd)
 
         decrypt_file_util(temp_in_path, temp_out_path, key.encode() if key else None)

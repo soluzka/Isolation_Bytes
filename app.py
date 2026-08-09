@@ -3751,7 +3751,7 @@ def phishing_check():
 
     if url:
         # Save URL to temp file for scanning (reuse existing logic)
-        with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt') as tmp:
+        with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt', prefix='antivirus_') as tmp:
             tmp.write(url)
             tmp.flush()
             findings = scan_file_for_phishing(tmp.name)
@@ -3759,7 +3759,7 @@ def phishing_check():
         summary = f"URL: {url[:80]}" if url else "URL scan"
     elif email_content:
         # Save email content to temp file for scanning
-        with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt') as tmp:
+        with tempfile.NamedTemporaryFile('w+', delete=False, suffix='.txt', prefix='antivirus_') as tmp:
             tmp.write(email_content)
             tmp.flush()
             findings = scan_file_for_phishing(tmp.name)
@@ -3822,8 +3822,8 @@ def encrypt_file_route():
     key = request.form.get('key', None)
 
     # Create temporary files for input/output
-    with tempfile.NamedTemporaryFile(delete=False) as temp_in, \
-         tempfile.NamedTemporaryFile(delete=False) as temp_out:
+    with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_in, \
+         tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_out:
         file.save(temp_in.name)
         encrypt_file(temp_in.name, temp_out.name, key)  # Call the correct encrypt_file function
         return send_file(temp_out.name, as_attachment=True, 
@@ -3843,8 +3843,8 @@ def decrypt_file_route():
     key = request.form.get('key', None)
 
     # Create temporary files for input/output
-    with tempfile.NamedTemporaryFile(delete=False) as temp_in, \
-         tempfile.NamedTemporaryFile(delete=False) as temp_out:
+    with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_in, \
+         tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_') as temp_out:
         file.save(temp_in.name)
         from file_crypto import decrypt_file as decrypt_file_util
         decrypt_file_util(temp_in.name, temp_out.name, key)
