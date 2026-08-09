@@ -251,8 +251,8 @@ function startTrafficMonitoring() {
         }
         
         // Safely update the network monitor status if the function exists
-        if (typeof updateNetworkMonitorStatus === 'function') {
-            updateNetworkMonitorStatus(true);
+        if (typeof window.updateNetworkMonitorStatus === 'function') {
+            window.updateNetworkMonitorStatus(true);
         }
         
         // Show monitored network directories if the function exists
