@@ -66,6 +66,8 @@ from data_analysis import analyze_data
 
 # Persistent scan cache and safe quarantine helper
 from security.scan_cache import FileScanCache, safe_quarantine
+# Self-protection / watchdog helpers (imported so they are bundled)
+import security.self_protect
 
 # Configure logging
 logging.basicConfig(
