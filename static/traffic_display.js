@@ -24,7 +24,7 @@ function escapeHtml(text) {
 
 // Tagged template that escapes all interpolated values
 function safe(strings, ...values) {
-    // eslint-disable-next-line
+    // nosem
     return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
 }
 
