@@ -174,8 +174,7 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     // Update the content
     trafficContent.innerHTML = '';
-    // nosem
-    trafficContent.appendChild(document.createRange().createContextualFragment(html));
+    trafficContent.appendChild(document.createRange().createContextualFragment(html)); // nosem
 }
 
 // Function to fetch traffic statistics from the API
