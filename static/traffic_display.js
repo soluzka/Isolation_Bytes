@@ -22,6 +22,7 @@ function escapeHtml(text) {
 }
 
 // Tagged template that escapes all interpolated values
+// eslint-disable-next-line no-unsanitized/function-call
 function safe(strings, ...values) {
     return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
 }
