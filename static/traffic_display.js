@@ -25,8 +25,8 @@ function escapeHtml(text) {
 
 // Tagged template that escapes all interpolated values
 function safe(strings, ...values) {
-
-    return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), '');
+    // eslint-disable-next-line no-unsanitized/property, no-unsanitized/function-call
+    return strings.reduce((acc, str, i) => acc + str + (i < values.length ? escapeHtml(values[i]) : ''), ''); // nosem
 }
 
 // Update traffic statistics display
