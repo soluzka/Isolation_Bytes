@@ -2218,7 +2218,6 @@ if __name__ == '__main__':
     logger.info("Process hardening monitor thread started")
 
     # Start conditional startup scan automatically the first time the app runs
-    global conditional_startup_thread
     with conditional_startup_lock:
         if not conditional_startup_state['running']:
             conditional_startup_state.update({
