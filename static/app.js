@@ -29,59 +29,59 @@ $(document).ready(function() {
 
 function updateSystemStatus() {
     $.get('/status', function(data) {
-        let statusHtml = '';
-        if (data.realtime_protection) {
-            statusHtml += '<div class="status-indicator status-ok"></div> Real-time protection: Enabled<br>';
-        } else {
-            statusHtml += '<div class="status-indicator status-error"></div> Real-time protection: Disabled<br>';
-        }
-
-        statusHtml += '<div class="status-indicator status-ok"></div> Network Monitor: ' + (data.network_monitor ? 'Enabled' : 'Disabled') + '<br>';
-        statusHtml += '<div class="status-indicator status-ok"></div> Safe Downloader: ' + (data.safe_downloader ? 'Enabled' : 'Disabled');
-
-        // eslint-disable-next-line no-unsanitized/method
-        $('#system-status').html(statusHtml);
+        const container = $('#system-status').empty();
+        const rtClass = data.realtime_protection ? 'status-ok' : 'status-error';
+        const rtText = data.realtime_protection ? 'Enabled' : 'Disabled';
+        container
+            .append($('<div>').addClass('status-indicator ' + rtClass))
+            .append(document.createTextNode(' Real-time protection: ' + rtText))
+            .append($('<br>'))
+            .append($('<div>').addClass('status-indicator status-ok'))
+            .append(document.createTextNode(' Network Monitor: ' + (data.network_monitor ? 'Enabled' : 'Disabled')))
+            .append($('<br>'))
+            .append($('<div>').addClass('status-indicator status-ok'))
+            .append(document.createTextNode(' Safe Downloader: ' + (data.safe_downloader ? 'Enabled' : 'Disabled')));
     }).fail(function() {
-        // eslint-disable-next-line no-unsanitized/method
-        $('#system-status').html('<div class="status-indicator status-error"></div> Failed to load status');
+        $('#system-status').empty()
+            .append($('<div>').addClass('status-indicator status-error'))
+            .append(document.createTextNode(' Failed to load status'));
     });
 }
 
 function updateThreatDetection() {
     $.get('/threats', function(data) {
-        let threatHtml = '';
+        const container = $('#threat-detection').empty();
         if (data.threats.length > 0) {
-            threatHtml += '<div class="alert alert-warning">Detected Threats:</div>';
+            container.append($('<div>').addClass('alert alert-warning').text('Detected Threats:'));
             data.threats.forEach(threat => {
-                threatHtml += '<div class="alert alert-info">' +
-                    '<strong>' + escapeHtml(threat.type) + '</strong> detected in <strong>' + escapeHtml(threat.location) + '</strong>' +
-                    '<button class="btn btn-sm btn-danger float-end quarantine-btn" data-id="' + escapeHtml(threat.id) + '" data-type="' + escapeHtml(threat.type) + '">Quarantine</button>' +
-                    '</div>';
+                const div = $('<div>').addClass('alert alert-info');
+                div.append($('<strong>').text(threat.type))
+                   .append(document.createTextNode(' detected in '))
+                   .append($('<strong>').text(threat.location));
+                const btn = $('<button>')
+                    .addClass('btn btn-sm btn-danger float-end quarantine-btn')
+                    .attr('data-id', String(threat.id))
+                    .attr('data-type', threat.type)
+                    .text('Quarantine');
+                div.append(btn);
+                container.append(div);
             });
         } else {
-            threatHtml += '<div class="alert alert-success">No threats detected</div>';
+            container.append($('<div>').addClass('alert alert-success').text('No threats detected'));
         }
-
-        // eslint-disable-next-line no-unsanitized/method
-        $('#threat-detection').html(threatHtml);
     }).fail(function() {
-        // eslint-disable-next-line no-unsanitized/method
-        $('#threat-detection').html('<div class="alert alert-danger">Failed to load threat detection status</div>');
+        $('#threat-detection').empty().append($('<div>').addClass('alert alert-danger').text('Failed to load threat detection status'));
     });
 }
 
 function updateNetworkMonitor() {
     $.get('/network', function(data) {
-        let networkHtml = '';
-        networkHtml += '<div>Active Connections: ' + escapeHtml(data.active_connections) + '</div>';
-        networkHtml += '<div>Data Rate: ' + escapeHtml(data.data_rate) + ' KB/s</div>';
-        networkHtml += '<div>Packet Rate: ' + escapeHtml(data.packet_rate) + ' pps</div>';
-
-        // eslint-disable-next-line no-unsanitized/method
-        $('#network-monitor').html(networkHtml);
+        const container = $('#network-monitor').empty();
+        container.append($('<div>').text('Active Connections: ' + String(data.active_connections)));
+        container.append($('<div>').text('Data Rate: ' + String(data.data_rate) + ' KB/s'));
+        container.append($('<div>').text('Packet Rate: ' + String(data.packet_rate) + ' pps'));
     }).fail(function() {
-        // eslint-disable-next-line no-unsanitized/method
-        $('#network-monitor').html('<div class="alert alert-danger">Failed to load network status</div>');
+        $('#network-monitor').empty().append($('<div>').addClass('alert alert-danger').text('Failed to load network status'));
     });
 }
 
