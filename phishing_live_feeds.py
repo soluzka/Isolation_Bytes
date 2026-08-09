@@ -29,7 +29,7 @@ def update_phishing_domains():
                         domain = line.split('/')[2]
                         domains.add(domain)
                     except Exception:
-                        continue
+                        pass
         # Abuse.ch
         r = requests.get(ABUSECH_DOMAINS_URL, timeout=30)
         if r.ok:
