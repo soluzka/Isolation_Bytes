@@ -159,6 +159,12 @@ python test_environment.py
 
 ---
 
+## License
+
+This project is released under the [MIT License](LICENSE).
+
+---
+
 ## Repository
 
 [https://github.com/soluzka/antivirus-yara-rules](https://github.com/soluzka/antivirus-yara-rules)
