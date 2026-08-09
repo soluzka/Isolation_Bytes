@@ -1174,7 +1174,16 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
     output.write("[conditional_startup] Running process hardening scan...\n")
 
     def on_hardening_event(event):
-        results["process_events"].append(event)
+        # Only count actionable / notable findings, not the per-process scan heartbeat
+        if event.get('type') in ('malware_found', 'yara_match'):
+            results["process_events"].append(event)
+        elif event.get('type') == 'process_scanned' and (
+            event.get('yara') or
+            (event.get('hashes', {}).get('entropy', 0) > 7.5) or
+            event.get('signed') is False
+        ):
+            results["process_events"].append(event)
+
         if callable(progress_callback):
             try:
                 progress_callback(results)

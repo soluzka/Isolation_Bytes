@@ -1317,7 +1317,13 @@ def run_process_hardening_monitor():
             hardening_events = []
 
             def on_hardening_event(event):
-                hardening_events.append(event)
+                if (event.get('type') in ('malware_found', 'yara_match') or
+                    (event.get('type') == 'process_scanned' and (
+                        event.get('yara') or
+                        (event.get('hashes', {}).get('entropy', 0) > 7.5) or
+                        event.get('signed') is False
+                    ))):
+                    hardening_events.append(event)
 
             scan_processes_with_hardening(
                 terminate_on_malware=False,
