@@ -253,8 +253,9 @@ def scan_and_quarantine(filepath, timeout=600, max_file_size=100 * 1024 * 1024):
 
             # Scan the file using Windows Defender
             try:
+                safe_path = filepath.replace("'", "''")
                 subprocess.run(  # nosem; nosec B603
-                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{filepath.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{safe_path}' -ScanType CustomScan"],
                     timeout=timeout,
                     check=True
                 )
@@ -668,8 +669,9 @@ class CustomEventHandler(FileSystemEventHandler):
 
             # Windows Defender scan
             try:
+                safe_path = file_path.replace("'", "''")
                 subprocess.run(  # nosem; nosec B603
-                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{safe_path}' -ScanType CustomScan"],
                     timeout=60,
                     check=True
                 )
@@ -733,8 +735,9 @@ class CustomEventHandler(FileSystemEventHandler):
 
             # Windows Defender scan
             try:
+                safe_path = file_path.replace("'", "''")
                 subprocess.run(  # nosem; nosec B603
-                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{file_path.replace(\"'\", \"''\")}' -ScanType CustomScan"],
+                    [POWERSHELL_PATH, '-Command', f"Start-MpScan -ScanPath '{safe_path}' -ScanType CustomScan"],
                     timeout=60,
                     check=True
                 )
