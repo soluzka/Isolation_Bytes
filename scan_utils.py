@@ -8,7 +8,7 @@ import logging
 POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
 import platform
 import subprocess
-from secure_message import encrypt_message  # Ensure encrypt_message is imported
+from security.secure_message import encrypt_message  # Ensure encrypt_message is imported
 import requests
 from datetime import datetime
 import json

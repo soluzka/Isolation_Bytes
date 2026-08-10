@@ -7,6 +7,7 @@ import hashlib
 
 ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
+from security.secure_memory import SecureBuffer
 import sys
 
 if getattr(sys, 'frozen', False):
@@ -155,14 +156,3 @@ def quarantine_file(filepath):
                 logging.warning(f"Force deleted {filepath} after failed quarantine.")
             except Exception as del_exc:
                 logging.error(f"Failed to force delete {filepath}: {del_exc}")
-                
-class SecureBuffer:
-    def __init__(self, key):
-        self.key = key
-
-    def get_bytes(self):
-        return self.key  # Return the stored key
-
-    def zero_and_unlock(self):
-        # Securely wipe the stored key if necessary
-        self.key = b'\x00' * len(self.key)

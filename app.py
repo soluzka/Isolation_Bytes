@@ -14,6 +14,7 @@ from flask import Flask, request, jsonify, render_template, Response, send_from_
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
 from cryptography.fernet import Fernet
+from security.secure_message import encrypt_message, decrypt_message
 from pefile import PE as PEFile
 import psutil
 import numpy as np
@@ -507,17 +508,6 @@ if not FERNET_KEY:
     # Save to .env for future use
     with open('.env', 'a') as f:
         f.write(f'\nFERNET_KEY={FERNET_KEY.decode()}')
-
-# Initialize Fernet instance
-fernet = Fernet(FERNET_KEY)
-
-def encrypt_message(message):
-    """Encrypt a message using Fernet encryption."""
-    return fernet.encrypt(message.encode()).decode()
-
-def decrypt_message(encrypted_message):
-    """Decrypt a message using Fernet encryption."""
-    return fernet.decrypt(encrypted_message.encode()).decode()
 
 # Initialize login manager
 login_manager = LoginManager()
@@ -1265,12 +1255,6 @@ if __name__ == '__main__':
         logger.error(f"Error starting Flask: {e}")
         print(f"\nError starting server: {e}\n")
         print("Try manually running the application with 'python quick_start.py' instead.")
-
-
-def decrypt_message(encrypted_message):
-    """Decrypt a message using Fernet encryption."""
-    return fernet.decrypt(encrypted_message.encode()).decode()
-
 
 
 from security.process_monitor import scan_running_processes
@@ -3737,7 +3721,6 @@ from flask_wtf.csrf import generate_csrf
 from scan_utils import scan_file_for_viruses
 import psutil
 import subprocess
-from secure_message import encrypt_message, decrypt_message
 from folder_watcher import build_monitored_folders, MONITORED_FOLDERS
 
 # Ensure MONITORED_FOLDERS is always populated
@@ -4456,8 +4439,7 @@ def toggle_safe_downloader(action):
 @app.route('/quarantine/download/<filename>')
 def quarantine_download(filename):
     from cryptography.fernet import Fernet, InvalidToken
-    from secure_memory import SecureBuffer
-    from secure_message import encrypt_message, decrypt_message
+    from security.secure_memory import SecureBuffer
     import io
     from flask import send_file
 

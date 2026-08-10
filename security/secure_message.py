@@ -1,65 +1,55 @@
 """
-Secure messaging module for encrypting log messages and sensitive information
-This provides encryption functions to protect sensitive data in logs
+Secure messaging module for encrypting log messages and sensitive information.
+Uses Fernet symmetric encryption with the FERNET_KEY environment variable.
 """
-import base64
 import os
+import sys
 from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from security.secure_memory import SecureBuffer
 
-def get_encryption_key():
-    """Generate a deterministic encryption key based on machine-specific information"""
-    # Use a combination of machine-specific values as salt
-    import socket
-    salt = socket.gethostname().encode() + b'secure_log_salt'
-    # Use a fixed passphrase (in production, this would be securely stored)
-    password = b"windows_defender_secure_logging_key"
-    
-    # Use PBKDF2 to derive a secure key
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=100000,
-    )
-    key = base64.urlsafe_b64encode(kdf.derive(password))
-    return key
-
-def encrypt_message(message):
-    """Encrypt a message string for secure logging"""
+FERNET_KEY = os.environ.get('FERNET_KEY')
+if not FERNET_KEY:
     try:
+        from config import FERNET_KEY
+    except Exception:
+        pass
+
+_fernet = None
+
+
+def _get_fernet():
+    global _fernet
+    if _fernet is not None:
+        return _fernet
+    if not FERNET_KEY or len(FERNET_KEY) != 44:
+        print("[ERROR] FERNET_KEY must be a 44-character base64 string.", file=sys.stderr)
+        return None
+    raw = FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY
+    secure_key = SecureBuffer(raw)
+    _fernet = Fernet(secure_key.get_bytes())
+    secure_key.zero_and_unlock()
+    return _fernet
+
+
+def encrypt_message(message: str) -> str:
+    """Encrypt a message string using Fernet."""
+    try:
+        fernet = _get_fernet()
+        if fernet is None:
+            return str(message)
         if not isinstance(message, str):
             message = str(message)
-            
-        # Get encryption key
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
-        # Encrypt the message
-        encrypted_data = fernet.encrypt(message.encode())
-        return f"[ENCRYPTED]{base64.b64encode(encrypted_data).decode()}[/ENCRYPTED]"
+        return fernet.encrypt(message.encode()).decode()
     except Exception:
-        # If encryption fails, return the original message with a note
         return f"{message} [encryption failed]"
 
-def decrypt_message(encrypted_message):
-    """Decrypt a message that was encrypted with encrypt_message"""
+
+def decrypt_message(token: str) -> str:
+    """Decrypt a Fernet token."""
     try:
-        # Extract the encrypted data
-        if not encrypted_message.startswith("[ENCRYPTED]") or not encrypted_message.endswith("[/ENCRYPTED]"):
-            return encrypted_message
-            
-        encrypted_data = encrypted_message[len("[ENCRYPTED]"):-len("[/ENCRYPTED]")]
-        encrypted_bytes = base64.b64decode(encrypted_data)
-        
-        # Get encryption key
-        key = get_encryption_key()
-        fernet = Fernet(key)
-        
-        # Decrypt the message
-        decrypted_data = fernet.decrypt(encrypted_bytes)
-        return decrypted_data.decode()
+        fernet = _get_fernet()
+        if fernet is None:
+            return token
+        return fernet.decrypt(token.encode()).decode()
     except Exception:
-        # If decryption fails, return the original encrypted message
-        return encrypted_message
+        return token

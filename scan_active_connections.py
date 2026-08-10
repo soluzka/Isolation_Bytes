@@ -3,7 +3,7 @@ import psutil
 import re
 import os
 import sys
-from secure_message import encrypt_message  # Ensure encrypt_message is imported
+from security.secure_message import encrypt_message  # Ensure encrypt_message is imported
 
 # --- Windows subprocess window suppression ---
 if sys.platform == 'win32':

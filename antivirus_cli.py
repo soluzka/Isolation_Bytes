@@ -9,7 +9,7 @@ import os
 import logging
 import os
 from scan_utils import scan_file_for_viruses
-from secure_message import encrypt_message  # Ensure encrypt_message is imported
+from security.secure_message import encrypt_message  # Ensure encrypt_message is imported
     
 def file_hashes(filepath):
     import hashlib
