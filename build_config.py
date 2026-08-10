@@ -136,6 +136,9 @@ if redis_available:
 # Add hidden imports
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 
+# Collect the entire pyssdeep package (including bin/windows/fuzzy_64.dll)
+pyinstaller_args += ['--collect-all', 'pyssdeep']
+
 # Exclude large/unnecessary packages that bloat the one-file EXE and can fail
 # extraction (e.g. TensorFlow's long internal paths / huge binaries).
 EXCLUDE_MODULES = [
