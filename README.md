@@ -128,7 +128,13 @@ To have the antivirus start automatically when you log in, run the installer aft
 python build_config.py --install-startup
 ```
 
-This creates a Task Scheduler task that runs `dist/antivirus_server.exe` at every user logon. If Task Scheduler cannot be used, it falls back to adding the EXE to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
+Or, from the built EXE itself:
+
+```powershell
+.\dist\antivirus_server.exe --install-startup
+```
+
+This creates a Task Scheduler task that runs the EXE at every user logon. If Task Scheduler cannot be used, it falls back to adding the EXE to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
 
 ---
 
