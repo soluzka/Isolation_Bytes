@@ -61,7 +61,7 @@ def force_unlock_windows(filepath):
         except Exception as e:
             logging.warning(f'Could not run handle.exe to unlock {filepath}: {e}')
 
-def _add_local_signatures(data):
+def _add_local_signatures(data, filepath):
     """Append the hashes of a quarantined file to the local signature file so
     the same malware is detected by hash next time."""
     try:
@@ -74,8 +74,32 @@ def _add_local_signatures(data):
         sha1 = hashlib.sha1(data, usedforsecurity=False).hexdigest()
         sha256 = hashlib.sha256(data).hexdigest()
         sha512 = hashlib.sha512(data).hexdigest()
+
+        # TLSH fuzzy hash for catching variants
+        tlsh_hash = ''
+        try:
+            import tlsh
+            tlsh_hash = tlsh.hash(data)
+            if tlsh_hash == 'TNULL':
+                tlsh_hash = ''
+        except Exception:
+            pass
+
+        # imphash for PE files
+        imphash = ''
+        try:
+            import pefile
+            pe = pefile.PE(filepath)
+            imphash = pe.get_imphash()
+            pe.close()
+        except Exception:
+            pass
+
         new_lines = []
-        for htype, hval in [('md5', md5), ('sha1', sha1), ('sha256', sha256), ('sha512', sha512)]:
+        for htype, hval in [('md5', md5), ('sha1', sha1), ('sha256', sha256),
+                            ('sha512', sha512), ('tlsh', tlsh_hash), ('imphash', imphash)]:
+            if not hval:
+                continue
             line = f'local_quarantine:{htype}:{hval}'
             if line.lower() not in existing:
                 new_lines.append(line)
@@ -111,7 +135,7 @@ def quarantine_file(filepath):
             except Exception as del_exc:
                 logging.error(f"Failed to force delete {filepath}: {del_exc}")
         return
-    secure_key = SecureBuffer(FERNET_KEY)
+    secure_key = SecureBuffer(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
     fernet = Fernet(secure_key.get_bytes())
     basename = os.path.basename(filepath)
     dest = os.path.join(QUARANTINE_FOLDER, basename + '.enc')
@@ -124,7 +148,7 @@ def quarantine_file(filepath):
             ef.write(encrypted_data)
         del ef
         logging.warning(f"Quarantined (encrypted): {filepath}")
-        _add_local_signatures(data)
+        _add_local_signatures(data, filepath)
         try:
             from security.virus_total import check_and_update
             check_and_update(filepath)

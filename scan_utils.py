@@ -423,7 +423,7 @@ def load_malware_signatures():
     Load malware signatures from the signatures file.
     Returns a dictionary of {hash_type: {hash_value: signature_name}}
     """
-    signatures = {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
+    signatures = {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}, 'tlsh': {}, 'imphash': {}}
     signatures_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'malware_signatures.txt')
     
     if not os.path.exists(signatures_file):
@@ -447,12 +447,12 @@ def load_malware_signatures():
     except Exception as e:
         logging.error(f"Error loading malware signatures: {str(e)}")
         # Return empty signatures if there's an error
-        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
+        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}, 'tlsh': {}, 'imphash': {}}
     
     # Validate the signatures dictionary structure
     if not isinstance(signatures, dict):
         logging.error("Signatures is not a dictionary")
-        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
+        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}, 'tlsh': {}, 'imphash': {}}
     
     for hash_type, hash_dict in signatures.items():
         if not isinstance(hash_dict, dict):
@@ -463,8 +463,8 @@ def load_malware_signatures():
 
 def calculate_file_hashes(filepath):
     """
-    Calculate MD5, SHA1, SHA256 and SHA512 hashes for a file in a single pass.
-    Returns a tuple of (md5_hash, sha1_hash, sha256_hash, sha512_hash)
+    Calculate MD5, SHA1, SHA256, SHA512, TLSH and imphash for a file.
+    Returns a tuple of (md5_hash, sha1_hash, sha256_hash, sha512_hash, tlsh_hash, imphash)
     """
     import hashlib
     
@@ -475,17 +475,53 @@ def calculate_file_hashes(filepath):
     
     try:
         with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
-            # Read file in chunks to handle large files efficiently
-            for chunk in iter(lambda: f.read(4096), b''):
-                md5.update(chunk)
-                sha1.update(chunk)
-                sha256.update(chunk)
-                sha512.update(chunk)
+            data = f.read()
         
-        return md5.hexdigest(), sha1.hexdigest(), sha256.hexdigest(), sha512.hexdigest()
+        md5.update(data)
+        sha1.update(data)
+        sha256.update(data)
+        sha512.update(data)
+        
+        # TLSH fuzzy hash (catches variants even if a few bytes differ)
+        tlsh_hash = ''
+        try:
+            import tlsh
+            tlsh_hash = tlsh.hash(data)
+            if tlsh_hash == 'TNULL':
+                tlsh_hash = ''
+        except Exception:
+            pass
+        
+        # imphash for PE files (catches renamed/repacked binaries with same imports)
+        imphash = ''
+        try:
+            import pefile
+            pe = pefile.PE(get_resource_path(os.path.join(filepath)))
+            imphash = pe.get_imphash()
+            pe.close()
+        except Exception:
+            pass
+        
+        return md5.hexdigest(), sha1.hexdigest(), sha256.hexdigest(), sha512.hexdigest(), tlsh_hash, imphash
     except Exception as e:
         logging.error(f"Error calculating file hashes for {filepath}: {str(e)}")
         raise
+
+
+def _tlsh_match(value, signatures):
+    """Return the closest matching signature name if the TLSH distance is small."""
+    try:
+        import tlsh
+        for sig_hash, sig_name in signatures.items():
+            try:
+                if tlsh.diff(value, sig_hash) <= 100:
+                    return sig_name
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
 
 def scan_file_for_viruses(filepath):
     """
@@ -500,17 +536,23 @@ def scan_file_for_viruses(filepath):
         # Load the latest signatures
         signatures = load_malware_signatures()
         
-        # Calculate file hashes in one pass
-        md5_hash, sha1_hash, sha256_hash, sha512_hash = calculate_file_hashes(filepath)
+        # Calculate file hashes
+        md5_hash, sha1_hash, sha256_hash, sha512_hash, tlsh_hash, imphash = calculate_file_hashes(filepath)
         
-        # Check against all available signature databases
+        # Check against exact hash databases
         for hash_type, hash_value in [('md5', md5_hash), ('sha1', sha1_hash),
-                                       ('sha256', sha256_hash), ('sha512', sha512_hash)]:
-            if hash_value in signatures[hash_type]:
+                                       ('sha256', sha256_hash), ('sha512', sha512_hash),
+                                       ('imphash', imphash)]:
+            if hash_value and hash_value in signatures[hash_type]:
                 signature_name = signatures[hash_type][hash_value]
                 return True, True, f"Malware detected: {signature_name} ({hash_type.upper()} match)"
         
-        # If we reach here, no malware was found in our signatures
+        # Check TLSH fuzzy hash for variants
+        if tlsh_hash:
+            matched_name = _tlsh_match(tlsh_hash, signatures['tlsh'])
+            if matched_name:
+                return True, True, f"Malware detected: {matched_name} (TLSH fuzzy match)"
+        
         # Optional: query VirusTotal for the SHA256 hash
         try:
             from security.virus_total import is_malicious
@@ -520,6 +562,7 @@ def scan_file_for_viruses(filepath):
                 return True, True, "Malware detected by VirusTotal lookup"
         except Exception:
             pass
+        
         return True, False, "No malware found in signature database"
     
     except Exception as e:
