@@ -1565,17 +1565,19 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
     if modules is None:
         return output.getvalue()
 
+    # Start the file/folder scan first so the dashboard shows live file progress
+    # while the slower process/hardening scan runs afterwards.
+    if _load_scheduled_scan_state(state_file, output):
+        output.write('[conditional_startup] Running scheduled scans...\n')
+        monitored_folders = _get_monitored_folders(basedir, output)
+        _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback)
+
     _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
     _scan_processes_hardening_step(modules['process_security'], results, output, progress_callback)
     _check_persistence_indicators_step(results, output)
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
     _start_antivirus_cli_step(basedir, output)
-
-    if _load_scheduled_scan_state(state_file, output):
-        output.write('[conditional_startup] Running scheduled scans...\n')
-        monitored_folders = _get_monitored_folders(basedir, output)
-        _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback)
 
     if open_browser:
         _open_browser_when_ready(output)
