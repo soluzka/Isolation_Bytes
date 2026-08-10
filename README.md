@@ -120,6 +120,16 @@ python build_config.py
 
 The built executable is placed in `dist/antivirus_server.exe` and can be run or distributed without a Python install.
 
+### Installing as a Startup Application
+
+To have the antivirus start automatically when you log in, run the installer after building the EXE:
+
+```powershell
+python build_config.py --install-startup
+```
+
+This creates a Task Scheduler task that runs `dist/antivirus_server.exe` at every user logon. If Task Scheduler cannot be used, it falls back to adding the EXE to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
+
 ---
 
 ## Optional Environment Flags
