@@ -22,8 +22,7 @@ args = [
     '--noconfirm',
     '--log-level=INFO',
     '--add-data', f"{os.path.join(repo_root, 'security', 'yara_rules')}{sep}security\\yara_rules",
-    '--hidden-import', 'pyssdeep',
-    '--hidden-import', 'ssdeep',
+    '--collect-all', 'pyssdeep',
     '--hidden-import', 'yara',
     runner,
 ]

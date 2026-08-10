@@ -164,13 +164,27 @@ def match_yara(rules_obj, path):
 
 def main():
     p = argparse.ArgumentParser(description='YARA + ssdeep fuzzy runner')
-    p.add_argument('--rules', required=True, help='YARA rules file path')
-    g = p.add_mutually_exclusive_group(required=True)
+
+    if getattr(sys, 'frozen', False):
+        base_dir = os.getcwd()
+    else:
+        _here = os.path.dirname(os.path.abspath(__file__))
+        base_dir = os.path.dirname(os.path.dirname(_here))
+    default_rules = os.path.join(base_dir, 'security', 'yara_rules', 'yara_rules.yar')
+    default_dir = os.path.join(base_dir, 'security', 'yara_rules')
+
+    p.add_argument('--rules', default=None, help='YARA rules file path')
+    g = p.add_mutually_exclusive_group(required=False)
     g.add_argument('--target', help='Single file to scan')
     g.add_argument('--dir', help='Directory of files to scan (recursively)')
     p.add_argument('--threshold', type=int, default=60, help='ssdeep match threshold (0-100)')
     p.add_argument('--yara-timeout', type=int, default=10, help='YARA match timeout (seconds)')
     args = p.parse_args()
+
+    if not args.rules:
+        args.rules = default_rules
+    if not args.target and not args.dir:
+        args.dir = default_dir
 
     if not os.path.exists(args.rules):
         print('Rules file not found:', args.rules)
@@ -217,8 +231,15 @@ def main():
                 rs = metas.get('ssdeep')
                 if not rs:
                     continue
+                # Skip placeholder or invalid ssdeep strings (e.g. "TODO:replace...")
+                parts = rs.split(':')
+                if len(parts) < 3 or not parts[0].isdigit():
+                    continue
                 try:
-                    score = ssdeep.compare(file_ss, rs)
+                    if hasattr(ssdeep, 'compare'):
+                        score = ssdeep.compare(file_ss, rs)
+                    else:
+                        score = ssdeep.fuzzy_compare(file_ss, rs)
                     if score >= args.threshold:
                         fuzzy_hits.append((rname, score))
                 except Exception:
