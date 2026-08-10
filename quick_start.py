@@ -741,10 +741,22 @@ def run_startup():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # -- Web auth for quick_start.py dashboard --
+# The YARA scanner (and its supporting API endpoints) are intentionally public
+# so the desktop "Start YARA Scanner" shortcut works without an extra login step.
+YARA_SCANNER_PREFIXES = (
+    '/yara', '/yara_scanner', '/scan', '/scan_all', '/toggle_scan_all',
+    '/add_folder', '/remove-monitored-folder', '/api/monitored-directories',
+    '/api/network/monitored_directories', '/toggle_folder_watcher',
+    '/folder-watcher-paths', '/get_folder_watcher_paths', '/start_realtime',
+)
+
+
 @app.before_request
 def _require_login():
-    """Redirect unauthenticated users to /login except for login/logout/static."""
+    """Redirect unauthenticated users to /login except for public pages/scanning APIs."""
     if request.endpoint in ('login', 'logout', 'static'):
+        return
+    if request.path.startswith(YARA_SCANNER_PREFIXES):
         return
     if session.get('logged_in'):
         return
