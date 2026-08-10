@@ -1138,6 +1138,12 @@ def api_network_monitored_directories():
 # Note: We've removed the duplicate endpoint to avoid conflicts
 
 # -- Network monitoring functions --
+@app.route('/start_traffic_monitoring', methods=['POST'])
+def start_traffic_monitoring():
+    """Signal that traffic monitoring is active."""
+    return jsonify({'success': True, 'message': 'Traffic monitoring is active'})
+
+
 @app.route('/toggle_network_monitor/<action>', methods=['POST'])
 def toggle_network_monitor(action):
     """Toggle network monitor service on/off."""

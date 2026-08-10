@@ -190,8 +190,8 @@ function updateTrafficDisplay(trafficData, c2Data) {
 // Function to fetch traffic statistics from the API
 function updateTrafficStats() {
     Promise.all([
-        fetch('/get_traffic_stats'),
-        fetch('/get_c2_patterns')
+        fetch('/get_traffic_stats', {credentials: 'include'}),
+        fetch('/get_c2_patterns', {credentials: 'include'})
     ])
     .then(responses => Promise.all(responses.map(r => r.json())))
     .then(([trafficData, c2Data]) => {
@@ -247,7 +247,7 @@ function startTrafficMonitoring() {
     
     fetch('/start_traffic_monitoring', {
         method: 'POST',
-        credentials: 'include' // Ensure cookies are sent with the request
+        credentials: 'include'
     })
     .then(response => {
         if (!response.ok) {
@@ -301,7 +301,7 @@ function fetchMonitoredNetworkDirectories() {
     safeDomOperation('monitored_directories', function(container) {
         container.innerHTML = '<div class="loading">Loading monitored directories...</div>';
         
-        fetch('/api/network/monitored_directories')
+        fetch('/api/network/monitored_directories', {credentials: 'include'})
             .then(response => {
                 if (!response.ok) {
                     throw new Error(`Failed to fetch monitored directories: ${response.status}`);

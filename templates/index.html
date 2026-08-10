@@ -830,7 +830,7 @@ if (stopAutoUpdatesBtn) {
         // instead of letting it reject and abort every other update.
         async function fetchJsonOrNotAvailable(url) {
             try {
-                const response = await fetch(url);
+                const response = await fetch(url, {credentials: 'include'});
                 if (!response.ok) {
                     return { success: false, error: 'Not implemented' };
                 }

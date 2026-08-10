@@ -40,6 +40,10 @@
         if (!isSafeRelativePath(url)) {
             return { ok: false, status: null, data: null, error: 'Refused to fetch a non-relative or unsafe URL' };
         }
+        options = options || {};
+        if (!options.credentials) {
+            options.credentials = 'include';
+        }
         try {
             const response = await fetch(url, options); // nosem
             if (!response.ok) {
