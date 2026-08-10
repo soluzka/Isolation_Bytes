@@ -57,5 +57,19 @@ def update_signatures():
     all_hashes = remote | local
     save_hashes(all_hashes)
 
+    # Pull free ThreatFox file hashes as well
+    try:
+        from security.threatfox_updater import update_threatfox_signatures
+        update_threatfox_signatures(days=1)
+    except Exception:
+        pass
+
+    # Pull free URLhaus blocklists as well
+    try:
+        from security.urlhaus_updater import update_urlhaus_blocklists
+        update_urlhaus_blocklists()
+    except Exception:
+        pass
+
 if __name__ == '__main__':
     update_signatures()
