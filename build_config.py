@@ -93,6 +93,12 @@ hidden_imports = [
     'lightgbm.sklearn',
     'pefile',
     'security.process_monitor',
+    # Shortcut creation (pywin32) dependencies for the one-file EXE
+    'win32com.client',
+    'win32com.shell.shell',
+    'win32com.shell.shellcon',
+    'pythoncom',
+    'pywintypes',
 ]
 
 # Path separator based on platform

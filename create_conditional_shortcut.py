@@ -9,12 +9,14 @@ except ImportError:
 
 # Prefer the compiled EXE so the shortcuts work without a Python install.
 # Fall back to python.exe + quick_start.py if the EXE has not been built yet.
+is_frozen = getattr(sys, 'frozen', False)
+base_dir = os.path.dirname(sys.executable) if is_frozen else os.path.dirname(__file__)
 exe_candidates = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), 'antivirus_server.exe')),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), 'dist', 'antivirus_server.exe')),
+    os.path.abspath(os.path.join(base_dir, 'antivirus_server.exe')),
+    os.path.abspath(os.path.join(base_dir, 'dist', 'antivirus_server.exe')),
 ]
 exe_path = next((p for p in exe_candidates if os.path.exists(p)), None)
-quick_start_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'quick_start.py'))
+quick_start_path = os.path.abspath(os.path.join(base_dir, 'quick_start.py'))
 
 if exe_path:
     target = exe_path
