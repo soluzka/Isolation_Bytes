@@ -3150,8 +3150,8 @@ def safe_download_service():
                                 f.write(chunk)
                         
                         # Scan file for viruses
-                        scan_result = scan_file_for_viruses(temp_file)
-                        if scan_result.get('infected'):
+                        scan_success, malware_found, msg = scan_file_for_viruses(temp_file)
+                        if malware_found:
                             logging.warning(f"Download from {url} contains malware")
                             continue
                             
@@ -3161,8 +3161,8 @@ def safe_download_service():
                             for root, _, files in os.walk(temp_dir):
                                 for file in files:
                                     file_path = os.path.join(root, file)
-                                    scan_result = scan_file_for_viruses(file_path)
-                                    if scan_result.get('infected'):
+                                    scan_success, malware_found, msg = scan_file_for_viruses(file_path)
+                                    if malware_found:
                                         logging.warning(f"Extracted file {file} contains malware")
                                         continue
                                         
