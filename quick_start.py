@@ -157,12 +157,38 @@ for handler in logging.getLogger().handlers:
     if isinstance(handler, logging.StreamHandler):
         handler.addFilter(dnsbl_filter)
 
+def _is_startup_installed():
+    """Check whether the EXE is already registered to run at logon."""
+    try:
+        subprocess.run(
+            ['schtasks', '/query', '/tn', 'AntivirusYARAServerStartup'],
+            check=True, capture_output=True, text=True
+        )
+        return True
+    except Exception:
+        pass
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Run',
+            0, winreg.QUERY_VALUE
+        )
+        winreg.QueryValueEx(key, 'AntivirusYARAServer')
+        winreg.CloseKey(key)
+        return True
+    except Exception:
+        return False
+
 def install_startup():
-    """Add the current EXE to the current user's startup."""
+    """Add the current EXE to the current user's startup if not already."""
     exe_path = sys.executable
     if not exe_path.lower().endswith('.exe'):
         print("Install startup is only supported when running the built EXE.")
         return False
+
+    if _is_startup_installed():
+        print("Startup entry already exists.")
+        return True
 
     # Try Task Scheduler first
     try:
@@ -2255,6 +2281,8 @@ if __name__ == '__main__':
     if '--install-startup' in sys.argv:
         install_startup()
         sys.exit(0)
+    if sys.executable.lower().endswith('.exe') and not _is_startup_installed():
+        install_startup()
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
     
