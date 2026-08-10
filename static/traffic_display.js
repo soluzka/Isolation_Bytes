@@ -24,8 +24,8 @@ function escapeHtml(text) {
 }
 
 // Tagged template that escapes all interpolated values
-// eslint-disable-next-line security/detect-object-injection
 // snyk:ignore:Function Call Object Injection Sink
+// eslint-disable-next-line security/detect-object-injection
 function safe(strings, ...values) { // nosemgrep: detect-object-injection
     const parts = Array.from(strings);
     let result = parts.shift() || '';
