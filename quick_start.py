@@ -61,6 +61,13 @@ def _request_admin_elevation():
 _request_admin_elevation()
 load_dotenv()
 
+# Seed the web_auth password store from the .env ADMIN_PASSWORD
+try:
+    from security.web_auth import set_password
+    set_password(os.environ.get('ADMIN_PASSWORD', 'admin123'))
+except Exception:
+    pass
+
 # Import DNS server functionality
 from dns_server import start_dns_server
 # Fernet key provider for quarantine encryption

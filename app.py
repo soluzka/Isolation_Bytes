@@ -1549,7 +1549,14 @@ def login():
         username = request.form.get('username')
         password = request.form.get('password')
         
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
+        try:
+            from security.web_auth import verify_password
+            password_ok = verify_password(password)
+        except Exception:
+            # Fallback to env if web_auth isn't available
+            password_ok = (password == ADMIN_PASSWORD)
+
+        if username == ADMIN_USERNAME and password_ok:
             user = User('admin')
             login_user(user)
             next_page = request.args.get('next')
