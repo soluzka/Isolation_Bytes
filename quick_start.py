@@ -2545,15 +2545,18 @@ if __name__ == '__main__':
     
     # Show a popup with the URL; clicking OK opens the browser.
     if detected_port is not None:
-        url = f"http://127.0.0.1:{detected_port}"
+        base_url = f"http://127.0.0.1:{detected_port}"
+        browser_path = '/yara-scanner' if '--open-yara' in sys.argv else ''
+        url = f"{base_url}{browser_path}"
         print(f"Server is ready at {url}")
         if sys.platform == 'win32':
             try:
+                title = 'YARA Scanner' if browser_path else 'Antivirus Dashboard'
                 result = ctypes.windll.user32.MessageBoxW(
                     0,
-                    f"Antivirus dashboard is ready at {url}\n\n"
-                    "Click OK to open it and view the live scan indicators.",
-                    "Antivirus Dashboard",
+                    f"{title} is ready at {url}\n\n"
+                    "Click OK to open it.",
+                    title,
                     0x00000000  # MB_OK
                 )
                 if result == 1:  # IDOK

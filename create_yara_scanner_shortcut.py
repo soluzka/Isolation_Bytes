@@ -7,11 +7,12 @@ except ImportError:
     print("win32com.client is required. Please install pywin32: pip install pywin32")
     sys.exit(1)
 
-# Robustly determine the batch file path (even in temp extraction)
-bat_filename = 'start_yara_scanner.bat'
-bat_path = os.path.abspath(os.path.join(os.path.dirname(__file__), bat_filename))
-if not os.path.exists(bat_path):
-    print(f"[ERROR] Batch file not found: {bat_path}")
+# Use python.exe and quick_start.py --open-yara so the shortcut target type is an
+# Application, not a Windows batch file.
+python_exe = sys.executable
+quick_start_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'quick_start.py'))
+if not os.path.exists(quick_start_path):
+    print(f"[ERROR] quick_start.py not found: {quick_start_path}")
     sys.exit(1)
 
 # Path to the user's actual desktop (works with OneDrive redirection)
@@ -30,14 +31,16 @@ shortcut_path = os.path.join(desktop, 'Start YARA Scanner.lnk')
 try:
     shell = win32com.client.Dispatch('WScript.Shell')
     shortcut = shell.CreateShortCut(shortcut_path)
-    shortcut.Targetpath = bat_path
-    shortcut.WorkingDirectory = os.path.dirname(bat_path)
-    icon_path = os.path.join(os.path.dirname(bat_path), 'static', 'favicon.ico')
-    shortcut.IconLocation = f"{icon_path},0" if os.path.exists(icon_path) else bat_path
+    shortcut.Targetpath = python_exe
+    shortcut.Arguments = f'"{quick_start_path}" --open-yara'
+    shortcut.WorkingDirectory = os.path.dirname(quick_start_path)
+    icon_path = os.path.join(os.path.dirname(quick_start_path), 'static', 'favicon.ico')
+    shortcut.IconLocation = f"{icon_path},0" if os.path.exists(icon_path) else python_exe
     shortcut.save()
     print(f"[SUCCESS] Shortcut created: {shortcut_path}")
-    print(f"[INFO] Shortcut target: {bat_path}")
-    print(f"[INFO] Shortcut working dir: {os.path.dirname(bat_path)}")
+    print(f"[INFO] Shortcut target: {python_exe}")
+    print(f"[INFO] Shortcut arguments: {shortcut.Arguments}")
+    print(f"[INFO] Shortcut working dir: {os.path.dirname(quick_start_path)}")
 except Exception as e:
     print(f"[ERROR] Failed to create shortcut: {e}")
     sys.exit(1)
