@@ -1,4 +1,5 @@
 # Specific large files
+malware_signatures.txt
 uploads/malware_signatures.txt
 yara_scanner.log
 
