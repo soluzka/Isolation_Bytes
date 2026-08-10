@@ -2403,16 +2403,15 @@ if __name__ == '__main__':
     print(f"Network Monitoring: {'ENABLED' if network_state['monitoring_enabled'] else 'DISABLED'}")
     print(f"Auto-Block: {'ENABLED' if network_state['auto_block_enabled'] else 'DISABLED'}")
 
-    # Ensure desktop shortcuts exist when running from source
-    if not getattr(sys, 'frozen', False):
-        try:
-            import create_conditional_shortcut
-        except Exception:
-            pass
-        try:
-            import create_yara_scanner_shortcut
-        except Exception:
-            pass
+    # Ensure desktop shortcuts exist
+    try:
+        import create_conditional_shortcut
+    except Exception:
+        pass
+    try:
+        import create_yara_scanner_shortcut
+    except Exception:
+        pass
     
     # Initialize DNS server and start it automatically
     try:
