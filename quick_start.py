@@ -454,6 +454,20 @@ def _perform_scan_all():
     try:
         quarantine_dir = os.path.join(os.environ.get('USERPROFILE', r'C:\Users\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
 
+        if continuous_scan_state['active']:
+            continuous_scan_state['last_result'] = {
+                'status': 'success',
+                'scan_time': '0.00 seconds',
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'matches': 0,
+                'folders': monitored_dirs,
+                'results': [f'Scan started on {len(monitored_dirs)} folder(s)...'],
+                'files_scanned': 0,
+                'directories_scanned': 0,
+                'threats_detected': 0,
+                'threats_removed': 0
+            }
+
         for directory in monitored_dirs:
             try:
                 if not os.path.exists(directory) or not os.path.isdir(directory):
@@ -481,7 +495,7 @@ def _perform_scan_all():
 
                         total_files_scanned += 1
 
-                        if continuous_scan_state['active'] and total_files_scanned % 100 == 0:
+                        if continuous_scan_state['active'] and total_files_scanned % 10 == 0:
                             elapsed = time.time() - start_time
                             continuous_scan_state['last_result'] = {
                                 'status': 'success',
