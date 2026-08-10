@@ -2388,6 +2388,9 @@ if __name__ == '__main__':
         install_startup()
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
+    print(f"Real-Time Protection: {'ENABLED' if folder_watcher_state['active'] else 'DISABLED'}")
+    print(f"Network Monitoring: {'ENABLED' if network_state['monitoring_enabled'] else 'DISABLED'}")
+    print(f"Auto-Block: {'ENABLED' if network_state['auto_block_enabled'] else 'DISABLED'}")
 
     # Ensure desktop shortcuts exist when running from source
     if not getattr(sys, 'frozen', False):
