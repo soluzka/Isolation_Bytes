@@ -3,6 +3,7 @@ import os
 import sys
 import io
 import json
+import getpass
 import subprocess
 import tempfile
 import requests
@@ -21,6 +22,50 @@ def import_module_from_path(module_name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+def _resolve_critical_directories():
+    """Resolve critical system directories, auto-detecting the Windows drive
+    when SYSTEMROOT/USERPROFILE/PROGRAMDATA environment variables are missing."""
+    import string
+
+    system_root = os.environ.get('SYSTEMROOT')
+    if not system_root or not os.path.isdir(system_root):
+        for d in string.ascii_uppercase:
+            candidate = f"{d}:\\Windows"
+            if os.path.isdir(candidate):
+                system_root = candidate
+                break
+        else:
+            system_root = 'C:\\Windows'
+
+    user_profile = os.environ.get('USERPROFILE')
+    if not user_profile or not os.path.isdir(user_profile):
+        username = getpass.getuser()
+        for d in string.ascii_uppercase:
+            candidate = os.path.join(f"{d}:\\", 'Users', username)
+            if os.path.isdir(candidate):
+                user_profile = candidate
+                break
+        else:
+            user_profile = 'C:\\Users\\Default'
+
+    program_data = os.environ.get('PROGRAMDATA')
+    if not program_data or not os.path.isdir(program_data):
+        drive, _ = os.path.splitdrive(system_root)
+        candidate = os.path.join(drive + '\\', 'ProgramData')
+        if os.path.isdir(candidate):
+            program_data = candidate
+        else:
+            program_data = 'C:\\ProgramData'
+
+    dirs = [
+        os.path.join(system_root, 'System32'),
+        os.path.join(system_root, 'Temp'),
+        os.path.join(user_profile, 'Downloads'),
+        os.path.join(user_profile, 'AppData\\Local\\Temp'),
+        os.path.join(program_data, 'Microsoft\\Windows\\Start Menu\\Programs\\Startup')
+    ]
+    return [d for d in dirs if os.path.isdir(d)]
 
 def load_module(module_name, path, output):
     """Helper to dynamically load a module from the given path."""
@@ -87,14 +132,8 @@ def routine_maintenance_and_system_recovery():
             yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
             yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)
             
-            # Scan critical system directories
-            critical_dirs = [
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32'),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'Temp'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'Downloads'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Local\\Temp'),
-                os.path.join(os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'Microsoft\\Windows\\Start Menu\\Programs\\Startup')
-            ]
+            # Scan critical system directories (auto-detect drive if env vars missing)
+            critical_dirs = _resolve_critical_directories()
             
             for scan_dir in critical_dirs:
                 if os.path.exists(scan_dir):
