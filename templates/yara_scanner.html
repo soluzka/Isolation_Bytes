@@ -369,9 +369,6 @@
                 <h3>Protection Controls</h3>
                 <div class="button-group">
                     <a href="/" target="_blank" class="dashboard-button">Open Full Dashboard</a>
-                    <button type="button" id="start_realtime_btn" class="dashboard-button green">Start Real-Time Protection</button>
-                    <button type="button" id="stop_realtime_btn" class="dashboard-button red" style="opacity:0.6;cursor:not-allowed;" disabled title="Disabling real-time protection is not allowed for your security.">Stop Real-Time Protection</button>
-                    <button type="button" id="start_folder_watcher_btn" class="dashboard-button green">Start Folder Monitoring</button>
                 </div>
                 <p style="color:#888;font-size:0.95em;margin-top:0.5em;">For your security, real-time protection cannot be disabled. This ensures continuous protection against threats.</p>
             </div>
@@ -426,64 +423,7 @@
                 <p>Yes, you can manually delete files from the quarantine folder if you're certain they're malicious and no longer needed for analysis.</p>
             </div>
         </div>
-<script>
-document.getElementById('start_realtime_btn').onclick = async function() {
-    const btn = this;
-    btn.disabled = true;
-    btn.textContent = 'Starting...';
-    try {
-        const response = await fetch('/start_realtime', {method: 'POST'});
-        const text = await response.text();
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (parseErr) {
-            alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
-            btn.disabled = false;
-            btn.textContent = 'Start Real-Time Protection';
-            return;
-        }
-        let msg = '';
-        if (data.status === 'success') {
-            msg = data.message || 'Real-Time Protection started.';
-            // Optionally update a status span if present
-        } else if (data.status === 'warning') {
-            msg = data.message || 'Real-Time Protection is already running.';
-        } else {
-            msg = data.message || data.error || 'Unknown error';
-        }
-        alert(msg);
-    } catch (error) {
-        alert('Error: ' + error);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Start Real-Time Protection';
-    }
-};
-document.getElementById('stop_realtime_btn').onclick = function() {
-    alert('Disabling real-time protection is not allowed for your security.');
-};
-document.getElementById('start_folder_watcher_btn').onclick = function() {
-                    fetch('/toggle_folder_watcher/start', {method: 'POST'})
-                        .then(async response => {
-                            let text = await response.text();
-                            let data;
-                            try {
-                                data = JSON.parse(text);
-                            } catch (e) {
-                                alert('Unexpected server response: ' + text);
-                                return;
-                            }
-                            if (data.status === 'success') {
-                                alert(data.message || 'Folder Watcher started.');
-                                location.reload();
-                            } else {
-                                alert('Error: ' + (data.message || data.error || 'Unknown error'));
-                            }
-                        })
-                        .catch(error => alert('Error: ' + error));
-                };
-                </script>
+
             </div>
             
             <div class="card">

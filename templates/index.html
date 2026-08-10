@@ -135,54 +135,7 @@
     <p>Auto-Block: <span class="status" id="auto_block_status">{{ 'ENABLED' if auto_block_enabled else 'DISABLED' }}</span></p>
 <p style="color:#888;font-size:0.95em;margin-top:-1em;">For your security, real-time protection cannot be disabled. This ensures continuous protection against threats.</p>
     <div class="button-row">
-        <button type="button" id="start_realtime_btn" style="background:#27ae60;color:#fff;">Start Real-Time Protection</button>
-        <script>
-        const startRealtimeBtn = document.getElementById('start_realtime_btn');
-        if (startRealtimeBtn) {
-            startRealtimeBtn.onclick = async function() {
-    const btn = this;
-    btn.disabled = true;
-    btn.textContent = 'Starting...';
-    try {
-        const response = await fetch('/start_realtime', {method: 'POST'});
-        const text = await response.text();
-        let data;
-        try {
-            data = JSON.parse(text);
-        } catch (parseErr) {
-            alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
-            btn.disabled = false;
-            btn.textContent = 'Start Real-Time Protection';
-            return;
-        }
-        let msg = '';
-        if (data.status === 'success') {
-            msg = data.message || 'Real-Time Protection started.';
-            document.getElementById('rtp_status').textContent = 'ENABLED';
-        } else if (data.status === 'warning') {
-            msg = data.message || 'Real-Time Protection is already running.';
-            document.getElementById('rtp_status').textContent = 'ENABLED';
-        } else {
-            msg = data.message || data.error || 'Unknown error';
-            document.getElementById('rtp_status').textContent = 'ERROR';
-        }
-        alert(msg);
-    } catch (error) {
-        alert('Error: ' + error);
-        document.getElementById('rtp_status').textContent = 'ERROR';
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Start Real-Time Protection';
-    }
-};
-}
-        // Stop Real-Time Protection is disabled for security reasons.
-const stopRealtimeBtn = document.getElementById('stop_realtime_btn');
-if (stopRealtimeBtn) {
-    stopRealtimeBtn.onclick = function() {
-        alert('Disabling real-time protection is not allowed for your security.');
-    };
-}
+    <script>
         // Folder Watcher
 function folderWatcherHandler(action) {
     const btn = action === 'start' ? document.getElementById('start_folder_watcher_btn') : document.getElementById('stop_folder_watcher_btn');
