@@ -241,7 +241,7 @@ network_bp = Blueprint('network', __name__, url_prefix='/api/network')
 
 # Global state for monitoring services
 folder_watcher_state = {
-    'active': False,
+    'active': True,
     'start_time': None,
     'monitored_paths': [
         # User profile directories - common locations for personal files and downloads
@@ -969,8 +969,8 @@ def scan_all_latest():
 # -- Network monitoring enhanced functionality --
 # Global state to track network monitoring status
 network_state = {
-    'monitoring_enabled': False,
-    'auto_block_enabled': False,  # Opt-in; see toggle_auto_block() and network_blocking.py
+    'monitoring_enabled': True,
+    'auto_block_enabled': True,  # C2/uncommon-port auto-blocking is now on by default
     'suspicious_connections': [],
     'monitored_directories': [
         # User profile locations (high risk)
@@ -2415,11 +2415,11 @@ if __name__ == '__main__':
     scan_thread.start()
     logger.info("Scheduled scanning thread started for continuous YARA scanning")
 
-    # Auto-block monitor thread -- no-ops unless network_state['auto_block_enabled']
-    # is turned on via /toggle_auto_block/start (opt-in, off by default).
+    # Auto-block monitor thread -- active by default because auto_block_enabled
+    # is initialized to True. It can still be toggled via /toggle_auto_block.
     auto_block_thread = threading.Thread(target=run_auto_block_monitor, daemon=True)
     auto_block_thread.start()
-    logger.info("Auto-block monitor thread started (inactive until enabled)")
+    logger.info("Auto-block monitor thread started (active by default)")
 
     # Process hardening monitor thread -- scans running EXEs for YARA, entropy,
     # missing signatures, and memory-region anomalies.
