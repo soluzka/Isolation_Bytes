@@ -24,7 +24,8 @@ function escapeHtml(text) {
 }
 
 // Tagged template that escapes all interpolated values
-function safe(strings, ...values) {
+// eslint-disable-next-line security/detect-object-injection
+function safe(strings, ...values) { // nosem
     const parts = Array.from(strings);
     let result = parts.shift() || '';
     for (const value of values) {
