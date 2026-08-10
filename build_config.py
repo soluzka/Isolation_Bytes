@@ -100,6 +100,8 @@ sep = ';' if sys.platform.startswith('win') else ':'
 redis_available = configure_redis()
 
 # PyInstaller arguments
+icon_path = os.path.join(base_dir, 'static', 'favicon.ico')
+
 pyinstaller_args = [
     f'--name={app_name}',
     '--onefile',
@@ -107,6 +109,7 @@ pyinstaller_args = [
     '--log-level=DEBUG',
     '--noupx',
     '--uac-admin',  # Request admin at launch; no Python self-restart loop
+    f'--icon={icon_path}',
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
     '--console'  # Keep console for debugging
