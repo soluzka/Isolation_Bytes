@@ -511,6 +511,15 @@ def scan_file_for_viruses(filepath):
                 return True, True, f"Malware detected: {signature_name} ({hash_type.upper()} match)"
         
         # If we reach here, no malware was found in our signatures
+        # Optional: query VirusTotal for the SHA256 hash
+        try:
+            from security.virus_total import is_malicious
+            if is_malicious(filepath):
+                from security.virus_total import add_signatures
+                add_signatures(filepath)
+                return True, True, "Malware detected by VirusTotal lookup"
+        except Exception:
+            pass
         return True, False, "No malware found in signature database"
     
     except Exception as e:

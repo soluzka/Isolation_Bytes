@@ -140,6 +140,18 @@ The scanner uses `malware_signatures.txt` for hash-based detection (MD5, SHA1, S
    python update_signatures.py
    ```
 
+## Optional: VirusTotal Enrichment
+
+If you add a `VT_API_KEY` to `.env`, the scanner will:
+
+1. Query VirusTotal for any file whose hash is not in `malware_signatures.txt`.
+2. If VirusTotal reports it as malicious, add its MD5/SHA1/SHA256/SHA512 to `malware_signatures.txt`.
+3. Quarantined files are also checked against VirusTotal and their hashes added if flagged.
+
+```powershell
+VT_API_KEY=your-vt-key-here
+```
+
 ---
 
 ## Optional Environment Flags

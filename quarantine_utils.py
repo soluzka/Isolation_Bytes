@@ -124,6 +124,11 @@ def quarantine_file(filepath):
         del ef
         logging.warning(f"Quarantined (encrypted): {filepath}")
         _add_local_signatures(data)
+        try:
+            from security.virus_total import check_and_update
+            check_and_update(filepath)
+        except Exception:
+            pass
         secure_key.zero_and_unlock()
         secure_key.zero_and_unlock()
         if os.path.exists(filepath):
