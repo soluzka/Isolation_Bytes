@@ -147,7 +147,7 @@ def routine_maintenance_and_system_recovery():
                         for file in files:
                             filepath = os.path.join(root, file)
                             try:
-                                yara_result = yara_scanner.scan_file(filepath)
+                                yara_result = yara_scanner.scan_file_with_yara(filepath)
                                 if yara_result:
                                     recovery_results["yara_scans"].append({
                                         "file": filepath,
@@ -515,7 +515,7 @@ def routine_maintenance_and_system_recovery():
                                 if is_suspicious:
                                     # Perform YARA scan on suspicious game files
                                     try:
-                                        yara_result = yara_scanner.scan_file(filepath)
+                                        yara_result = yara_scanner.scan_file_with_yara(filepath)
                                         if yara_result:
                                             recovery_results["game_malware_scans"].append({
                                                 "file": filepath,
@@ -1433,7 +1433,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
         # Try YARA scan
         try:
             with scanner_lock:
-                yara_result = yara_scanner.scan_file(filepath)
+                yara_result = yara_scanner.scan_file_with_yara(filepath)
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
         except Exception as yara_exc:

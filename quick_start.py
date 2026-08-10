@@ -500,15 +500,10 @@ def _perform_scan_all():
                                 'reported': False
                             }
 
-                            if not yara_matches:
-                                scan_cache.set(file_path, cache_entry)
-                                continue
-
-                            total_yara_matches += len(yara_matches)
-                            detected_threats += 1
-
                             ml_score = None
-                            if ember_detector.available:
+                            pe_extensions = ('.exe', '.dll', '.sys', '.scr', '.pif', '.com', '.cpl')
+                            file_ext = os.path.splitext(file_path)[1].lower()
+                            if ember_detector.available and file_ext in pe_extensions:
                                 ml_score = ember_detector.score(file_path)
                                 cache_entry['ember_score'] = ml_score
                             if ml_score is None and detector is not None:
@@ -527,21 +522,36 @@ def _perform_scan_all():
                                     should_quarantine = True
                                     cache_entry['quarantine_reason'] = 'legacy'
 
-                            if should_quarantine:
-                                success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
-                                cache_entry['quarantined'] = success
-                                if success:
-                                    quarantined_count += 1
-                                    results.append('QUARANTINED: ' + file_path + ' - Rules: ' + ', '.join(rule_names))
-                                    logger.warning(f'Quarantined high-risk file: {file_path}')
+                            if yara_matches:
+                                total_yara_matches += len(yara_matches)
+
+                            if yara_matches or should_quarantine:
+                                detected_threats += 1
+
+                                if should_quarantine:
+                                    success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
+                                    cache_entry['quarantined'] = success
+                                    if success:
+                                        quarantined_count += 1
+                                        if yara_matches:
+                                            results.append('QUARANTINED: ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                        else:
+                                            results.append(f'QUARANTINED (ember): {file_path} - ML score {ml_score:.4f}')
+                                        logger.warning(f'Quarantined high-risk file: {file_path}')
+                                    else:
+                                        if yara_matches:
+                                            results.append('YARA match (quarantine failed: ' + message + '): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                        else:
+                                            results.append(f'EMBER match (quarantine failed: {message}): {file_path} - ML score {ml_score:.4f}')
+                                        logger.warning(f'EMBER match not quarantined ({message}): {file_path}')
                                 else:
-                                    results.append('YARA match (quarantine failed: ' + message + '): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
-                                    logger.warning(f'YARA match not quarantined ({message}): {file_path}')
-                            else:
-                                cache_entry['reported'] = True
-                                results.append('YARA match (report-only): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
-                                if ml_score is not None:
-                                    logger.info(f'  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}')
+                                    cache_entry['reported'] = True
+                                    if yara_matches:
+                                        results.append('YARA match (report-only): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                    else:
+                                        results.append(f'EMBER match (report-only): {file_path} - ML score {ml_score:.4f}')
+                                    if ml_score is not None:
+                                        logger.info(f'  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}')
 
                             scan_cache.set(file_path, cache_entry)
 

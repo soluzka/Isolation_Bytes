@@ -313,6 +313,10 @@ def scan_file_with_yara(filepath, timeout=10):
     except Exception as e:
         logging.error(f"Error checking file size: {str(e)}")
     
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico'}:
+        return []
+
     # Load the YARA rules
     try:
         rules = load_yara_rules()
@@ -330,7 +334,7 @@ def scan_file_with_yara(filepath, timeout=10):
         
         # Build per-file external variables for rules that depend on them
         externals = {
-            'extension': os.path.splitext(filepath)[1].lower(),
+            'extension': ext,
             'filename': os.path.basename(filepath),
             'filepath': filepath,
             'filetype': _classify_filetype(filepath),
