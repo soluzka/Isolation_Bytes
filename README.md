@@ -69,7 +69,7 @@
    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
    ```
 
-   For the full list of optional settings (Flask secret, admin credentials, quarantine limits), see `.env.example`.
+   The `.env` file is loaded by `python-dotenv` at startup and holds runtime secrets and optional credentials. See `.env.example` for the full list of available options (Flask secret, admin credentials, API keys).
 
 ---
 
