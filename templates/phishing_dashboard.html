@@ -4,7 +4,17 @@
     <meta charset="UTF-8">
     <title>Phishing Alerts Dashboard</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 2em; }
+        body { font-family: Arial, sans-serif; margin: 2em; position: relative; }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url('{{ url_for('static', filename='shield_bg.png') }}') no-repeat center fixed;
+            background-size: 300px;
+            opacity: 0.12;
+            z-index: -1;
+            pointer-events: none;
+        }
         h2 { color: #b30000; }
         table { border-collapse: collapse; width: 100%; }
         th, td { border: 1px solid #ccc; padding: 0.5em; }
