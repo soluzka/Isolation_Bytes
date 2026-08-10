@@ -1032,6 +1032,23 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
         
         let scanAllInterval = null;
 
+        function pollLatestScan() {
+            fetch('/scan_all/latest')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.result) {
+                        displayResults(data.result);
+                    }
+                    if (data.last_error) {
+                        document.getElementById('results').innerHTML = `<div class="alert">Error: ${data.last_error}</div>`;
+                    }
+                    document.getElementById('loadingIndicator').style.display = data.active ? 'block' : 'none';
+                })
+                .catch(error => {
+                    document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                });
+        }
+
         document.getElementById("scanAllBtn").addEventListener("click", function() {
             const btn = this;
 
@@ -1039,30 +1056,26 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
                 clearInterval(scanAllInterval);
                 scanAllInterval = null;
                 btn.textContent = 'Scan All Folders';
+                document.getElementById('loadingIndicator').style.display = 'none';
+                fetch('/toggle_scan_all/stop', { method: 'POST' });
                 return;
             }
 
             btn.textContent = 'Stop Scanning';
 
-            function runScanAll() {
-                document.getElementById('loadingIndicator').style.display = 'block';
-
-                fetch('/scan_all', {
-                    method: 'POST'
-                })
+            fetch('/toggle_scan_all/start', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
-                    displayResults(data);
-                    document.getElementById('loadingIndicator').style.display = 'none';
+                    if (data.status === 'success') {
+                        pollLatestScan();
+                        scanAllInterval = setInterval(pollLatestScan, 2000);
+                    } else {
+                        document.getElementById('results').innerHTML = `<div class="alert">Error: ${data.message || data.error}</div>`;
+                    }
                 })
                 .catch(error => {
                     document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
-                    document.getElementById('loadingIndicator').style.display = 'none';
                 });
-            }
-
-            runScanAll();
-            scanAllInterval = setInterval(runScanAll, 10000);
         });
         
         // Coerce API payloads that may be a single value, an object or JSON text into an array
