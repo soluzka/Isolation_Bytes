@@ -116,9 +116,10 @@ pyinstaller_args = [
     '--onedir',
     '--contents-directory=.',
     '--clean',
+    '--noconfirm',
     '--log-level=DEBUG',
-    '--noupx',
     '--uac-admin',  # Request admin at launch; no Python self-restart loop
+    '--noupx',
     f'--icon={icon_path}',
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),

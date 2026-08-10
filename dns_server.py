@@ -4,6 +4,9 @@ import socket
 import logging
 import random
 import os
+import sys
+
+BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
 import json
 import threading
 import time
@@ -20,7 +23,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('dns_server.log'),
+        logging.FileHandler(os.path.join(BASE_DIR, 'dns_server.log')),
         logging.StreamHandler()
     ]
 )
@@ -81,7 +84,7 @@ class RateLimiter:
 
 class ReputationChecker:
     def __init__(self):
-        self.malicious_domains_file = 'malicious_domains.json'
+        self.malicious_domains_file = os.path.join(BASE_DIR, 'malicious_domains.json')
         self.malicious_domains = set()
         self.load_malicious_domains()
         

@@ -1,5 +1,8 @@
 import os
 import sys
+
+FLASK_DEBUG = '--debug' in sys.argv
+
 import ctypes
 import time
 import logging
@@ -27,6 +30,14 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 # anything that depends on FERNET_KEY being set (e.g. file_crypto.py) would
 # fail with EnvironmentError even though the key is present in .env.
 from dotenv import load_dotenv
+
+# When running as a PyInstaller bundle, make the current working directory the
+# directory that contains the executable so that log files and runtime data are
+# written next to the application instead of wherever the user launched it from.
+if getattr(sys, 'frozen', False):
+    exe_dir = os.path.dirname(sys.executable)
+    if os.path.isdir(exe_dir):
+        os.chdir(exe_dir)
 
 
 def _request_admin_elevation():
@@ -2375,7 +2386,7 @@ def start_server(port=5000):
             # Port is available
             print(f"Server running at http://127.0.0.1:{port}")
             # Start server in non-debug mode to avoid reloader issues
-            app.run(host='127.0.0.1', port=port, debug=False, use_reloader=False, threaded=True)
+            app.run(host='127.0.0.1', port=port, debug=FLASK_DEBUG, use_reloader=False, threaded=True)
             return port
         except OSError:
             # Port is already in use, try fallback ports
@@ -2386,7 +2397,7 @@ def start_server(port=5000):
                 try:
                     print(f"Port {port} is in use. Trying port {fallback_port}...")
                     print(f"Server running at http://127.0.0.1:{fallback_port if fallback_port != 0 else '<assigned by OS>'}")
-                    app.run(host='127.0.0.1', port=fallback_port, debug=False, threaded=True, use_reloader=False)
+                    app.run(host='127.0.0.1', port=fallback_port, debug=FLASK_DEBUG, threaded=True, use_reloader=False)
                     return fallback_port
                 except OSError as e:
                     print(f"Port {fallback_port} also unavailable: {e}")
@@ -2402,7 +2413,7 @@ def start_server(port=5000):
             # Try with different parameters that avoid socket reuse
             # Use localhost only with random port
             print("Server running with OS-assigned port on localhost only")
-            app.run(host='127.0.0.1', port=0, debug=False, threaded=False, use_reloader=False)
+            app.run(host='127.0.0.1', port=0, debug=FLASK_DEBUG, threaded=False, use_reloader=False)
             return -1  # Unknown port
         except Exception as ex:
             print(f"Failed to start server: {ex}")
