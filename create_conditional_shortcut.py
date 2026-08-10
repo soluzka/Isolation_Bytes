@@ -32,7 +32,8 @@ try:
     shortcut = shell.CreateShortCut(shortcut_path)
     shortcut.Targetpath = bat_path
     shortcut.WorkingDirectory = os.path.dirname(bat_path)
-    shortcut.IconLocation = bat_path
+    icon_path = os.path.join(os.path.dirname(bat_path), 'static', 'favicon.ico')
+    shortcut.IconLocation = f"{icon_path},0" if os.path.exists(icon_path) else bat_path
     shortcut.save()
     print(f"[SUCCESS] Shortcut created: {shortcut_path}")
     print(f"[INFO] Shortcut target: {bat_path}")
