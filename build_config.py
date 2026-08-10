@@ -82,6 +82,8 @@ hidden_imports = [
     'pyssdeep',
     'ssdeep',
     'yara',
+    'tlsh',
+    'requests',
     # Static-file malware classifier (security/detector.py, security/ember_vendor/,
     # train_ember_classifier.py) -- both have compiled extensions PyInstaller
     # doesn't reliably auto-detect.
@@ -187,7 +189,7 @@ def add_extension_binaries(module_names):
         logging.info(f'Added binary to PyInstaller args: {c}')
 
 # Add suspected compiled modules
-add_extension_binaries(['pyssdeep', 'ssdeep', 'yara', 'lief', 'lightgbm'])
+add_extension_binaries(['pyssdeep', 'ssdeep', 'yara', 'lief', 'lightgbm', 'tlsh'])
 
 # Add malware_signatures.txt file
 malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')
