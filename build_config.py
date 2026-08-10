@@ -200,7 +200,8 @@ def add_extension_binaries(module_names):
 # Add suspected compiled modules
 add_extension_binaries(['pyssdeep', 'ssdeep', 'yara', 'lief', 'lightgbm', 'tlsh'])
 
-# Add malware_signatures.txt file
+# Seed the runtime signature database into the bundle so the EXE can place it in
+# its own root on first launch (it is not meant to be edited from the temp dir).
 malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')
 if os.path.exists(malware_signatures_file):
     pyinstaller_args.append(f'--add-data={malware_signatures_file}{sep}.')
@@ -233,7 +234,6 @@ DATA_FILES = [
     'c2_ports.json',
     'malicious_domains.json',
     'malicious_ips.log',
-    'malware_signatures.json',
     'network_segments.json',
     'phishing_alerts.json',
     'trusted_hashes.json',

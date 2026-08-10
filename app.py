@@ -3545,8 +3545,15 @@ if not os.path.exists(SCHEDULED_SCAN_STATE_FILE):
         json.dump(default_state, f, indent=2)
 SIGNATURE_DB = os.path.join(basedir, 'malware_signatures.txt')
 if not os.path.exists(SIGNATURE_DB):
-    with open(get_resource_path(SIGNATURE_DB), 'w') as f:
-        f.write('# Malware Signatures\n# SHA256 hashes, one per line\n')
+    # On first run (or if the user deleted it), seed the live DB from the
+    # bundled copy, then let runtime updaters keep it current.
+    seed = get_resource_path('malware_signatures.txt')
+    if os.path.exists(seed) and os.path.getsize(seed) > 0:
+        import shutil
+        shutil.copy2(seed, SIGNATURE_DB)
+    else:
+        with open(SIGNATURE_DB, 'w') as f:
+            f.write('# Malware Signatures\n# SHA256 hashes, one per line\n')
 
 import sys
 
