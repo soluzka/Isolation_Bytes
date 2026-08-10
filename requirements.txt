@@ -62,7 +62,7 @@ yara-python>=4.0
 dnslib>=0.9.26
 
 # For secure password hashing
-bcrypt>=4.0
+bcrypt>=5.0.0
 
 # For TOTP-based 2FA
 pyotp>=2.9
