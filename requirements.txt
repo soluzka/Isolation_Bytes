@@ -118,5 +118,8 @@ setuptools>=78.1.1,<82
 
 # Static-file malware classifier (security/detector.py, security/ember_vendor/,
 # train_ember_classifier.py, train_malware_classifier.py)
+# NOTE: EMBER2018 dataset is not a pip package. Download it from
+# https://github.com/endgameinc/ember and extract to data/ember2018/ember2018
+# before running train_ember_classifier.py.
 lief>=0.17.2
 lightgbm>=4.7.0
