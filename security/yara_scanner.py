@@ -344,7 +344,7 @@ def scan_file_with_yara(filepath, timeout=10):
         for rule_index, rule in enumerate(rules):
             try:
                 # Apply the rule with timeout and per-file externals
-                matches = rule.match(filepath, timeout=timeout, externals=externals, fast_match=True)
+                matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
                 
                 # Process any matches found
                 if matches:
