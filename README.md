@@ -122,7 +122,7 @@ The built executable is placed in `dist/antivirus_server.exe` and can be run or 
 
 ### Installing as a Startup Application
 
-The built `dist\antivirus_server.exe` auto-installs its startup entry the first time it is launched, so it will run at every user logon after the first run.
+The built `antivirus_server.exe` auto-installs its startup entry the first time it is launched, so it will run at every user logon after the first run. It uses its own full path (`sys.executable`), so it does not matter whether it stays in `dist` or is moved elsewhere.
 
 ---
 
