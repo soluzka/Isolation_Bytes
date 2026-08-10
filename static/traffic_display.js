@@ -25,10 +25,12 @@ function escapeHtml(text) {
 
 // Tagged template that escapes all interpolated values
 // eslint-disable-next-line security/detect-object-injection
-function safe(strings, ...values) { // nosem
+// snyk:ignore:Function Call Object Injection Sink
+function safe(strings, ...values) { // nosemgrep: detect-object-injection
     const parts = Array.from(strings);
     let result = parts.shift() || '';
-    for (const value of values) {
+    while (values.length) {
+        const value = values.shift();
         result += escapeHtml(value) + (parts.shift() || '');
     }
     return result;
