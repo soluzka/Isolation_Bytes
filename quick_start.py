@@ -748,6 +748,8 @@ YARA_SCANNER_PREFIXES = (
     '/add_folder', '/remove-monitored-folder', '/api/monitored-directories',
     '/api/network/monitored_directories', '/toggle_folder_watcher',
     '/folder-watcher-paths', '/get_folder_watcher_paths', '/start_realtime',
+    '/get_network_monitored_directories', '/get_traffic_stats',
+    '/get_c2_patterns', '/get_live_connections', '/start_traffic_monitoring',
 )
 
 
@@ -1244,12 +1246,12 @@ def get_network_monitored_directories():
                     'subdirectory_count': subdir_count,
                     'accessible': True
                 })
-            except PermissionError:
-                # Handle permission errors
+            except Exception:
+                # Handle permission / I/O errors
                 monitoring_status['directories'].append({
                     'path': directory,
                     'exists': True,
-                    'file_count': 'Unknown (Permission denied)',
+                    'file_count': 'Unknown (inaccessible)',
                     'high_risk_files': 0,
                     'subdirectory_count': 0,
                     'accessible': False
