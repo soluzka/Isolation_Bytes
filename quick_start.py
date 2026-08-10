@@ -19,7 +19,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session
 
 # Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
 # module is normally run directly with `python quick_start.py`, which (unlike
@@ -63,10 +63,12 @@ load_dotenv()
 
 # Seed the web_auth password store from the .env ADMIN_PASSWORD
 try:
-    from security.web_auth import set_password
+    from security.web_auth import set_password, verify_password
     set_password(os.environ.get('ADMIN_PASSWORD', 'admin123'))
 except Exception:
-    pass
+    verify_password = None
+
+ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 
 # Import DNS server functionality
 from dns_server import start_dns_server
@@ -232,6 +234,7 @@ app = Flask(__name__,
 # Cap request/upload size at 125MB (currently only used by the file
 # encryption/decryption feature's file uploads).
 app.config['MAX_CONTENT_LENGTH'] = 125 * 1024 * 1024
+app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'dev-key-please-set-SECRET_KEY-in-dotenv'
 
 # Create a blueprint for network-related API endpoints
 network_bp = Blueprint('network', __name__, url_prefix='/api/network')
@@ -736,6 +739,53 @@ def run_startup():
         conditional_startup_state['running'] = False
         logger.error(f"Error running conditional startup: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+# -- Web auth for quick_start.py dashboard --
+@app.before_request
+def _require_login():
+    """Redirect unauthenticated users to /login except for login/logout/static."""
+    if request.endpoint in ('login', 'logout', 'static'):
+        return
+    if session.get('logged_in'):
+        return
+    is_api = (
+        request.is_json
+        or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
+        or 'application/json' in request.headers.get('Accept', '')
+    )
+    if is_api:
+        return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
+    return redirect(url_for('login', next=request.full_path))
+
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+
+        if verify_password:
+            try:
+                password_ok = verify_password(password)
+            except Exception:
+                password_ok = (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+        else:
+            password_ok = (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+
+        if username == ADMIN_USERNAME and password_ok:
+            session['logged_in'] = True
+            next_page = request.form.get('next') or request.args.get('next') or url_for('index')
+            return redirect(next_page)
+        error = 'Invalid username or password'
+    return render_template('login.html', error=error)
+
+
+@app.route('/logout')
+def logout():
+    session.pop('logged_in', None)
+    return redirect(url_for('login'))
+
 
 # -- Main index page --
 @app.route('/')
