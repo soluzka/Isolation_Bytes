@@ -1030,21 +1030,39 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             });
         });
         
+        let scanAllInterval = null;
+
         document.getElementById("scanAllBtn").addEventListener("click", function() {
-            document.getElementById('loadingIndicator').style.display = 'block';
-            
-            fetch('/scan_all', {
-                method: 'POST'
-            })
-            .then(response => response.json())
-            .then(data => {
-                displayResults(data);
-                document.getElementById('loadingIndicator').style.display = 'none';
-            })
-            .catch(error => {
-                document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
-                document.getElementById('loadingIndicator').style.display = 'none';
-            });
+            const btn = this;
+
+            if (scanAllInterval) {
+                clearInterval(scanAllInterval);
+                scanAllInterval = null;
+                btn.textContent = 'Scan All Folders';
+                return;
+            }
+
+            btn.textContent = 'Stop Scanning';
+
+            function runScanAll() {
+                document.getElementById('loadingIndicator').style.display = 'block';
+
+                fetch('/scan_all', {
+                    method: 'POST'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    displayResults(data);
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                })
+                .catch(error => {
+                    document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
+                    document.getElementById('loadingIndicator').style.display = 'none';
+                });
+            }
+
+            runScanAll();
+            scanAllInterval = setInterval(runScanAll, 10000);
         });
         
         // Coerce API payloads that may be a single value, an object or JSON text into an array
