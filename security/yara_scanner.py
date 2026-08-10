@@ -300,6 +300,7 @@ def scan_file_with_yara(filepath, timeout=10):
         return []
     
     # Skip files that are extremely large (now increased to 500MB)
+    file_size = 0
     try:
         file_size = os.path.getsize(filepath)
         if file_size > 500 * 1024 * 1024:  # 500MB
@@ -340,11 +341,24 @@ def scan_file_with_yara(filepath, timeout=10):
             'filetype': _classify_filetype(filepath),
         }
         
+        # Load small files into memory so libyara doesn't have to re-open the
+        # path itself, which can trigger spurious "Failed to open" messages on
+        # locked/protected or oddly-handled files. Keep using the file path for
+        # anything > 100 MB to avoid excessive memory use.
+        data = None
+        use_data = file_size <= 100 * 1024 * 1024
+
         # Apply each rule with a timeout
         for rule_index, rule in enumerate(rules):
             try:
                 # Apply the rule with timeout and per-file externals
-                matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
+                if use_data:
+                    if data is None:
+                        with open(filepath, 'rb') as fh:
+                            data = fh.read()
+                    matches = rule.match(data=data, timeout=timeout, externals=externals, fast=True)
+                else:
+                    matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
                 
                 # Process any matches found
                 if matches:
