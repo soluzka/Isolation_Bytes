@@ -23,11 +23,11 @@ _YARA_EXTERNALS_DEFAULTS = {
 }
 
 def _classify_filetype(filepath):
-    """Best-effort filetype string for YARA external variables.
+    '''Best-effort filetype string for YARA external variables.
 
     Tries to identify the file by magic bytes first, then falls back to the
     file extension. Returns an empty string if the type cannot be determined.
-    """
+    '''
     ext = os.path.splitext(filepath)[1].lower()
     ext_type_map = {
         '.vbs': 'VBS', '.wsf': 'VBS',
@@ -39,13 +39,40 @@ def _classify_filetype(filepath):
         '.rtf': 'RTF',
         '.mdmp': 'MDMP',
         '.ps1': 'PowerShell', '.psm1': 'PowerShell', '.psd1': 'PowerShell',
+        '.sh': 'Shell', '.bash': 'Shell',
+        '.pl': 'Perl', '.pm': 'Perl',
+        '.rb': 'Ruby',
+        '.lua': 'Lua',
+        '.ts': 'TypeScript',
+        '.html': 'HTML', '.htm': 'HTML',
+        '.xml': 'XML',
+        '.json': 'JSON',
+        '.csv': 'CSV',
+        '.md': 'Markdown',
+        '.eml': 'Email', '.msg': 'Email',
+        '.doc': 'Office', '.docx': 'Office', '.xls': 'Office', '.xlsx': 'Office',
+        '.ppt': 'Office', '.pptx': 'Office', '.odt': 'Office', '.ods': 'Office', '.odp': 'Office',
+        '.zip': 'ZIP', '.jar': 'ZIP', '.war': 'ZIP', '.ear': 'ZIP',
+        '.rar': 'RAR',
+        '.7z': '7Z',
+        '.gz': 'GZIP', '.tgz': 'GZIP',
+        '.tar': 'TAR',
+        '.jpg': 'JPEG', '.jpeg': 'JPEG',
+        '.png': 'PNG',
+        '.gif': 'GIF',
+        '.bmp': 'BMP',
+        '.tiff': 'TIFF', '.tif': 'TIFF',
+        '.webp': 'WEBP',
+        '.db': 'SQLite', '.sqlite': 'SQLite', '.sqlite3': 'SQLite',
+        '.class': 'JavaClass',
+        '.lnk': 'LNK',
     }
     if ext in ext_type_map:
         return ext_type_map[ext]
 
     try:
         with open(filepath, 'rb') as f:
-            header = f.read(8)
+            header = f.read(16)
     except (OSError, IOError):
         return ''
 
@@ -63,9 +90,45 @@ def _classify_filetype(filepath):
                       b'\xfe\xed\xfa\xcf', b'\xfe\xed\xfa\xff',
                       b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
         return 'MACH-O'
+    # Java class
+    if header[:4] == b'\xca\xfe\xba\xbe':
+        return 'JavaClass'
     # PDF
     if header[:4] == b'%PDF':
         return 'PDF'
+    # JPEG
+    if header[:3] == b'\xff\xd8\xff':
+        return 'JPEG'
+    # PNG
+    if header[:4] == b'\x89PNG':
+        return 'PNG'
+    # GIF
+    if header[:4] == b'GIF8':
+        return 'GIF'
+    # BMP
+    if header[:2] == b'BM':
+        return 'BMP'
+    # WEBP
+    if len(header) >= 12 and header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+        return 'WEBP'
+    # ZIP / OOXML / JAR
+    if header[:2] == b'PK':
+        return 'ZIP'
+    # RAR
+    if header[:4] == b'Rar!':
+        return 'RAR'
+    # 7Z
+    if header[:2] == b'7z':
+        return '7Z'
+    # GZIP
+    if header[:2] == b'\x1f\x8b':
+        return 'GZIP'
+    # SQLite
+    if header[:16] == b'SQLite format 3\x00':
+        return 'SQLite'
+    # OLE2 / old Office
+    if header[:4] == b'\xd0\xcf\x11\xe0':
+        return 'Office'
 
     return ''
 

@@ -269,6 +269,23 @@
             <p>Rules Count: <strong>{{ rules_info.count }}</strong></p>
         </div>
         
+        <div class="card">
+            <h3>Supported File Types</h3>
+            <p>The YARA scanner identifies and matches against the following file types. Custom YARA rules in the rules directory can also match any additional type by content.</p>
+            <ul class="file-types-list" style="columns: 2; -webkit-columns: 2; list-style: disc; padding-left: 20px; margin-top: 10px;">
+                <li><strong>Executables:</strong> PE/EXE, ELF, Mach-O</li>
+                <li><strong>Office:</strong> Word, Excel, PowerPoint, OpenDocument, RTF</li>
+                <li><strong>Documents:</strong> PDF, HTML, XML, JSON, CSV, Markdown</li>
+                <li><strong>Scripts:</strong> VBS, PHP, JSP, Python, ASP, BATCH, PowerShell, Shell, Perl, Ruby, Lua, TypeScript</li>
+                <li><strong>Archives:</strong> ZIP, RAR, 7Z, GZIP, TAR</li>
+                <li><strong>Images:</strong> JPEG, PNG, GIF, BMP, TIFF, WEBP</li>
+                <li><strong>Databases:</strong> SQLite</li>
+                <li><strong>Email:</strong> EML, MSG</li>
+                <li><strong>Java:</strong> JavaClass, JAR/ZIP</li>
+                <li><strong>System:</strong> LNK, MDMP</li>
+            </ul>
+        </div>
+        
         <div class="tab">
             <button class="tablinks active" id="fileScanTab">File Scan</button>
             <button class="tablinks" id="monitoredFoldersTab">Monitored Folders</button>
