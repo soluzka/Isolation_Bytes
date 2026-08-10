@@ -1017,22 +1017,8 @@
                 scanAllInterval = null;
                 btn.textContent = 'Scan All Folders';
                 document.getElementById('loadingIndicator').style.display = 'none';
-
-                fetch('/toggle_scan_all/stop', { method: 'POST' })
-                    .then(() => {
-                        const stopPoll = setInterval(() => {
-                            fetch('/scan_all/latest')
-                                .then(response => response.json())
-                                .then(data => {
-                                    if (data.result && data.result.status !== 'error') {
-                                        displayResults(data.result);
-                                    }
-                                    if (!data.active) {
-                                        clearInterval(stopPoll);
-                                    }
-                                });
-                        }, 1000);
-                    });
+                document.getElementById('results').innerHTML = '';
+                fetch('/toggle_scan_all/stop', { method: 'POST' });
                 return;
             }
 

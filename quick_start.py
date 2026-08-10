@@ -481,6 +481,21 @@ def _perform_scan_all():
 
                         total_files_scanned += 1
 
+                        if continuous_scan_state['active'] and total_files_scanned % 100 == 0:
+                            elapsed = time.time() - start_time
+                            continuous_scan_state['last_result'] = {
+                                'status': 'success',
+                                'scan_time': f'{elapsed:.2f} seconds',
+                                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                                'matches': total_yara_matches,
+                                'folders': monitored_dirs,
+                                'results': results,
+                                'files_scanned': total_files_scanned,
+                                'directories_scanned': total_directories_scanned,
+                                'threats_detected': detected_threats,
+                                'threats_removed': quarantined_count
+                            }
+
                         try:
                             cached = scan_cache.get(file_path)
                             if cached is not None:
