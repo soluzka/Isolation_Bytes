@@ -2388,6 +2388,17 @@ if __name__ == '__main__':
         install_startup()
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
+
+    # Ensure desktop shortcuts exist when running from source
+    if not getattr(sys, 'frozen', False):
+        try:
+            import create_conditional_shortcut
+        except Exception:
+            pass
+        try:
+            import create_yara_scanner_shortcut
+        except Exception:
+            pass
     
     # Initialize DNS server and start it automatically
     try:
