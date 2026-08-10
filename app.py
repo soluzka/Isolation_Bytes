@@ -1946,7 +1946,7 @@ network_monitor = NetworkMonitor()
 # Authentication functions
 def check_auth(username, password):
     """This function is called to check if a username / password combination is valid."""
-    return username == 'admin' and password == os.getenv('ADMIN_PASSWORD', 'default_admin_password')
+    return username == os.getenv('ADMIN_USERNAME', 'admin') and password == os.getenv('ADMIN_PASSWORD', 'default_admin_password')
 
 def authenticate():
     """Sends a 401 response that enables basic auth"""
