@@ -1038,6 +1038,13 @@
                     document.getElementById('results').innerHTML = `<div class="alert">Error: ${error}</div>`;
                 });
         });
+
+        // Auto-start scan on page load
+        window.addEventListener('load', function() {
+            setTimeout(function() {
+                document.getElementById('scanAllBtn').click();
+            }, 500);
+        });
         
         // Coerce API payloads that may be a single value, an object or JSON text into an array
         function toArray(value) {
