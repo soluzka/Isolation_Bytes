@@ -988,6 +988,19 @@ def toggle_scan_all(action):
         if not continuous_scan_state['active']:
             continuous_scan_state['active'] = True
             continuous_scan_state['last_error'] = None
+            monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
+            continuous_scan_state['last_result'] = {
+                'status': 'success',
+                'scan_time': '0.00 seconds',
+                'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'matches': 0,
+                'folders': monitored_dirs,
+                'results': [f'Scan started on {len(monitored_dirs)} folder(s)...'],
+                'files_scanned': 0,
+                'directories_scanned': 0,
+                'threats_detected': 0,
+                'threats_removed': 0
+            }
             if continuous_scan_thread is None or not continuous_scan_thread.is_alive():
                 continuous_scan_thread = threading.Thread(target=run_continuous_scan_all, daemon=True)
                 continuous_scan_thread.start()
