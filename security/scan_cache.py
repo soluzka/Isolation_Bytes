@@ -94,8 +94,8 @@ class FileScanCache:
     """Persistent JSON cache keyed by file content fingerprint."""
 
     def __init__(self, cache_path='data/scan_cache.json'):
-        self.cache_path = Path(cache_path)
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+        self.cache_path = Path(os.path.abspath(str(cache_path)))
+        os.makedirs(str(self.cache_path.parent), exist_ok=True)
         self._cache = self._load()
 
     def _load(self):
@@ -123,7 +123,7 @@ class FileScanCache:
 
     def _save(self):
         try:
-            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            os.makedirs(str(self.cache_path.parent), exist_ok=True)
             # Write to a temp file first, then atomically replace the real one
             # so a crash mid-write never leaves a truncated scan_cache.json.
             tmp_path = self.cache_path.with_suffix('.json.tmp')

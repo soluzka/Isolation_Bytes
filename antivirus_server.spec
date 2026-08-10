@@ -39,7 +39,6 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    uac_admin=True,
     icon=['C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\static\\favicon.ico'],
     contents_directory='.',
 )
