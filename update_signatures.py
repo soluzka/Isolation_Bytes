@@ -2,7 +2,6 @@ from utils.paths import get_resource_path
 import os
 
 import requests
-import os
 
 def get_basedir():
     import sys
@@ -16,7 +15,11 @@ MALWAREBAZAAR_API = 'https://mb-api.abuse.ch/api/v1/'
 def download_hashes():
     """Download SHA1 and SHA256 hashes from MalwareBazaar in the format the
     scanner expects: source:hash_type:hash"""
-    resp = requests.post(MALWAREBAZAAR_API, data={"query": "get_recent"}, timeout=60)
+    api_key = os.environ.get('MALWAREBAZAAR_API_KEY', '')
+    headers = {}
+    if api_key:
+        headers['API-KEY'] = api_key
+    resp = requests.post(MALWAREBAZAAR_API, data={"query": "get_recent"}, headers=headers, timeout=60)
     resp.raise_for_status()
     data = resp.json()
     signatures = set()

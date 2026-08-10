@@ -126,6 +126,22 @@ The built `antivirus_server.exe` auto-installs its startup entry the first time 
 
 ---
 
+## Signature Updates
+
+The scanner uses `malware_signatures.txt` for hash-based detection (MD5, SHA1, SHA256, SHA512). To fetch the latest sample hashes from MalwareBazaar:
+
+1. Get a free API key from [Abuse.ch](https://auth.abuse.ch/).
+2. Copy `.env.example` to `.env` and set:
+   ```powershell
+   MALWAREBAZAAR_API_KEY=your-key-here
+   ```
+3. Run:
+   ```powershell
+   python update_signatures.py
+   ```
+
+---
+
 ## Optional Environment Flags
 
 - `AV_ENABLE_TEMP_CLEANUP=1` — Delete files under temp directories during startup.
