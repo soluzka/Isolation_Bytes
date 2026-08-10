@@ -3,6 +3,7 @@ import os
 import logging
 import shutil
 import tempfile
+import hashlib
 
 ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
@@ -59,6 +60,32 @@ def force_unlock_windows(filepath):
         except Exception as e:
             logging.warning(f'Could not run handle.exe to unlock {filepath}: {e}')
 
+def _add_local_signatures(data):
+    """Append the hashes of a quarantined file to the local signature file so
+    the same malware is detected by hash next time."""
+    try:
+        signature_db = os.path.join(basedir, 'malware_signatures.txt')
+        existing = set()
+        if os.path.exists(signature_db):
+            with open(signature_db, 'r', encoding='utf-8') as f:
+                existing = set(line.strip().lower() for line in f if ':' in line.strip())
+        md5 = hashlib.md5(data, usedforsecurity=False).hexdigest()
+        sha1 = hashlib.sha1(data, usedforsecurity=False).hexdigest()
+        sha256 = hashlib.sha256(data).hexdigest()
+        sha512 = hashlib.sha512(data).hexdigest()
+        new_lines = []
+        for htype, hval in [('md5', md5), ('sha1', sha1), ('sha256', sha256), ('sha512', sha512)]:
+            line = f'local_quarantine:{htype}:{hval}'
+            if line.lower() not in existing:
+                new_lines.append(line)
+        if new_lines:
+            with open(signature_db, 'a', encoding='utf-8') as f:
+                for line in new_lines:
+                    f.write(line + '\n')
+            logging.info(f"Added {len(new_lines)} local quarantine signatures")
+    except Exception as e:
+        logging.error(f"Failed to add local quarantine signatures: {e}")
+
 def quarantine_file(filepath):
     import shutil
     from cryptography.fernet import Fernet
@@ -96,6 +123,7 @@ def quarantine_file(filepath):
             ef.write(encrypted_data)
         del ef
         logging.warning(f"Quarantined (encrypted): {filepath}")
+        _add_local_signatures(data)
         secure_key.zero_and_unlock()
         secure_key.zero_and_unlock()
         if os.path.exists(filepath):
