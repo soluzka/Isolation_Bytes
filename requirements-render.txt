@@ -1,5 +1,5 @@
 # Core deployment requirements
-cffi>=1.15.1
+cffi>=2.1.1
 wheel>=0.37.1
 setuptools>=78.1.1,<82
 
