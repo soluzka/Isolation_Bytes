@@ -66,6 +66,15 @@ def _classify_filetype(filepath):
         '.db': 'SQLite', '.sqlite': 'SQLite', '.sqlite3': 'SQLite',
         '.class': 'JavaClass',
         '.lnk': 'LNK',
+        # High-risk Windows executable and script extensions
+        '.exe': 'EXE', '.dll': 'EXE', '.com': 'EXE', '.scr': 'EXE', '.pif': 'EXE', '.sys': 'EXE',
+        '.vbe': 'VBS', '.wsh': 'WScript',
+        '.hta': 'HTA',
+        '.js': 'JS',
+        '.reg': 'Registry',
+        '.msi': 'MSI',
+        '.jnlp': 'JavaWebStart',
+        '.inf': 'INF',
     }
     if ext in ext_type_map:
         return ext_type_map[ext]
