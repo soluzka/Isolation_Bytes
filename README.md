@@ -122,6 +122,28 @@ The built `antivirus_server.exe` auto-installs its startup entry the first time 
 
 ---
 
+### Standalone ssdeep Runner
+
+Build the fuzzy-hash runner:
+
+```powershell
+python tools\build_runner_exe.py
+```
+
+Run a directory scan:
+
+```powershell
+.\dist\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --dir security\yara_rules --threshold 60
+```
+
+Scan a single file:
+
+```powershell
+.\dist\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --target path\to\file.exe
+```
+
+The `--rules` argument is required. Use `--threshold` to set the ssdeep match cutoff.
+
 ## Signature Updates
 
 The scanner uses `malware_signatures.txt` for hash-based detection (MD5, SHA1, SHA256, SHA512). To fetch the latest sample hashes from MalwareBazaar:
