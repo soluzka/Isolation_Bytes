@@ -623,11 +623,10 @@ def run_continuous_scan_all():
     """Background loop for continuous scan-all."""
     while continuous_scan_state['active']:
         try:
-            with scanning_lock:
-                result, _ = _perform_scan_all()
-                continuous_scan_state['last_result'] = result
-                continuous_scan_state['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
-                continuous_scan_state['last_error'] = None if result.get('status') == 'success' else result.get('message')
+            result, _ = _perform_scan_all()
+            continuous_scan_state['last_result'] = result
+            continuous_scan_state['last_run'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            continuous_scan_state['last_error'] = None if result.get('status') == 'success' else result.get('message')
         except Exception as e:
             logger.error(f"Error in continuous scan: {e}")
             continuous_scan_state['last_error'] = str(e)
