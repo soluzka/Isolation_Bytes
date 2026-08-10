@@ -136,6 +136,8 @@ Or, from the built EXE itself:
 
 This creates a Task Scheduler task that runs the EXE at every user logon. If Task Scheduler cannot be used, it falls back to adding the EXE to the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` registry key.
 
+The EXE also auto-installs its startup entry the first time it is launched, so manually running the installer is only needed if you want to force a reinstall.
+
 ---
 
 ## Optional Environment Flags
