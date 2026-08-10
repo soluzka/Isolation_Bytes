@@ -7,7 +7,9 @@ from logging.handlers import RotatingFileHandler
 import json
 import socket
 import shutil  # For file operations like move for quarantine
+import subprocess
 import threading
+import winreg
 import psutil
 import ipaddress
 import base64
@@ -154,6 +156,40 @@ logging.getLogger().addFilter(dnsbl_filter)
 for handler in logging.getLogger().handlers:
     if isinstance(handler, logging.StreamHandler):
         handler.addFilter(dnsbl_filter)
+
+def install_startup():
+    """Add the current EXE to the current user's startup."""
+    exe_path = sys.executable
+    if not exe_path.lower().endswith('.exe'):
+        print("Install startup is only supported when running the built EXE.")
+        return False
+
+    # Try Task Scheduler first
+    try:
+        subprocess.run(
+            ['schtasks', '/create', '/tn', 'AntivirusYARAServerStartup',
+             '/tr', f'"{exe_path}"', '/sc', 'ONLOGON', '/f'],
+            check=True, capture_output=True, text=True
+        )
+        print("Startup task created. It will run at logon.")
+        return True
+    except Exception as e:
+        print(f"Task Scheduler install failed: {e}; using registry fallback.")
+
+    # Fallback to HKCU\...\Run
+    try:
+        key = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Run',
+            0, winreg.KEY_SET_VALUE
+        )
+        winreg.SetValueEx(key, 'AntivirusYARAServer', 0, winreg.REG_SZ, exe_path)
+        winreg.CloseKey(key)
+        print("Added to HKCU\\...\\Run for current-user logon.")
+        return True
+    except Exception as e:
+        print(f"Registry install failed: {e}")
+        return False
 
 # Create a clean app instance
 app = Flask(__name__, 
@@ -2216,6 +2252,9 @@ class ServerInfo:
         self.port = None
 
 if __name__ == '__main__':
+    if '--install-startup' in sys.argv:
+        install_startup()
+        sys.exit(0)
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
     
