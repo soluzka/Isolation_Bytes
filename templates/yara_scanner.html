@@ -1036,8 +1036,10 @@ document.getElementById('start_folder_watcher_btn').onclick = function() {
             fetch('/scan_all/latest')
                 .then(response => response.json())
                 .then(data => {
-                    if (data.result) {
+                    if (data.result && data.result.status !== 'error') {
                         displayResults(data.result);
+                    } else if (data.result && data.result.status === 'error') {
+                        document.getElementById('results').innerHTML = `<div class="alert">Error: ${data.result.message}</div>`;
                     }
                     if (data.last_error) {
                         document.getElementById('results').innerHTML = `<div class="alert">Error: ${data.last_error}</div>`;
