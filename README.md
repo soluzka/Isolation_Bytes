@@ -21,10 +21,6 @@
 
 ---
 
-## Steam / Store Page Short Description
-
-Defend your Windows PC with a portable YARA antivirus dashboard. Scan files, folders, and live processes, monitor network traffic, quarantine threats with Fernet encryption, and block malicious connections. Copy .env.example to .env to configure your admin password, Fernet key, and optional ThreatFox / URLhaus / API keys before launching the local Flask server. Open source, built for Windows 10/11.
-
 ## Discord Server Blurb
 
 **Windows Defender AV Dashboard** — YARA malware scanning, real-time network & process monitoring, ML threat scoring, encrypted quarantine, and Windows Firewall blocking. Built for Windows 10/11. Open source, runs locally.
