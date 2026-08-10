@@ -245,7 +245,7 @@ def scan_and_quarantine(filepath, timeout=600, max_file_size=100 * 1024 * 1024):
                     logging.error(f"Failed to extract .rar file {filepath}: {e}")
         else:
             # Scan the file for viruses using scan_file_for_viruses
-            virus_found = scan_file_for_viruses(filepath)
+            _, virus_found, _ = scan_file_for_viruses(filepath)
             if virus_found:
                 logging.warning(f"Virus found in file: {filepath}")
                 # Quarantine the file

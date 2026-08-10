@@ -62,8 +62,19 @@ def load_signatures():
         logging.warning(f"Signature database not found: {SIGNATURE_DB}")
         return set()
     try:
+        signatures = set()
         with open(get_resource_path(os.path.join(SIGNATURE_DB)), 'r') as f:
-            signatures = set(line.strip() for line in f if line.strip())
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+                # Accept both bare hashes and source:hash_type:hash lines
+                if ':' in line:
+                    parts = line.split(':', 2)
+                    if len(parts) >= 3:
+                        signatures.add(parts[2].lower())
+                else:
+                    signatures.add(line.lower())
         logging.info(f"Loaded {len(signatures)} signatures from {SIGNATURE_DB}")
         return signatures
     except Exception as e:
