@@ -131,7 +131,8 @@
 <body>
     <h2>Antivirus Web Interface</h2>
     <input type="hidden" id="network_monitor_running" value="{{ 'true' if network_monitor_running else 'false' }}">
-    <p>Real-Time Protection: <span class="status" id="rtp_status">{{ status }}</span></p>
+    <p>Real-Time Protection: <span class="status" id="rtp_status">{{ 'ENABLED' if folder_watcher_status else 'DISABLED' }}</span></p>
+    <p>Auto-Block: <span class="status" id="auto_block_status">{{ 'ENABLED' if auto_block_enabled else 'DISABLED' }}</span></p>
 <p style="color:#888;font-size:0.95em;margin-top:-1em;">For your security, real-time protection cannot be disabled. This ensures continuous protection against threats.</p>
     <div class="button-row">
         <button type="button" id="start_realtime_btn" style="background:#27ae60;color:#fff;">Start Real-Time Protection</button>
@@ -504,8 +505,8 @@ if (stopAutoUpdatesBtn) {
                 <h4 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                     Live Connections
                     <label style="font-size:0.8em;font-weight:normal;display:flex;align-items:center;gap:5px;">
-                        <input type="checkbox" id="auto_block_toggle" />
-                        Auto-block flagged connections (uncommon-port heuristic -- weak signal, off by default)
+                        <input type="checkbox" id="auto_block_toggle" {% if auto_block_enabled %}checked{% endif %} />
+                        Auto-block flagged connections (uncommon-port heuristic -- weak signal, on by default)
                     </label>
                 </h4>
                 <div id="live_connections" style="background:#f8f9fa;padding:10px;border-radius:5px;max-height:400px;overflow:auto;">

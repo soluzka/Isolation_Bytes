@@ -803,23 +803,25 @@ def logout():
 @app.route('/')
 def index():
     # Provide all template variables required by index.html
-    network_monitor_running = True  # Default value
-    folder_watcher_status = True    # Default value
+    folder_watcher_status = folder_watcher_state.get('active', False)
+    network_monitor_running = network_state.get('monitoring_enabled', False)
+    auto_block_enabled = network_state.get('auto_block_enabled', False)
     safe_downloader_status = True   # Default value
     auto_updates_running = True     # Default value
     c2_detector_low_count = 0        # Default value
     c2_detector_high_count = 0       # Default value
     scheduled_scan_enabled = True   # Default value
-    status = {                       # Default status object
-        'status': 'DISABLED',
-        'folder_watcher': False,
-        'network_monitor': False,
-        'safe_downloader': False
+    status = {
+        'status': 'ENABLED' if folder_watcher_status else 'DISABLED',
+        'folder_watcher': folder_watcher_status,
+        'network_monitor': network_monitor_running,
+        'safe_downloader': safe_downloader_status
     }
-    
+
     return render_template('index.html',
                           network_monitor_running=network_monitor_running,
                           folder_watcher_status=folder_watcher_status,
+                          auto_block_enabled=auto_block_enabled,
                           safe_downloader_status=safe_downloader_status,
                           auto_updates_running=auto_updates_running,
                           c2_detector_low_count=c2_detector_low_count,
@@ -843,10 +845,11 @@ def yara_scanner():
     # Combine network monitoring and folder watcher paths
     monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
     
-    return render_template('yara_scanner.html', 
+    return render_template('yara_scanner.html',
                            rules_info=rules_info,
                            monitored_directories=monitored_dirs,
                            monitored_folders=monitored_dirs,  # Provide both variable names for compatibility
+                           auto_block_enabled=network_state.get('auto_block_enabled', False),
                            scan_status="Ready")
 
 # -- API for getting monitored directories for YARA scanner --
