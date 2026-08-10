@@ -24,8 +24,9 @@ def download_hashes():
     api_key = os.environ.get('MALWAREBAZAAR_API_KEY', '')
     headers = {}
     if api_key:
-        headers['API-KEY'] = api_key
-    resp = requests.post(MALWAREBAZAAR_API, data={"query": "get_recent"}, headers=headers, timeout=60)
+        # MalwareBazaar requires the 'Auth-Key' header
+        headers['Auth-Key'] = api_key
+    resp = requests.post(MALWAREBAZAAR_API, data={"query": "get_recent", "selector": "100"}, headers=headers, timeout=60)
     resp.raise_for_status()
     data = resp.json()
     signatures = set()
