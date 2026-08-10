@@ -5786,10 +5786,13 @@ def get_storage_backend():
 storage_uri = get_storage_backend()
 
 # Configure Flask-Limiter with retry configuration
+rate_limit_day = int(os.environ.get('RATE_LIMIT_DAY', 200))
+rate_limit_hour = int(os.environ.get('RATE_LIMIT_HOUR', 50))
+
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=storage_uri,
-    default_limits=["200 per day", "50 per hour"],
+    default_limits=[f"{rate_limit_day} per day", f"{rate_limit_hour} per hour"],
     key_prefix="antivirus_rate_limit",
     retry_after="http-date"
 )
