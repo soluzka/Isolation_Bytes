@@ -14,12 +14,16 @@ if not os.path.exists(bat_path):
     print(f"[ERROR] Batch file not found: {bat_path}")
     sys.exit(1)
 
-# Path to the user's desktop
+# Path to the user's actual desktop (works with OneDrive redirection)
 try:
-    desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
-except KeyError:
-    print("[ERROR] Could not find the user's Desktop path.")
-    sys.exit(1)
+    from win32com.shell import shell, shellcon
+    desktop = shell.SHGetFolderPath(0, shellcon.CSIDL_DESKTOP, 0, 0)
+except Exception:
+    try:
+        desktop = os.path.join(os.environ['USERPROFILE'], 'Desktop')
+    except KeyError:
+        print("[ERROR] Could not find the user's Desktop path.")
+        sys.exit(1)
 
 shortcut_path = os.path.join(desktop, 'Start Conditional Antivirus.lnk')
 
