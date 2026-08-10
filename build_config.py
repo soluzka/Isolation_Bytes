@@ -4,8 +4,7 @@ import sys
 import glob
 import logging
 import platform
-import subprocess
-import winreg
+
 
 # Application details
 app_name = 'antivirus_server'
@@ -247,45 +246,6 @@ for root, _, files in os.walk(base_dir):
 redis_config = os.path.join(base_dir, 'redis', 'redis.conf')
 if os.path.exists(redis_config):
     pyinstaller_args.append(f'--add-data={redis_config}{sep}redis')
-
-def _install_startup():
-    """Add the built EXE to the current user's startup."""
-    exe_path = os.path.join(base_dir, 'dist', f'{app_name}.exe')
-    if not os.path.exists(exe_path):
-        print(f"EXE not found at {exe_path}. Build it first with: python build_config.py")
-        return False
-
-    task_name = 'AntivirusYARAServerStartup'
-    # Try Task Scheduler first (runs at every user logon)
-    try:
-        subprocess.run(
-            ['schtasks', '/create', '/tn', task_name, '/tr', f'"{exe_path}"',
-             '/sc', 'ONLOGON', '/f'],
-            check=True, capture_output=True, text=True
-        )
-        print(f"Startup task '{task_name}' created. It will run at logon.")
-        return True
-    except Exception as e:
-        print(f"Task Scheduler install failed ({e}); falling back to registry.")
-
-    # Fallback to HKCU Run registry key
-    try:
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r'Software\Microsoft\Windows\CurrentVersion\Run',
-            0, winreg.KEY_SET_VALUE
-        )
-        winreg.SetValueEx(key, 'AntivirusYARAServer', 0, winreg.REG_SZ, exe_path)
-        winreg.CloseKey(key)
-        print("Added 'AntivirusYARAServer' to HKCU\\...\\Run for current-user logon.")
-        return True
-    except Exception as e:
-        print(f"Registry install failed: {e}")
-        return False
-
-if '--install-startup' in sys.argv:
-    _install_startup()
-    sys.exit(0)
 
 # Run PyInstaller
 try:
