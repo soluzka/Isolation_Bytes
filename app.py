@@ -471,8 +471,9 @@ class ScanResult(db.Model):
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 # Set up folders for uploads and quarantine
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-QUARANTINE_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quarantine')
+_RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__)))
+UPLOAD_FOLDER = os.path.join(_RUNTIME_DIR, 'uploads')
+QUARANTINE_FOLDER = os.path.join(_RUNTIME_DIR, 'quarantine')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 
@@ -1070,7 +1071,7 @@ class FolderWatcher:
         """Handle suspicious files by quarantining them."""
         try:
             # Define quarantine folder
-            QUARANTINE_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'quarantine')
+            QUARANTINE_FOLDER = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__))), 'quarantine')
             os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
             
             # Perform YARA scan
@@ -1592,8 +1593,9 @@ class User(UserMixin):
 
 
 # Global folder paths
-ENCRYPTED_FOLDER = os.path.join(os.path.dirname(__file__), 'encrypted_files')
-QUARANTINE_FOLDER = os.path.join(os.path.dirname(__file__), 'quarantine')
+_RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(__file__))
+ENCRYPTED_FOLDER = os.path.join(_RUNTIME_DIR, 'encrypted_files')
+QUARANTINE_FOLDER = os.path.join(_RUNTIME_DIR, 'quarantine')
 
 # Global variables for service states
 network_monitor_running = True
@@ -3471,7 +3473,8 @@ def get_basedir():
     return os.path.dirname(os.path.abspath(__file__))
 
 basedir = get_basedir()
-LOG_FILE = os.path.join(basedir, "antivirus.log")
+_RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
+LOG_FILE = os.path.join(_RUNTIME_DIR, "antivirus.log")
 
 # Initialize FolderWatcher
 # Get common directories to monitor
@@ -3528,11 +3531,12 @@ def get_basedir():
     return os.path.dirname(os.path.abspath(__file__))
 
 basedir = get_basedir()
-LOG_FILE = os.path.join(basedir, "antivirus.log")
+_RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
+LOG_FILE = os.path.join(_RUNTIME_DIR, "antivirus.log")
 
 # --- Guarantee critical files exist in EXE folder ---
 import json
-SCHEDULED_SCAN_STATE_FILE = os.path.join(basedir, 'scheduled_scan_state.json')
+SCHEDULED_SCAN_STATE_FILE = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir), 'scheduled_scan_state.json')
 if not os.path.exists(SCHEDULED_SCAN_STATE_FILE):
     import datetime
     default_state = {
@@ -3541,9 +3545,9 @@ if not os.path.exists(SCHEDULED_SCAN_STATE_FILE):
         'scan_frequency': 'daily',
         'audit_log': [],
     }
-    with open(get_resource_path(SCHEDULED_SCAN_STATE_FILE), 'w') as f:
+    with open(SCHEDULED_SCAN_STATE_FILE, 'w') as f:
         json.dump(default_state, f, indent=2)
-SIGNATURE_DB = os.path.join(basedir, 'malware_signatures.txt')
+SIGNATURE_DB = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir), 'malware_signatures.txt')
 if not os.path.exists(SIGNATURE_DB):
     # On first run (or if the user deleted it), seed the live DB from the
     # bundled copy, then let runtime updaters keep it current.
@@ -3939,7 +3943,7 @@ import hashlib
 import json
 
 SIGNATURE_DB = os.path.join(basedir, 'malware_signatures.txt')
-QUARANTINE_FOLDER = os.path.join(basedir, 'quarantine')
+QUARANTINE_FOLDER = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir), 'quarantine')
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 
 def file_hashes(filepath):
@@ -4585,11 +4589,11 @@ def start_folder_watcher_manual():
 # --- Scheduled Scan Control (persistent state) ---
 # scheduled_scan_thread is no longer managed here; all background processes are managed by conditional_startup.py
 scheduled_scan_thread = None  # Deprecated, kept for UI compatibility
-SCHEDULED_SCAN_STATE_FILE = os.path.join(basedir, 'scheduled_scan_state.json')
+SCHEDULED_SCAN_STATE_FILE = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir), 'scheduled_scan_state.json')
 
 def load_scheduled_scan_state():
     try:
-        with open(get_resource_path(os.path.join(SCHEDULED_SCAN_STATE_FILE)), 'r') as f:
+        with open(SCHEDULED_SCAN_STATE_FILE, 'r') as f:
             state = json.load(f)
             return bool(state.get('enabled', False))
     except Exception:
@@ -4597,7 +4601,7 @@ def load_scheduled_scan_state():
 
 def save_scheduled_scan_state(enabled):
     try:
-        with open(get_resource_path(os.path.join(SCHEDULED_SCAN_STATE_FILE)), 'w') as f:
+        with open(SCHEDULED_SCAN_STATE_FILE, 'w') as f:
             json.dump({'enabled': bool(enabled)}, f)
     except Exception as e:
         logging.error(encrypt_message(f'Failed to save scheduled scan state: {e}'))

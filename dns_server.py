@@ -7,6 +7,7 @@ import os
 import sys
 
 BASE_DIR = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', BASE_DIR)
 import json
 import threading
 import time
@@ -23,7 +24,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(BASE_DIR, 'dns_server.log')),
+        logging.FileHandler(os.path.join(LOG_DIR, 'dns_server.log')),
         logging.StreamHandler()
     ]
 )

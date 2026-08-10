@@ -118,7 +118,7 @@ def update_malware_bazaar_signatures():
     Update malware signatures from Malware Bazaar.
     Returns True if successful, False otherwise.
     """
-    signatures_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'malware_signatures.txt')
+    signatures_file = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__))), 'malware_signatures.txt')
     
     try:
         # Create signatures directory if it doesn't exist
@@ -424,7 +424,7 @@ def load_malware_signatures():
     Returns a dictionary of {hash_type: {hash_value: signature_name}}
     """
     signatures = {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}, 'tlsh': {}, 'imphash': {}}
-    signatures_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'malware_signatures.txt')
+    signatures_file = os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__))), 'malware_signatures.txt')
     
     if not os.path.exists(signatures_file):
         logging.warning(f"Malware signatures file not found: {signatures_file}")

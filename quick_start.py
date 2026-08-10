@@ -31,13 +31,17 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 # fail with EnvironmentError even though the key is present in .env.
 from dotenv import load_dotenv
 
-# When running as a PyInstaller bundle, make the current working directory the
-# directory that contains the executable so that log files and runtime data are
-# written next to the application instead of wherever the user launched it from.
+# When running as a PyInstaller bundle, use the user's AppData\Local folder for
+# runtime files (logs, cache, quarantine) so the packaged app can write even
+# when the distribution folder lives on a read-only / OneDrive reparse point.
 if getattr(sys, 'frozen', False):
-    exe_dir = os.path.dirname(sys.executable)
-    if os.path.isdir(exe_dir):
-        os.chdir(exe_dir)
+    runtime_dir = os.path.join(
+        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+        'antivirus_server'
+    )
+    os.makedirs(runtime_dir, exist_ok=True)
+    os.environ['ANTIVIRUS_RUNTIME_DIR'] = runtime_dir
+    os.chdir(runtime_dir)
 
 
 def _request_admin_elevation():
