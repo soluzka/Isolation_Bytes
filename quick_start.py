@@ -396,6 +396,15 @@ def run_conditional_startup_background():
             'running': True,
             'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'scanned_files': 0,
+            'quarantined_files': 0,
+            'errors': 0,
+            'process_events': 0,
+            'ml_detections': 0,
+            'ransomware_indicators': 0,
+            'persistence_indicators': 0,
+            'duration': None,
+            'last_error': None,
         })
 
     try:
@@ -443,9 +452,21 @@ def run_startup():
                     "scan_time": "in progress",
                     "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
                 })
-            conditional_startup_state['running'] = True
-            conditional_startup_state['started_at'] = time.strftime('%Y-%m-%d %H:%M:%S')
-            conditional_startup_state['last_updated'] = conditional_startup_state['started_at']
+            now = time.strftime('%Y-%m-%d %H:%M:%S')
+            conditional_startup_state.update({
+                'running': True,
+                'started_at': now,
+                'last_updated': now,
+                'scanned_files': 0,
+                'quarantined_files': 0,
+                'errors': 0,
+                'process_events': 0,
+                'ml_detections': 0,
+                'ransomware_indicators': 0,
+                'persistence_indicators': 0,
+                'duration': None,
+                'last_error': None,
+            })
 
         logger.info("Starting conditional startup scan in background")
         global conditional_startup_thread
