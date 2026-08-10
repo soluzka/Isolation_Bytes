@@ -60,7 +60,7 @@ def update_signatures():
     # Pull free ThreatFox file hashes as well
     try:
         from security.threatfox_updater import update_threatfox_signatures
-        update_threatfox_signatures(days=1)
+        update_threatfox_signatures(days=3)
     except Exception:
         pass
 

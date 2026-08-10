@@ -19,7 +19,7 @@ def get_basedir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def update_threatfox_signatures(days=1):
+def update_threatfox_signatures(days=3):
     """Fetch recent file hashes from ThreatFox and append them to malware_signatures.txt."""
     if not API_KEY:
         logging.debug("ThreatFox API key not set; skipping")
