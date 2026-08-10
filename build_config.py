@@ -4,6 +4,7 @@ import sys
 import glob
 import logging
 import platform
+import subprocess
 
 
 # Application details
@@ -112,7 +113,8 @@ icon_path = os.path.join(base_dir, 'static', 'favicon.ico')
 
 pyinstaller_args = [
     f'--name={app_name}',
-    '--onefile',
+    '--onedir',
+    '--contents-directory=.',
     '--clean',
     '--log-level=DEBUG',
     '--noupx',
@@ -292,3 +294,16 @@ except PermissionError as e:
 except Exception as e:
     print(f"Error during build: {e}")
     sys.exit(1)
+
+# Build the standalone ssdeep_runner helper so both executables are produced
+# by the same top-level build command.
+runner_script = os.path.join(base_dir, 'tools', 'build_runner_exe.py')
+if os.path.exists(runner_script):
+    try:
+        print("Building ssdeep_runner.exe...")
+        subprocess.run([sys.executable, runner_script], check=True)
+        print("ssdeep_runner build completed.")
+    except Exception as e:
+        print(f"Warning: ssdeep_runner build failed: {e}")
+else:
+    print("Warning: tools/build_runner_exe.py not found; skipping ssdeep_runner build.")
