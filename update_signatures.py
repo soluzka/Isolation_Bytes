@@ -3,6 +3,12 @@ import os
 
 import requests
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except Exception:
+    pass
+
 def get_basedir():
     import sys
     if getattr(sys, 'frozen', False):
