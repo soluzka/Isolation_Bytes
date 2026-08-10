@@ -23,8 +23,8 @@ requests
 # Watchdog for real-time folder monitoring
 watchdog
 
-# psutil for process management
-psutil
+# psutil>=7.2.2 for process management
+psutil>=7.2.2
 
 # Data analysis
 pandas
@@ -72,7 +72,7 @@ dnspython>=2.7.0
 # Machine Learning dependencies
 joblib<1.3.0
 requests>=2.33.0
-psutil>=5.9.0
+psutil>=7.2.2>=5.9.0
 
 # Network monitoring and analysis
 flask-limiter<4.0
