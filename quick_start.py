@@ -2325,6 +2325,12 @@ if __name__ == '__main__':
             conditional_startup_thread.start()
             logger.info("Conditional startup scan auto-started")
 
+    # Start automatic signature updates (every 24 hours)
+    from auto_update_signatures import start_auto_update_thread
+    auto_update_sig_thread = threading.Thread(target=start_auto_update_thread, daemon=True)
+    auto_update_sig_thread.start()
+    logger.info("Automatic signature update thread started")
+
     # Create a queue for passing the port from server thread to main thread
     port_queue = queue.Queue()
     
