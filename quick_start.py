@@ -353,18 +353,20 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     """Update conditional_startup_state after a run completes or fails."""
     if not isinstance(scan_data, dict):
         scan_data = {}
+    errors = scan_data.get('errors', [])
+    last_internal = str(errors[-1]) if errors else None
     conditional_startup_state.update({
         'running': False,
         'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
         'scanned_files': len(scan_data.get('scanned_files', [])),
         'quarantined_files': len(scan_data.get('quarantined_files', [])),
-        'errors': len(scan_data.get('errors', [])),
+        'errors': len(errors),
         'process_events': len(scan_data.get('process_events', [])),
         'ml_detections': len(scan_data.get('ml_detections', [])),
         'ransomware_indicators': len(scan_data.get('ransomware_indicators', [])),
         'persistence_indicators': _count_persistence_indicators(scan_data),
-        'last_error': str(error) if error else None
+        'last_error': str(error) if error else last_internal
     })
 
 
@@ -379,12 +381,14 @@ def run_conditional_startup_background():
         used to only update counts, leaving 'last_run' as 'never' for the
         entire (sometimes multi-minute) duration of a run, since that field
         was only ever set once the whole scan finished."""
+        errors = partial_results.get('errors', [])
         conditional_startup_state.update({
             'running': True,
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
             'scanned_files': len(partial_results.get('scanned_files', [])),
             'quarantined_files': len(partial_results.get('quarantined_files', [])),
-            'errors': len(partial_results.get('errors', [])),
+            'errors': len(errors),
+            'last_error': str(errors[-1]) if errors else None,
             'process_events': len(partial_results.get('process_events', [])),
             'ml_detections': len(partial_results.get('ml_detections', [])),
             'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
