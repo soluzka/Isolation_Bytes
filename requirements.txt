@@ -73,7 +73,7 @@ py7zr>=1.1.3
 dnslib>=0.9.22
 
 # For DNS-based reputation services
-dnspython>=2.7.0
+dnspython>=2.8.0
 
 # Machine Learning dependencies
 # YARA for advanced malware scanning
