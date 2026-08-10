@@ -423,7 +423,7 @@ def load_malware_signatures():
     Load malware signatures from the signatures file.
     Returns a dictionary of {hash_type: {hash_value: signature_name}}
     """
-    signatures = {'md5': {}, 'sha256': {}}
+    signatures = {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
     signatures_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'malware_signatures.txt')
     
     if not os.path.exists(signatures_file):
@@ -447,12 +447,12 @@ def load_malware_signatures():
     except Exception as e:
         logging.error(f"Error loading malware signatures: {str(e)}")
         # Return empty signatures if there's an error
-        return {'md5': {}, 'sha256': {}}
+        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
     
     # Validate the signatures dictionary structure
     if not isinstance(signatures, dict):
         logging.error("Signatures is not a dictionary")
-        return {'md5': {}, 'sha256': {}}
+        return {'md5': {}, 'sha1': {}, 'sha256': {}, 'sha512': {}}
     
     for hash_type, hash_dict in signatures.items():
         if not isinstance(hash_dict, dict):
@@ -463,22 +463,26 @@ def load_malware_signatures():
 
 def calculate_file_hashes(filepath):
     """
-    Calculate MD5 and SHA256 hashes for a file.
-    Returns a tuple of (md5_hash, sha256_hash)
+    Calculate MD5, SHA1, SHA256 and SHA512 hashes for a file in a single pass.
+    Returns a tuple of (md5_hash, sha1_hash, sha256_hash, sha512_hash)
     """
     import hashlib
     
     md5 = hashlib.md5(usedforsecurity=False)
+    sha1 = hashlib.sha1(usedforsecurity=False)
     sha256 = hashlib.sha256()
+    sha512 = hashlib.sha512()
     
     try:
         with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
             # Read file in chunks to handle large files efficiently
             for chunk in iter(lambda: f.read(4096), b''):
                 md5.update(chunk)
+                sha1.update(chunk)
                 sha256.update(chunk)
+                sha512.update(chunk)
         
-        return md5.hexdigest(), sha256.hexdigest()
+        return md5.hexdigest(), sha1.hexdigest(), sha256.hexdigest(), sha512.hexdigest()
     except Exception as e:
         logging.error(f"Error calculating file hashes for {filepath}: {str(e)}")
         raise
@@ -496,18 +500,15 @@ def scan_file_for_viruses(filepath):
         # Load the latest signatures
         signatures = load_malware_signatures()
         
-        # Calculate file hashes
-        md5_hash, sha256_hash = calculate_file_hashes(filepath)
+        # Calculate file hashes in one pass
+        md5_hash, sha1_hash, sha256_hash, sha512_hash = calculate_file_hashes(filepath)
         
-        # Check against MD5 signatures
-        if md5_hash in signatures['md5']:
-            signature_name = signatures['md5'][md5_hash]
-            return True, True, f"Malware detected: {signature_name} (MD5 match)"
-        
-        # Check against SHA256 signatures
-        if sha256_hash in signatures['sha256']:
-            signature_name = signatures['sha256'][sha256_hash]
-            return True, True, f"Malware detected: {signature_name} (SHA256 match)"
+        # Check against all available signature databases
+        for hash_type, hash_value in [('md5', md5_hash), ('sha1', sha1_hash),
+                                       ('sha256', sha256_hash), ('sha512', sha512_hash)]:
+            if hash_value in signatures[hash_type]:
+                signature_name = signatures[hash_type][hash_value]
+                return True, True, f"Malware detected: {signature_name} ({hash_type.upper()} match)"
         
         # If we reach here, no malware was found in our signatures
         return True, False, "No malware found in signature database"
