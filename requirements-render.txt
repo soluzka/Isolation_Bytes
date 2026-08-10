@@ -75,7 +75,7 @@ requests>=2.33.0
 psutil>=5.9.0
 
 # Network monitoring and analysis
-flask-limiter<4.0
+flask-limiter<5.0
 limits<6.0
 ordered-set<4.2
 rich<14.0
