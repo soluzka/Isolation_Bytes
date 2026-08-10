@@ -3,6 +3,7 @@ import os
 import logging
 import sys
 import time
+import functools
 from yara import Error as YaraError
 
 def get_basedir():
@@ -141,6 +142,7 @@ def _classify_filetype(filepath):
 
     return ''
 
+@functools.lru_cache(maxsize=None)
 def load_yara_rules():
     """Load YARA rules from the rules directory structure or create basic rules if none exist."""
     # Create a fallback rule to ensure we have at least one rule available

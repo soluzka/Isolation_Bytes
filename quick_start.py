@@ -288,6 +288,9 @@ folder_watcher_state = {
         'Temporary Internet Files',
         'WindowsApps',  # Microsoft Store apps can be large and are usually safe
         'WinSxS',      # Windows component store (very large and low risk)
+        'C:\\\\Windows',
+        'C:\\\\Program Files',
+        'C:\\\\ProgramData',
         'node_modules', # NPM modules folder can be extremely large
         'venv',         # Python virtual environments folder
         '.git',         # Git repositories
@@ -460,12 +463,16 @@ def _perform_scan_all():
                 total_directories_scanned += 1
                 logger.info(f'Scanning directory: {directory}')
 
-                for root, _, files in os.walk(directory, topdown=True, onerror=lambda e: logger.warning(f'Access error: {e}')):
+                for root, dirs, files in os.walk(directory, topdown=True, onerror=lambda e: logger.warning(f'Access error: {e}')):
                     if should_exclude_path(root):
+                        dirs[:] = []
                         continue
 
                     if not os.access(root, os.R_OK):
+                        dirs[:] = []
                         continue
+
+                    dirs[:] = [d for d in dirs if not should_exclude_path(os.path.join(root, d))]
 
                     for file in files:
                         file_path = os.path.join(root, file)
