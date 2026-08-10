@@ -421,13 +421,18 @@ continuous_scan_thread = None
 
 
 def _perform_scan_all():
-    """Shared scan-all implementation. Returns (result_dict, http_status)."""
+    '''Scan all monitored directories using YARA rules and optional ML scoring.'''
+    from security.yara_scanner import scan_file_with_yara
+    from security.detector import ember_detector, detector
+
     monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
     start_time = time.time()
     results = []
     total_files_scanned = 0
     total_directories_scanned = 0
     detected_threats = 0
+    total_yara_matches = 0
+    quarantined_count = 0
 
     if not monitored_dirs:
         return {
@@ -441,128 +446,119 @@ def _perform_scan_all():
         }, 400
 
     try:
+        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', r'C:\Users\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+
         for directory in monitored_dirs:
             try:
-                if os.path.exists(directory) and os.path.isdir(directory):
-                    logger.info(f"Scanning directory: {directory}")
-                    total_directories_scanned += 1
+                if not os.path.exists(directory) or not os.path.isdir(directory):
+                    results.append(f'Directory not found or not accessible: {directory}')
+                    continue
 
-                    file_count = 0
-                    for root, _, files in os.walk(directory, topdown=True, onerror=lambda e: logger.warning(f"Access error: {e}")):
-                        if should_exclude_path(root):
-                            logger.info(f"Skipping excluded path: {root}")
+                total_directories_scanned += 1
+                logger.info(f'Scanning directory: {directory}')
+
+                for root, _, files in os.walk(directory, topdown=True, onerror=lambda e: logger.warning(f'Access error: {e}')):
+                    if should_exclude_path(root):
+                        continue
+
+                    if not os.access(root, os.R_OK):
+                        continue
+
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        if should_exclude_path(file_path):
                             continue
 
-                        if not os.access(root, os.R_OK):
-                            logger.warning(f"No read permission for directory: {root}")
-                            continue
+                        total_files_scanned += 1
 
-                        for file in files:
-                            file_path = os.path.join(root, file)
-
-                            if should_exclude_path(file_path):
+                        try:
+                            cached = scan_cache.get(file_path)
+                            if cached is not None:
+                                cached_matches = cached.get('yara_matches', [])
+                                if cached_matches:
+                                    total_yara_matches += len(cached_matches)
+                                    detected_threats += 1
+                                    results.append('YARA match: ' + file_path + ' - Rules: ' + ', '.join(cached_matches))
                                 continue
 
-                            try:
-                                if file_count % 100 == 0:
-                                    time.sleep(0.01)
+                            yara_matches = scan_file_with_yara(file_path)
+                            rule_names = [getattr(m, 'rule', str(m)) for m in yara_matches]
 
-                                file_count += 1
-                                suspicious_extensions = ['.exe.txt', '.scr', '.bat', '.cmd', '.vbs', '.js', '.ps1', '.hta']
-                                suspicious_names = ['virus', 'trojan', 'malware', 'hack', 'crack', 'keygen', 'patch']
+                            cache_entry = {
+                                'yara_matches': rule_names,
+                                'quarantined': False,
+                                'reported': False
+                            }
 
-                                filename_lower = file.lower()
-                                detected = False
+                            if not yara_matches:
+                                scan_cache.set(file_path, cache_entry)
+                                continue
 
-                                for ext in suspicious_extensions:
-                                    if filename_lower.endswith(ext):
-                                        detected = True
-                                        break
+                            total_yara_matches += len(yara_matches)
+                            detected_threats += 1
 
-                                for name in suspicious_names:
-                                    if name in filename_lower:
-                                        detected = True
-                                        break
+                            ml_score = None
+                            if ember_detector.available:
+                                ml_score = ember_detector.score(file_path)
+                                cache_entry['ember_score'] = ml_score
+                            if ml_score is None and detector is not None:
+                                try:
+                                    ml_score = detector.get_anomaly_score(file_path)
+                                    cache_entry['legacy_ml_score'] = ml_score
+                                except Exception:
+                                    pass
 
-                                if detected:
-                                    detected_threats += 1
-                                    logger.warning(f"Potential threat detected: {file_path}")
-                                    threat_level = "high"
+                            should_quarantine = False
+                            if ml_score is not None:
+                                if ember_detector.available and ml_score >= 0.85:
+                                    should_quarantine = True
+                                    cache_entry['quarantine_reason'] = 'ember'
+                                elif not ember_detector.available and ml_score >= 0.5:
+                                    should_quarantine = True
+                                    cache_entry['quarantine_reason'] = 'legacy'
 
-                                    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
-                                    os.makedirs(quarantine_dir, exist_ok=True)
+                            if should_quarantine:
+                                success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
+                                cache_entry['quarantined'] = success
+                                if success:
+                                    quarantined_count += 1
+                                    results.append('QUARANTINED: ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                    logger.warning(f'Quarantined high-risk file: {file_path}')
+                                else:
+                                    results.append('YARA match (quarantine failed: ' + message + '): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                    logger.warning(f'YARA match not quarantined ({message}): {file_path}')
+                            else:
+                                cache_entry['reported'] = True
+                                results.append('YARA match (report-only): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
+                                if ml_score is not None:
+                                    logger.info(f'  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}')
 
-                                    try:
-                                        base_filename = os.path.basename(file_path)
-                                        base_name, ext = os.path.splitext(base_filename)
-                                        encrypted_filename = f"{base_name}{ext}.enc"
-                                        quarantine_path = os.path.join(quarantine_dir, encrypted_filename)
+                            scan_cache.set(file_path, cache_entry)
 
-                                        if os.path.exists(quarantine_path):
-                                            timestamp = time.strftime("%Y%m%d_%H%M%S")
-                                            quarantine_path = os.path.join(quarantine_dir, f"{base_name}_{timestamp}{ext}.enc")
+                        except Exception as file_error:
+                            logger.warning(f'Error scanning file {file_path}: {file_error}')
 
-                                        if threat_level == "high":
-                                            logger.info(f"Encrypting high-risk threat for quarantine: {file_path}")
-
-                                            if encrypt_file(file_path, quarantine_path):
-                                                os.remove(file_path)
-                                                results.append(f"HIGH RISK THREAT DELETED: {file_path} (encrypted and saved to quarantine first)")
-                                                logger.warning(f"Encrypted and deleted high risk threat: {file_path}")
-                                            else:
-                                                fallback_path = quarantine_path.replace('.enc', '')
-                                                shutil.copy2(file_path, fallback_path)
-                                                os.remove(file_path)
-                                                results.append(f"HIGH RISK THREAT DELETED: {file_path} (unencrypted copy in quarantine due to encryption error)")
-                                                logger.warning(f"Failed to encrypt but quarantined and deleted threat: {file_path}")
-                                        else:
-                                            logger.info(f"Encrypting moderate-risk threat for quarantine: {file_path}")
-
-                                            if encrypt_file(file_path, quarantine_path):
-                                                os.remove(file_path)
-                                                results.append(f"THREAT ENCRYPTED AND QUARANTINED: {file_path}")
-                                                logger.warning(f"Encrypted and quarantined threat: {file_path}")
-                                            else:
-                                                fallback_path = quarantine_path.replace('.enc', '')
-                                                shutil.move(file_path, fallback_path)
-                                                results.append(f"THREAT QUARANTINED (unencrypted): {file_path}")
-                                                logger.warning(f"Failed to encrypt but quarantined threat: {file_path}")
-                                    except Exception as quar_error:
-                                        logger.error(f"Error handling threat {file_path}: {quar_error}")
-                                        results.append(f"THREAT DETECTED: {file_path} - Failed to handle: {str(quar_error)}")
-                                        logger.critical(f"!!!URGENT!!! Malicious file {file_path} could not be quarantined or removed.")
-                            except Exception as file_error:
-                                logger.warning(f"Error scanning file {file_path}: {file_error}")
-
-                    total_files_scanned += file_count
-                    results.append(f"Scanned {file_count} files in {directory}")
-                else:
-                    logger.warning(f"Directory not found or not accessible: {directory}")
-                    results.append(f"Directory not found or not accessible: {directory}")
+                results.append(f'Scanned directory: {directory}')
             except Exception as scan_error:
-                logger.error(f"Error scanning directory {directory}: {scan_error}")
-                results.append(f"Error scanning {directory}: {str(scan_error)}")
-
-        elapsed = time.time() - start_time
-        if elapsed < 1.0:
-            time.sleep(1.0 - elapsed)
+                logger.error(f'Error scanning directory {directory}: {scan_error}')
+                results.append(f'Error scanning {directory}: {str(scan_error)}')
 
         duration = time.time() - start_time
 
         return {
             'status': 'success',
-            'scan_time': f"{duration:.2f} seconds",
+            'scan_time': f'{duration:.2f} seconds',
             'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'matches': detected_threats,
+            'matches': total_yara_matches,
             'folders': monitored_dirs,
             'results': results,
             'files_scanned': total_files_scanned,
             'directories_scanned': total_directories_scanned,
             'threats_detected': detected_threats,
-            'threats_removed': detected_threats
+            'threats_removed': quarantined_count
         }, 200
     except Exception as e:
-        logger.error(f"Error during scan_all: {e}")
+        logger.error(f'Error during scan_all: {e}')
         return {
             'status': 'error',
             'message': str(e),
@@ -866,6 +862,47 @@ def remove_monitored_folder():
 def scan_all_directories():
     result, status_code = _perform_scan_all()
     return jsonify(result), status_code
+
+
+@app.route('/toggle_scan_all/<action>', methods=['POST'])
+def toggle_scan_all(action):
+    """Start or stop the continuous scan-all background loop."""
+    global continuous_scan_thread
+    if action not in ['start', 'stop']:
+        return jsonify({'status': 'error', 'error': 'Invalid action'}), 400
+
+    if action == 'start':
+        if not continuous_scan_state['active']:
+            continuous_scan_state['active'] = True
+            continuous_scan_state['last_error'] = None
+            if continuous_scan_thread is None or not continuous_scan_thread.is_alive():
+                continuous_scan_thread = threading.Thread(target=run_continuous_scan_all, daemon=True)
+                continuous_scan_thread.start()
+        return jsonify({
+            'status': 'success',
+            'active': True,
+            'message': 'Continuous scanning started'
+        })
+
+    continuous_scan_state['active'] = False
+    return jsonify({
+        'status': 'success',
+        'active': False,
+        'message': 'Continuous scanning stopped'
+    })
+
+
+@app.route('/scan_all/latest', methods=['GET'])
+def scan_all_latest():
+    """Return the most recent continuous scan-all result."""
+    return jsonify({
+        'status': 'success',
+        'active': continuous_scan_state['active'],
+        'last_run': continuous_scan_state.get('last_run'),
+        'last_error': continuous_scan_state.get('last_error'),
+        'result': continuous_scan_state.get('last_result')
+    })
+
 
 # -- Network monitoring enhanced functionality --
 # Global state to track network monitoring status
