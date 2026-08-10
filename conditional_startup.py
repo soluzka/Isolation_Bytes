@@ -4,11 +4,13 @@ import sys
 import io
 import json
 import getpass
+import threading
 import subprocess
 import tempfile
 import requests
 import time
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 import warnings
 
 # Ensure the base directory is in sys.path for package imports
@@ -22,6 +24,10 @@ def import_module_from_path(module_name, path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+# Locks for concurrent process + file scanning
+results_lock = threading.RLock()
+scanner_lock = threading.RLock()
 
 def _resolve_critical_directories():
     """Resolve critical system directories, auto-detecting the Windows drive
@@ -1168,25 +1174,30 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
     output.write("[conditional_startup] Scanning running processes...\n")
 
     def on_process_event(event):
-        results["process_events"].append(event)
+        with results_lock:
+            results["process_events"].append(event)
 
-        exe = event.get('exe')
-        if exe and event['type'] == 'process_scanned':
-            _run_ml_and_ransomware_checks(exe, results, output)
+            exe = event.get('exe')
+            if exe and event['type'] == 'process_scanned':
+                _run_ml_and_ransomware_checks(exe, results, output)
 
-        # Report progress per-event, not just once after the whole process
-        # scan finishes -- scanning a handful of large executables against
-        # every YARA rule can take minutes, so waiting until the end would
-        # leave the status UI showing 0 the entire time.
-        if callable(progress_callback):
-            try:
-                progress_callback(results)
-            except Exception as e:
-                output.write(f"[WARNING] progress_callback raised during process scan: {e}\n")
+            # Report progress per-event, not just once after the whole process
+            # scan finishes -- scanning a handful of large executables against
+            # every YARA rule can take minutes, so waiting until the end would
+            # leave the status UI showing 0 the entire time.
+            if callable(progress_callback):
+                try:
+                    progress_callback(results)
+                except Exception as e:
+                    output.write(f"[WARNING] progress_callback raised during process scan: {e}\n")
+
+    def _locked_scan_file_for_viruses(filepath):
+        with scanner_lock:
+            return scan_utils.scan_file_for_viruses(filepath)
 
     try:
         process_monitor.scan_running_processes(
-            scan_utils.scan_file_for_viruses,
+            _locked_scan_file_for_viruses,
             event_callback=on_process_event
         )
         output.write(f"[conditional_startup] Process scan reported {len(results['process_events'])} event(s).\n")
@@ -1201,21 +1212,22 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
     output.write("[conditional_startup] Running process hardening scan...\n")
 
     def on_hardening_event(event):
-        # Only count actionable / notable findings, not the per-process scan heartbeat
-        if event.get('type') in ('malware_found', 'yara_match'):
-            results["process_events"].append(event)
-        elif event.get('type') == 'process_scanned' and (
-            event.get('yara') or
-            (event.get('hashes', {}).get('entropy', 0) > 7.5) or
-            event.get('signed') is False
-        ):
-            results["process_events"].append(event)
+        with results_lock:
+            # Only count actionable / notable findings, not the per-process scan heartbeat
+            if event.get('type') in ('malware_found', 'yara_match'):
+                results["process_events"].append(event)
+            elif event.get('type') == 'process_scanned' and (
+                event.get('yara') or
+                (event.get('hashes', {}).get('entropy', 0) > 7.5) or
+                event.get('signed') is False
+            ):
+                results["process_events"].append(event)
 
-        if callable(progress_callback):
-            try:
-                progress_callback(results)
-            except Exception as e:
-                output.write(f"[WARNING] progress_callback raised during hardening scan: {e}\n")
+            if callable(progress_callback):
+                try:
+                    progress_callback(results)
+                except Exception as e:
+                    output.write(f"[WARNING] progress_callback raised during hardening scan: {e}\n")
 
     try:
         process_security.scan_processes_with_hardening(
@@ -1224,10 +1236,12 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
             entropy_threshold=7.5,
             event_callback=on_hardening_event
         )
-        output.write(f"[conditional_startup] Hardening scan reported {len(results['process_events'])} total process event(s).\n")
+        with results_lock:
+            output.write(f"[conditional_startup] Hardening scan reported {len(results['process_events'])} total process event(s).\n")
     except Exception as e:
-        output.write(f"[ERROR] Process hardening scan failed: {e}\n")
-        results["errors"].append({"stage": "process_hardening", "error": str(e)})
+        with results_lock:
+            output.write(f"[ERROR] Process hardening scan failed: {e}\n")
+            results["errors"].append({"stage": "process_hardening", "error": str(e)})
 
 
 def _check_persistence_indicators_step(results, output):
@@ -1370,85 +1384,104 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
     a hit here the same as a YARA/signature match would risk quarantining
     legitimate files on false positives.
     """
-    try:
-        from security.detector import detector, ember_detector, check_ransomware_indicators
+    with results_lock:
+        try:
+            from security.detector import detector, ember_detector, check_ransomware_indicators
 
-        _, ext = os.path.splitext(filepath)
-        if ext.lower() in _ML_CLASSIFIER_EXTENSIONS:
-            # Prefer the EMBER-trained classifier (real malware/benign data)
-            # when its model file is present; fall back to the
-            # synthetic-data classifier otherwise.
-            if ember_detector.available:
-                score = ember_detector.score(filepath)
-                if score is not None and score >= 0.85:
-                    output.write(f"[ML/EMBER] Suspicious file (not auto-quarantined): {filepath} (score: {score:.3f})\n")
-                    results["ml_detections"].append({"file": filepath, "anomaly_score": score, "model": "ember"})
-            elif detector.is_malicious(filepath):
-                score = detector.get_anomaly_score(filepath)
-                output.write(f"[ML] Suspicious file (not auto-quarantined): {filepath} (score: {score})\n")
-                results["ml_detections"].append({"file": filepath, "anomaly_score": float(score), "model": "synthetic"})
+            _, ext = os.path.splitext(filepath)
+            ml_hit = None
+            if ext.lower() in _ML_CLASSIFIER_EXTENSIONS:
+                with scanner_lock:
+                    # Prefer the EMBER-trained classifier (real malware/benign data)
+                    # when its model file is present; fall back to the
+                    # synthetic-data classifier otherwise.
+                    if ember_detector.available:
+                        score = ember_detector.score(filepath)
+                        if score is not None and score >= 0.85:
+                            ml_hit = ("ember", score)
+                    elif detector.is_malicious(filepath):
+                        score = detector.get_anomaly_score(filepath)
+                        ml_hit = ("synthetic", float(score))
+                if ml_hit:
+                    model, score = ml_hit
+                    output.write(f"[ML/{model.upper()}] Suspicious file (not auto-quarantined): {filepath} (score: {score})\n")
+                    results["ml_detections"].append({"file": filepath, "anomaly_score": score, "model": model})
 
-        is_suspicious, reason = check_ransomware_indicators(filepath)
-        if is_suspicious:
-            output.write(f"[RANSOMWARE HEURISTIC] {filepath}: {reason}\n")
-            results["ransomware_indicators"].append({"file": filepath, "reason": reason})
-    except Exception as ml_exc:
-        output.write(f"[INFO] ML/ransomware check skipped for {filepath}: {ml_exc}\n")
+            with scanner_lock:
+                is_suspicious, reason = check_ransomware_indicators(filepath)
+            if is_suspicious:
+                output.write(f"[RANSOMWARE HEURISTIC] {filepath}: {reason}\n")
+                results["ransomware_indicators"].append({"file": filepath, "reason": reason})
+        except Exception as ml_exc:
+            output.write(f"[INFO] ML/ransomware check skipped for {filepath}: {ml_exc}\n")
 
 
-def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output):
+def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output, progress_callback=None):
     """Scan a single file, quarantining it if malware is found, and record
     its outcome into results/scanned_file_status."""
     try:
-        scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
-        output.write(f"[conditional_startup] {msg}\n")
-        scanned_file_status[filepath] = {
-            "malware_found": malware_found,
-            "quarantined": False,
-            "error": None
-        }
+        with scanner_lock:
+            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
+        with results_lock:
+            output.write(f"[conditional_startup] {msg}\n")
+            scanned_file_status[filepath] = {
+                "malware_found": malware_found,
+                "quarantined": False,
+                "error": None
+            }
 
         # Try YARA scan
         try:
-            yara_result = yara_scanner.scan_file(filepath)
-            output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
+            with scanner_lock:
+                yara_result = yara_scanner.scan_file(filepath)
+            with results_lock:
+                output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
         except Exception as yara_exc:
-            # Just log and continue if YARA scan fails
-            output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
+            with results_lock:
+                output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
 
         _run_ml_and_ransomware_checks(filepath, results, output)
 
         # Quarantine if malware found
         if malware_found:
-            try:
-                quarantine_utils.quarantine_file(filepath)
-                output.write(f"[conditional_startup] File {filepath} quarantined.\n")
-                results["quarantined_files"].append(filepath)
-                scanned_file_status[filepath]["quarantined"] = True
-            except Exception as quarantine_exc:
-                # Malware was detected but could not be removed (e.g. permission
-                # denied on a protected system file). Previously this was only
-                # written to the internal log and counted toward neither
-                # "Quarantined" nor "Errors", making it look like nothing had
-                # happened when malware had actually been found and left in place.
-                output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
-                scanned_file_status[filepath]["error"] = str(quarantine_exc)
-                results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
+            with results_lock:
+                try:
+                    quarantine_utils.quarantine_file(filepath)
+                    output.write(f"[conditional_startup] File {filepath} quarantined.\n")
+                    results["quarantined_files"].append(filepath)
+                    scanned_file_status[filepath]["quarantined"] = True
+                except Exception as quarantine_exc:
+                    # Malware was detected but could not be removed (e.g. permission
+                    # denied on a protected system file). Previously this was only
+                    # written to the internal log and counted toward neither
+                    # "Quarantined" nor "Errors", making it look like nothing had
+                    # happened when malware had actually been found and left in place.
+                    output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
+                    scanned_file_status[filepath]["error"] = str(quarantine_exc)
+                    results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
+                if callable(progress_callback):
+                    progress_callback(results)
     except (PermissionError, OSError) as perm_error:
-        output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
-        scanned_file_status[filepath] = {
-            "malware_found": None,
-            "quarantined": False,
-            "error": str(perm_error)
-        }
+        with results_lock:
+            output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
+            scanned_file_status[filepath] = {
+                "malware_found": None,
+                "quarantined": False,
+                "error": str(perm_error)
+            }
+            if callable(progress_callback):
+                progress_callback(results)
     except Exception as scan_exc:
-        output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
-        results["errors"].append({"file": filepath, "error": str(scan_exc)})
-        scanned_file_status[filepath] = {
-            "malware_found": None,
-            "quarantined": False,
-            "error": str(scan_exc)
-        }
+        with results_lock:
+            output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
+            results["errors"].append({"file": filepath, "error": str(scan_exc)})
+            scanned_file_status[filepath] = {
+                "malware_found": None,
+                "quarantined": False,
+                "error": str(scan_exc)
+            }
+            if callable(progress_callback):
+                progress_callback(results)
 
 
 def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback):
@@ -1474,15 +1507,7 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
                     output.write(f"[INFO] Skipping inaccessible file: {filepath}\n")
                     continue
 
-                _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output)
-
-                # Report live progress so callers (e.g. the status API) don't
-                # appear stuck at 0 while a large scan is still in progress.
-                if callable(progress_callback):
-                    try:
-                        progress_callback(results)
-                    except Exception as e:
-                        output.write(f"[WARNING] progress_callback raised during directory scan: {e}\n")
+                _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output, progress_callback)
 
 
 def _open_browser_when_ready(output):
@@ -1553,14 +1578,26 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
     if modules is None:
         return output.getvalue()
 
-    # Run the file/folder scan first so files_scanned starts climbing,
-    # then the process scan, then the slow process hardening step.
+    # Run the file/folder scan and the process scan in parallel so that
+    # Files Scanned and Process Events climb at the same time, then the
+    # slow process hardening step once both have finished.
     if _load_scheduled_scan_state(state_file, output):
         output.write('[conditional_startup] Running scheduled scans...\n')
         monitored_folders = _get_monitored_folders(basedir, output)
-        _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_process = executor.submit(
+                _scan_running_processes_step,
+                modules['process_monitor'], modules['scan_utils'], results, output, progress_callback
+            )
+            future_file = executor.submit(
+                _scan_monitored_folders_step,
+                monitored_folders, modules, results, scanned_file_status, output, progress_callback
+            )
+            future_process.result()
+            future_file.result()
+    else:
+        _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
 
-    _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
     _scan_processes_hardening_step(modules['process_security'], results, output, progress_callback)
     _check_persistence_indicators_step(results, output)
     _update_phishing_blocklists_step(basedir, output)

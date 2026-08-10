@@ -382,18 +382,19 @@ def run_conditional_startup_background():
         entire (sometimes multi-minute) duration of a run, since that field
         was only ever set once the whole scan finished."""
         errors = partial_results.get('errors', [])
-        conditional_startup_state.update({
-            'running': True,
-            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'scanned_files': len(partial_results.get('scanned_files', [])),
-            'quarantined_files': len(partial_results.get('quarantined_files', [])),
-            'errors': len(errors),
-            'last_error': str(errors[-1]) if errors else None,
-            'process_events': len(partial_results.get('process_events', [])),
-            'ml_detections': len(partial_results.get('ml_detections', [])),
-            'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
-            'persistence_indicators': _count_persistence_indicators(partial_results),
-        })
+        with conditional_startup_lock:
+            conditional_startup_state.update({
+                'running': True,
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'scanned_files': len(partial_results.get('scanned_files', [])),
+                'quarantined_files': len(partial_results.get('quarantined_files', [])),
+                'errors': len(errors),
+                'last_error': str(errors[-1]) if errors else None,
+                'process_events': len(partial_results.get('process_events', [])),
+                'ml_detections': len(partial_results.get('ml_detections', [])),
+                'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
+                'persistence_indicators': _count_persistence_indicators(partial_results),
+            })
 
     with conditional_startup_lock:
         conditional_startup_state.update({
@@ -430,15 +431,16 @@ def run_conditional_startup_background():
 def conditional_startup_status():
     """Status of the last conditional startup run; also used by Refresh Status."""
     global conditional_startup_thread
-    if conditional_startup_state.get('running'):
-        if conditional_startup_thread is None or not conditional_startup_thread.is_alive():
-            conditional_startup_state.update({
-                'running': False,
-                'last_error': 'Scan thread terminated unexpectedly',
-                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
-            })
-    resp = dict(conditional_startup_state)
-    resp['status'] = 'RUNNING' if conditional_startup_state.get('running') else 'IDLE'
+    with conditional_startup_lock:
+        if conditional_startup_state.get('running'):
+            if conditional_startup_thread is None or not conditional_startup_thread.is_alive():
+                conditional_startup_state.update({
+                    'running': False,
+                    'last_error': 'Scan thread terminated unexpectedly',
+                    'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+                })
+        resp = dict(conditional_startup_state)
+    resp['status'] = 'RUNNING' if resp.get('running') else 'IDLE'
     resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
     return jsonify(resp)
 
