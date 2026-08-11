@@ -94,6 +94,10 @@ hidden_imports = [
     'lightgbm.sklearn',
     'pefile',
     'security.process_monitor',
+    'security.process_security',
+    'security.yara_scanner',
+    'scan_utils',
+    'quarantine_utils',
     # Shortcut creation (pywin32) dependencies for the one-file EXE
     'win32com.client',
     'win32com.shell.shell',

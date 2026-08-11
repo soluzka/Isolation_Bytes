@@ -1133,33 +1133,56 @@ def _run_routine_maintenance_step(output, results):
 
 
 def _load_scan_utilities(basedir, output):
-    """Dynamically load the modules the scan needs. Returns a dict of loaded
-    modules, or None if loading failed (with the failure logged to output)."""
+    """Load the scan modules. In a PyInstaller bundle the source .py files are
+    already on sys.path, so normal imports are used first. File-based loading is
+    kept as a fallback for standalone development use."""
     paths_path = os.path.join(basedir, 'utils', 'paths.py')
     if os.path.exists(paths_path):
         output.write(f"[conditional_startup] Found paths.py at: {paths_path}\n")
     else:
         output.write(f"[ERROR] paths.py not found in {basedir}!\n")
 
-    scan_utils_path = os.path.join(basedir, 'scan_utils.py')
-    yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
-    process_monitor_path = os.path.join(basedir, 'security', 'process_monitor.py')
-    process_security_path = os.path.join(basedir, 'security', 'process_security.py')
-    quarantine_utils_path = os.path.join(basedir, 'quarantine_utils.py')
+    def _do_import():
+        import scan_utils
+        import security.yara_scanner as yara_scanner
+        import security.process_monitor as process_monitor
+        import security.process_security as process_security
+        import quarantine_utils
+        return {
+            'scan_utils': scan_utils,
+            'yara_scanner': yara_scanner,
+            'process_monitor': process_monitor,
+            'process_security': process_security,
+            'quarantine_utils': quarantine_utils,
+        }
 
-    try:
-        modules = {
+    def _do_file_load():
+        scan_utils_path = os.path.join(basedir, 'scan_utils.py')
+        yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
+        process_monitor_path = os.path.join(basedir, 'security', 'process_monitor.py')
+        process_security_path = os.path.join(basedir, 'security', 'process_security.py')
+        quarantine_utils_path = os.path.join(basedir, 'quarantine_utils.py')
+        return {
             'scan_utils': import_module_from_path('scan_utils', scan_utils_path),
             'yara_scanner': import_module_from_path('yara_scanner', yara_scanner_path),
             'process_monitor': import_module_from_path('process_monitor', process_monitor_path),
             'process_security': import_module_from_path('process_security', process_security_path),
             'quarantine_utils': import_module_from_path('quarantine_utils', quarantine_utils_path),
         }
-        output.write("[conditional_startup] Successfully loaded scan utilities.\n")
-        return modules
-    except Exception as e:
-        output.write(f"[ERROR] Failed to load scan utilities: {e}\n")
-        return None
+
+    try:
+        modules = _do_import()
+        output.write("[conditional_startup] Successfully loaded scan utilities (import).\n")
+        return modules, None
+    except Exception as e1:
+        output.write(f"[WARNING] Normal module import failed: {e1}\n")
+        try:
+            modules = _do_file_load()
+            output.write("[conditional_startup] Successfully loaded scan utilities (file load).\n")
+            return modules, None
+        except Exception as e2:
+            output.write(f"[ERROR] Failed to load scan utilities: {e2}\n")
+            return None, f"{e1}; then {e2}"
 
 
 def _scan_running_processes_step(process_monitor, scan_utils, results, output, progress_callback):
@@ -1574,9 +1597,11 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
     basedir = os.path.dirname(os.path.abspath(__file__))
     state_file = os.path.abspath(os.path.join(basedir, 'scheduled_scan_state.json'))
 
-    modules = _load_scan_utilities(basedir, output)
+    modules, load_error = _load_scan_utilities(basedir, output)
     if modules is None:
-        return output.getvalue()
+        results["log"] = output.getvalue()
+        results["errors"].append({"stage": "module_load", "error": load_error or "Failed to load scan utilities"})
+        return results
 
     # Run the file/folder scan and the process scan in parallel so that
     # Files Scanned and Process Events climb at the same time, then the
@@ -1609,6 +1634,14 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
 
     results["results"] = _build_scanned_results(results, scanned_file_status)
     results["log"] = output.getvalue()
+
+    # Persist the detailed log next to other runtime files for debugging.
+    log_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR') or basedir
+    try:
+        with open(os.path.join(log_dir, 'conditional_startup.log'), 'w', encoding='utf-8') as f:
+            f.write(results["log"])
+    except Exception:
+        pass
 
     return results
 
