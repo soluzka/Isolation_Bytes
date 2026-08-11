@@ -79,6 +79,7 @@ hidden_imports = [
     'numpy.random.bounded_integers',
     'numpy.random.entropy',
     'redis',  # Add Redis to hidden imports
+    'onnxruntime',  # Bundle ONNX Runtime for the CNN model
     # Add fuzzy and YARA related packages so PyInstaller bundles them
     'pyssdeep',
     'ssdeep',
@@ -145,6 +146,9 @@ pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 
 # Collect the entire pyssdeep package (including bin/windows/fuzzy_64.dll)
 pyinstaller_args += ['--collect-all', 'pyssdeep']
+
+# Collect the entire onnxruntime package so the CNN .onnx model can be run
+pyinstaller_args += ['--collect-all', 'onnxruntime']
 
 # Exclude large/unnecessary packages that bloat the one-file EXE and can fail
 # extraction (e.g. TensorFlow's long internal paths / huge binaries).

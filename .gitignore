@@ -87,6 +87,8 @@ data/labeled/
 models/**/*.pkl
 models/*.pkl
 models/*.txt
+models/*.onnx
+models/**/*.onnx
 
 # Rust build artifacts (myproject/)
 target/
