@@ -499,8 +499,8 @@ def calculate_file_hashes(filepath):
             pe = pefile.PE(get_resource_path(os.path.join(filepath)))
             imphash = pe.get_imphash()
             pe.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.debug("PE imphash extraction failed: %s", exc)
         
         return md5.hexdigest(), sha1.hexdigest(), sha256.hexdigest(), sha512.hexdigest(), tlsh_hash, imphash
     except Exception as e:
@@ -512,14 +512,16 @@ def _tlsh_match(value, signatures):
     """Return the closest matching signature name if the TLSH distance is small."""
     try:
         import tlsh
-        for sig_hash, sig_name in signatures.items():
-            try:
-                if tlsh.diff(value, sig_hash) <= 100:
-                    return sig_name
-            except Exception:
-                continue
-    except Exception:
-        pass
+    except ImportError:
+        logging.warning("tlsh module not available; skipping TLSH matching")
+        return None
+
+    for sig_hash, sig_name in signatures.items():
+        try:
+            if tlsh.diff(value, sig_hash) <= 100:
+                return sig_name
+        except Exception as exc:
+            logging.debug("TLSH comparison failed for %s: %s", sig_name, exc)
     return None
 
 

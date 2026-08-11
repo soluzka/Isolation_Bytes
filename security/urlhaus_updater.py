@@ -75,8 +75,8 @@ def update_urlhaus_blocklists():
                 else:
                     if host not in existing_domains:
                         new_domains.append(host)
-            except Exception:
-                continue
+            except Exception as exc:
+                logging.debug("Failed to parse URLhaus entry %r: %s", raw_url, exc)
 
         if new_domains:
             with open(domain_list, 'a', encoding='utf-8') as f:
