@@ -18,6 +18,9 @@ POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
 from network_monitor import BLACKLISTED_IPS, is_blacklisted, analyze_connection_pattern
 from datetime import datetime
 
+# Base directory for writable runtime state.
+RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__)))
+
 # Ensure scan_directories.txt exists at startup
 def ensure_file_exists(filename, default_content=None):
     full_path = get_resource_path(filename)
@@ -366,7 +369,8 @@ class CustomEventHandler(FileSystemEventHandler):
         """Load malware signatures database."""
         signatures = {}
         try:
-            with open(get_resource_path('malware_signatures.json'), 'r') as f:
+            sig_path = os.path.join(RUNTIME_DIR, 'malware_signatures.json')
+            with open(sig_path, 'r') as f:
                 signatures = json.load(f)
         except Exception as e:
             logging.warning(f"No malware signatures file found: {e}")
@@ -457,7 +461,9 @@ class CustomEventHandler(FileSystemEventHandler):
     def _save_signature_database(self):
         """Save updated signature database."""
         try:
-            with open(get_resource_path('malware_signatures.json'), 'w') as f:
+            os.makedirs(RUNTIME_DIR, exist_ok=True)
+            sig_path = os.path.join(RUNTIME_DIR, 'malware_signatures.json')
+            with open(sig_path, 'w') as f:
                 json.dump(self.signature_db, f, indent=4)
             logging.info("Signature database updated successfully")
         except Exception as e:

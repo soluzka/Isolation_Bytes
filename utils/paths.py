@@ -3,14 +3,16 @@ import sys
 import logging
 
 def get_resource_path(relative_path):
-    try:
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
+    if getattr(sys, 'frozen', False):
+        # Onedir build: resources live next to the executable.
+        base_path = os.path.dirname(sys.executable)
+    else:
+        # Standalone development: project root is two levels above this file.
+        base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base_path, relative_path)
 
-# Verify malware_signatures.txt file
-malware_signatures_path = get_resource_path('malware_signatures.txt')
+# Verify malware_signatures.json file
+malware_signatures_path = get_resource_path('malware_signatures.json')
 if os.path.exists(malware_signatures_path):
     logging.info(f'Malware signatures file found: {malware_signatures_path}')
 else:

@@ -98,6 +98,12 @@ hidden_imports = [
     'security.process_monitor',
     'security.process_security',
     'security.yara_scanner',
+    'security.detector',
+    'folder_watcher',
+    'network_monitor',
+    'hash_verify',
+    'ml_security',
+    'utils.paths',
     'scan_utils',
     'quarantine_utils',
     # Shortcut creation (pywin32) dependencies for the one-file EXE
@@ -178,6 +184,12 @@ for directory in data_dirs:
             open(init_file, 'a').close()
         pyinstaller_args.append(f'--add-data={full_path}{sep}{directory}')
 
+# Add the blocklists directory used by the phishing detector/network monitor.
+blocklists_dir = os.path.join(base_dir, 'blocklists')
+if os.path.isdir(blocklists_dir):
+    pyinstaller_args.append(f'--add-data={blocklists_dir}{sep}blocklists')
+    logging.info(f'Including blocklists directory: {blocklists_dir}')
+
 # Try to detect compiled extension binaries for fuzzy and YARA libs and include them
 def add_extension_binaries(module_names):
     """Locate compiled extension module files (.pyd, .so, .dll) and add them to the bundle."""
@@ -214,9 +226,24 @@ add_extension_binaries(['pyssdeep', 'ssdeep', 'yara', 'lief', 'lightgbm', 'tlsh'
 
 # Seed the runtime signature database into the bundle so the EXE can place it in
 # its own root on first launch (it is not meant to be edited from the temp dir).
-malware_signatures_file = os.path.join(base_dir, 'malware_signatures.txt')
-if os.path.exists(malware_signatures_file):
-    pyinstaller_args.append(f'--add-data={malware_signatures_file}{sep}.')
+# Bundle both .json and .txt if they exist so the EXE can use whichever name
+# the current code expects at runtime.
+for sig_ext in ('.json', '.txt'):
+    malware_signatures_file = os.path.join(base_dir, f'malware_signatures{sig_ext}')
+    if os.path.exists(malware_signatures_file):
+        pyinstaller_args.append(f'--add-data={malware_signatures_file}{sep}.')
+        logging.info(f'Including malware signatures seed: {malware_signatures_file}')
+
+# If no .txt seed exists in the repo, generate a minimal one in the build cache
+# so the packaged app still has a starting malware_signatures.txt file.
+if not any('malware_signatures.txt' in a and '--add-data=' in a for a in pyinstaller_args):
+    txt_seed = os.path.join(base_dir, 'build', 'malware_signatures.txt')
+    os.makedirs(os.path.dirname(txt_seed), exist_ok=True)
+    with open(txt_seed, 'w', encoding='utf-8') as f:
+        f.write('# Malware signatures seed - bundled by build_config.py\n')
+        f.write('# Format: signature_name:hash_type:hash_value\n\n')
+    pyinstaller_args.append(f'--add-data={txt_seed}{sep}.')
+    logging.info(f'Generated and including minimal malware_signatures.txt seed: {txt_seed}')
 
 # Add scan_directories.txt so the EXE knows which folders to scan
 scan_directories_file = os.path.join(base_dir, 'scan_directories.txt')

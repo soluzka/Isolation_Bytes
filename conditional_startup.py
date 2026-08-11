@@ -90,9 +90,9 @@ def get_resource_path(relative_path):
     """
     Returns the absolute path to a resource, handling both normal and frozen environments (e.g., PyInstaller).
     """
-    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
-        # PyInstaller one-file extracts to a temp folder
-        base_path = sys._MEIPASS
+    if getattr(sys, 'frozen', False):
+        # PyInstaller onedir: resources live next to the executable.
+        base_path = os.path.dirname(sys.executable)
     else:
         # If running as a script
         base_path = os.path.dirname(os.path.abspath(__file__))

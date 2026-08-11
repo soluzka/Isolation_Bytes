@@ -1,4 +1,3 @@
-from utils.paths import get_resource_path
 import os
 
 import requests
@@ -9,13 +8,22 @@ try:
 except Exception:
     pass
 
-def get_basedir():
+def get_runtime_dir():
+    """Return the writable runtime directory.
+
+    In the packaged app ANTIVIRUS_RUNTIME_DIR is set by quick_start.py; fall
+    back to the project/onedir root for standalone development use.
+    """
     import sys
+    if 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
+        return os.environ['ANTIVIRUS_RUNTIME_DIR']
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-SIGNATURE_DB = os.path.join(get_basedir(), 'malware_signatures.txt')
+signature_dir = get_runtime_dir()
+os.makedirs(signature_dir, exist_ok=True)
+SIGNATURE_DB = os.path.join(signature_dir, 'malware_signatures.txt')
 MALWAREBAZAAR_API = 'https://mb-api.abuse.ch/api/v1/'
 
 def download_hashes():
@@ -43,11 +51,12 @@ def download_hashes():
 def load_local_hashes():
     if not os.path.exists(SIGNATURE_DB):
         return set()
-    with open(get_resource_path(os.path.join(SIGNATURE_DB)), 'r') as f:
+    with open(SIGNATURE_DB, 'r') as f:
         return set(line.strip() for line in f if line.strip())
 
 def save_hashes(all_hashes):
-    with open(get_resource_path(os.path.join(SIGNATURE_DB)), 'w') as f:
+    os.makedirs(os.path.dirname(SIGNATURE_DB), exist_ok=True)
+    with open(SIGNATURE_DB, 'w') as f:
         for h in sorted(all_hashes):
             f.write(h + '\n')
 

@@ -3911,8 +3911,8 @@ import sys
 
 # Ensure Flask always finds the templates folder, even in EXE or different working directory
 if getattr(sys, 'frozen', False):
-    # Running as bundled EXE
-    basedir = sys._MEIPASS
+    # Running as bundled onedir EXE
+    basedir = os.path.dirname(sys.executable)
 else:
     basedir = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, template_folder=os.path.join(basedir, 'templates'))

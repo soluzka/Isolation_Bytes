@@ -31,17 +31,31 @@ from flask import Flask, render_template, request, jsonify, redirect, url_for, s
 # fail with EnvironmentError even though the key is present in .env.
 from dotenv import load_dotenv
 
-# When running as a PyInstaller bundle, use the user's AppData\Local folder for
-# runtime files (logs, cache, quarantine) so the packaged app can write even
-# when the distribution folder lives on a read-only / OneDrive reparse point.
+# When running as a PyInstaller bundle, prefer the onedir itself so the
+# package is self-contained. If the onedir is on a read-only / OneDrive
+# reparse point, fall back to the user's AppData\Local directory.
 if getattr(sys, 'frozen', False):
-    runtime_dir = os.path.join(
-        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-        'antivirus_server'
-    )
+    onedir = os.path.dirname(sys.executable)
+    if os.access(onedir, os.W_OK):
+        runtime_dir = onedir
+    else:
+        runtime_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'antivirus_server'
+        )
     os.makedirs(runtime_dir, exist_ok=True)
     os.environ['ANTIVIRUS_RUNTIME_DIR'] = runtime_dir
     os.chdir(runtime_dir)
+
+    # Copy bundled signature seeds to the runtime directory when it is outside
+    # the onedir (e.g., a read-only/AppData fallback). When runtime == onedir,
+    # the bundled files are already in place.
+    if runtime_dir != onedir:
+        for seed in ('malware_signatures.txt', 'malware_signatures.json'):
+            src = os.path.join(onedir, seed)
+            dst = os.path.join(runtime_dir, seed)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
 
 
 def _request_admin_elevation():
