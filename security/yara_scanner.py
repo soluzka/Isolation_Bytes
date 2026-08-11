@@ -56,7 +56,12 @@ DEFINITIVE_MALWARE_KEYWORDS = (
     'emotet', 'trickbot', 'trickbot', 'dridex', 'zeus', 'qakbot', 'darkside',
     'gandcrab', 'lockbit', 'maze', 'netwalker', 'revil', 'ryuk', 'wannacry',
     'xmrig', 'agenttesla', 'redline', 'remcos', 'njrat', 'asyncrat', 'plugx',
-    'fin7', 'turla', 'carbanak', 'cobaltkitty'
+    'fin7', 'turla', 'carbanak', 'cobaltkitty',
+    # Additional families, tools, and common C2 frameworks
+    'lokibot', 'azorult', 'smokeloader', 'icedid', 'bokbot', 'vjw0rm',
+    'nanocore', 'netwire', 'formbook', 'luminositylink', 'revenge',
+    'cryptowall', 'petya', 'notpetya', 'blackcat', 'alphv',
+    'sliver', 'metasploit', 'mimikatz', 'bloodhound', 'cobaltstrike',
 )
 
 def _classify_filetype(filepath):
