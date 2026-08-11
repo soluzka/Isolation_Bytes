@@ -741,6 +741,20 @@ def run_conditional_startup_background():
             record_conditional_startup_run(error=e, duration=time.time() - start_time)
 
 
+def _ml_model_status():
+    """Return which malware-ML models are present/available."""
+    basedir = os.path.dirname(os.path.abspath(__file__))
+    models_dir = os.path.join(basedir, 'models')
+    return {
+        'bodmas_cnn': (
+            os.path.exists(os.path.join(models_dir, 'bodmas_cnn.onnx')) and
+            os.path.exists(os.path.join(models_dir, 'bodmas_cnn_scaler.pkl'))
+        ),
+        'ember': os.path.exists(os.path.join(models_dir, 'ember_malware_model.txt')),
+        'synthetic': os.path.exists(os.path.join(models_dir, 'file_malware_classifier.pkl')),
+    }
+
+
 @app.route('/api/conditional_startup/status', methods=['GET'])
 @app.route('/api/conditional_startup/refresh', methods=['POST'])
 def conditional_startup_status():
@@ -757,6 +771,7 @@ def conditional_startup_status():
         resp = dict(conditional_startup_state)
     resp['status'] = 'RUNNING' if resp.get('running') else 'IDLE'
     resp['network_monitor_running'] = bool(network_state.get('monitoring_enabled'))
+    resp['ml_models'] = _ml_model_status()
     return jsonify(resp)
 
 

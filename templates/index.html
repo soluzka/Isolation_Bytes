@@ -483,6 +483,7 @@ if (stopAutoUpdatesBtn) {
                 <div id="conditional_startup_status">
                     <p>Loading conditional startup status...</p>
                 </div>
+                <div id="ml_models_status" style="margin-top:10px;"></div>
                 <div class="button-row">
                     <button type="button" id="run_conditional_startup_panel_btn" style="background:#b36200;color:#fff;">
                         Run Conditional Startup
@@ -500,6 +501,7 @@ if (stopAutoUpdatesBtn) {
         // Conditional startup status panel inside the network monitoring card
         (function () {
             const statusDiv = document.getElementById('conditional_startup_status');
+            const mlDiv = document.getElementById('ml_models_status');
             const messageDiv = document.getElementById('conditional_startup_panel_message');
             const runBtn = document.getElementById('run_conditional_startup_panel_btn');
             const refreshBtn = document.getElementById('refresh_conditional_startup_btn');
@@ -513,9 +515,40 @@ if (stopAutoUpdatesBtn) {
                         </div>`;
             }
 
+            function renderMlModels(mlModels) {
+                if (!mlDiv || !mlModels) return;
+                mlDiv.textContent = '';
+                const heading = document.createElement('p');
+                heading.textContent = 'ML Models:';
+                heading.style.fontWeight = 'bold';
+                heading.style.marginBottom = '4px';
+                mlDiv.appendChild(heading);
+                const list = document.createElement('ul');
+                list.style.listStyle = 'none';
+                list.style.padding = '0';
+                list.style.margin = '0';
+                const names = {bodmas_cnn: 'BODMAS CNN', ember: 'EMBER', synthetic: 'Synthetic'};
+                Object.entries(mlModels).forEach(function (entry) {
+                    const [key, loaded] = entry;
+                    const li = document.createElement('li');
+                    li.style.marginBottom = '2px';
+                    const label = document.createElement('span');
+                    label.textContent = (names[key] || key) + ': ';
+                    const status = document.createElement('span');
+                    status.textContent = loaded ? 'loaded' : 'unavailable';
+                    status.style.color = loaded ? '#27ae60' : '#e74c3c';
+                    status.style.fontWeight = 'bold';
+                    li.appendChild(label);
+                    li.appendChild(status);
+                    list.appendChild(li);
+                });
+                mlDiv.appendChild(list);
+            }
+
             function renderStatus(data) {
                 if (!data.last_run && !data.running && !data.started_at) {
                     statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
+                    renderMlModels(data.ml_models);
                     return;
                 }
                 const state = data.running
@@ -544,6 +577,7 @@ if (stopAutoUpdatesBtn) {
                     html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;
                 }
                 statusDiv.innerHTML = html;
+                renderMlModels(data.ml_models);
             }
 
             function refreshStatus() {
