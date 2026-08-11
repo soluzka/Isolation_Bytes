@@ -154,3 +154,39 @@ def scan_processes_with_hardening(
         event_callback=_on_event
     )
     return results
+
+
+def scan_specific_process(pid: int, entropy_threshold: float = 7.5) -> Optional[Dict]:
+    """Scan a single process by PID: hashes, YARA, signature, memory regions."""
+    try:
+        proc = psutil.Process(pid)
+        exe = proc.exe()
+        if not exe or not os.path.isfile(exe):
+            return None
+
+        findings = []
+        yara = _yara_scan(exe)
+        if yara:
+            findings.extend(yara)
+
+        hashes = _file_hashes(exe)
+        if hashes.get('entropy', 0) > entropy_threshold:
+            findings.append(f'high entropy ({hashes["entropy"]})')
+
+        if not _is_signed_windows(exe) and not exe.startswith('C:\\Windows'):
+            findings.append('not signed')
+
+        return {
+            'pid': pid,
+            'name': proc.name(),
+            'exe': exe,
+            'hashes': hashes,
+            'yara': yara,
+            'signed': _is_signed_windows(exe),
+            'memory_regions': _memory_regions(pid),
+            'findings': findings,
+            'malware_found': bool(findings)
+        }
+    except Exception as e:
+        logging.warning(f'Could not scan process {pid}: {e}')
+        return None

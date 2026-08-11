@@ -206,6 +206,12 @@ function updateTrafficDisplay(trafficData, c2Data) {
             row.appendChild(makeC2Line('Process', conn.process + ' (PID: ' + (conn.pid || 0) + ')', null));
             row.appendChild(makeC2Line('Remote', conn.remote_ip + ':' + conn.remote_port, null));
             row.appendChild(makeC2Line('Reason', conn.reason, '#e74c3c'));
+            if (conn.process_scan) {
+                const ps = conn.process_scan;
+                const findings = ps.malware_found ? ps.findings.join('; ') : 'clean';
+                const color = ps.malware_found ? '#e74c3c' : null;
+                row.appendChild(makeC2Line('Process scan', findings, color));
+            }
             c2Wrap.appendChild(row);
         });
 

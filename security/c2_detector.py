@@ -14,6 +14,7 @@ from datetime import datetime
 import requests
 import ipaddress
 from security.network_threat_feed import NetworkThreatFeed
+from security.process_security import scan_specific_process
 
 class C2Detector:
     def __init__(self, logger=None):
@@ -138,12 +139,13 @@ class C2Detector:
         
         for conn_id, timestamps in self.connection_history.items():
             parts = conn_id.split(':')
-            if len(parts) < 4:
+            if len(parts) < 5:
                 continue
-                
+
             remote_ip = parts[0]
             remote_port = int(parts[1])
             process_name = parts[3]
+            pid = int(parts[4]) if parts[4].isdigit() else 0
             
             # Skip whitelisted items
             if remote_ip in whitelisted_ips or process_name in whitelisted_processes:
@@ -179,10 +181,12 @@ class C2Detector:
                 
                 # Only report if severity is above threshold
                 if severity >= 40:  # Medium severity or higher
+                    process_scan = scan_specific_process(pid) if pid else None
                     suspicious.append({
                         "remote_ip": remote_ip,
                         "remote_port": remote_port,
                         "process": process_name,
+                        "pid": pid,
                         "avg_interval": avg_interval,
                         "connection_count": len(timestamps),
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -194,7 +198,8 @@ class C2Detector:
                             process_name, 
                             avg_interval, 
                             std_dev
-                        )
+                        ),
+                        "process_scan": process_scan
                     })
                     
                     self.logger.warning(
@@ -354,7 +359,7 @@ class C2Detector:
                         except:
                             pass
                     
-                    connection_id = f"{remote_ip}:{remote_port}:{local_port}:{process_name}"
+                    connection_id = f"{remote_ip}:{remote_port}:{local_port}:{process_name}:{pid or 0}"
                     self.connection_history[connection_id].append(current_time)
                     
                     # Check if this is a known domain
