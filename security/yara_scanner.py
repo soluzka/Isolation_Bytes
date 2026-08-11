@@ -391,6 +391,35 @@ def scan_file_with_yara(filepath, timeout=10):
         logging.error(f"Unexpected error in YARA scan of {filepath}: {str(e)}")
         return []
 
+
+def _normalize_severity(value):
+    """Normalize a YARA metadata severity value to a lower-case string."""
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        value = value.decode('utf-8', errors='ignore')
+    return str(value).strip().lower()
+
+
+def get_match_severity(match):
+    """Return the severity string from a yara.Match object's metadata, or empty."""
+    meta = getattr(match, 'meta', {}) or {}
+    for key in ('severity', 'Severity', 'SEVERITY'):
+        if key in meta:
+            return _normalize_severity(meta[key])
+    return ''
+
+
+def has_critical_yara_match(matches):
+    """Return True if any match in the list has severity == 'critical'."""
+    if not matches:
+        return False
+    for match in matches:
+        if get_match_severity(match) == 'critical':
+            return True
+    return False
+
+
 def scan_all_folders_with_yara(monitored_folders, rules_path=None):
     """
     YARA-based scanning utilities for security module.
@@ -402,7 +431,14 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
     Returns a dictionary with scan statistics and a list of results (matches and errors).
     """
     import os
-    
+
+    # Try to import quarantine utilities so critical matches can be quarantined
+    quarantine_utils = None
+    try:
+        import quarantine_utils
+    except Exception:
+        quarantine_utils = None
+
     # Define high-risk file extensions similar to network monitor
     high_risk_extensions = [
         '.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.wsf', '.hta', 
@@ -417,6 +453,8 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         'total_high_risk_files': 0,
         'total_subdirectories': 0,
         'total_matches': 0,
+        'total_critical_matches': 0,
+        'total_quarantined': 0,
         'total_errors': 0,
         'directories': []
     }
@@ -430,6 +468,8 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
             'high_risk_files': 0,
             'subdirectory_count': 0,
             'matches': 0,
+            'critical_matches': 0,
+            'quarantined': 0,
             'errors': 0,
             'subdirectories': []  # List to store subdirectories
         }
@@ -474,9 +514,27 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
                     if matches:
                         folder_stats['matches'] += len(matches)
                         scan_stats['total_matches'] += len(matches)
+                        is_critical = has_critical_yara_match(matches)
+                        if is_critical:
+                            folder_stats['critical_matches'] += 1
+                            scan_stats['total_critical_matches'] += 1
                         for match in matches:
                             rule_name = getattr(match, 'rule', 'Unknown rule')
-                            results.append(f"YARA match ({rule_name}): {filepath}")
+                            severity = get_match_severity(match)
+                            prefix = 'CRITICAL YARA match' if severity == 'critical' else 'YARA match'
+                            results.append(f"{prefix} ({rule_name}): {filepath}")
+                        fernet_key = os.environ.get('FERNET_KEY')
+                        if is_critical and quarantine_utils and fernet_key and len(fernet_key) == 44:
+                            try:
+                                quarantine_utils.quarantine_file(filepath)
+                                folder_stats['quarantined'] += 1
+                                scan_stats['total_quarantined'] += 1
+                                results.append(f"Quarantined critical file: {filepath}")
+                            except Exception as qe:
+                                logging.warning(f"Could not quarantine critical file {filepath}: {qe}")
+                                results.append(f"Could not quarantine critical file {filepath}: {qe}")
+                        elif is_critical:
+                            results.append(f"CRITICAL match not quarantined (missing/invalid FERNET_KEY): {filepath}")
                 except Exception as e:
                     folder_stats['errors'] += 1
                     scan_stats['total_errors'] += 1

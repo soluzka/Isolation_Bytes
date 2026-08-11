@@ -233,6 +233,12 @@ if os.path.isdir(models_dir):
     pyinstaller_args.append(f'--add-data={models_dir}{sep}models')
     logging.info(f'Including models directory in build: {models_dir}')
 
+# Add the BODMAS dataset so the packaged EXE can access the raw feature vectors
+bodmas_dir = os.path.join(base_dir, 'data', 'bodmas')
+if os.path.isdir(bodmas_dir):
+    pyinstaller_args.append(f'--add-data={bodmas_dir}{sep}data\\bodmas')
+    logging.info(f'Including BODMAS data directory in build: {bodmas_dir}')
+
 # Add runtime data/config files that the app reads from the project root
 DATA_FILES = [
     '.env',

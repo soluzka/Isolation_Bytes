@@ -1454,11 +1454,17 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
             }
 
         # Try YARA scan
+        yara_result = None
         try:
             with scanner_lock:
                 yara_result = yara_scanner.scan_file_with_yara(filepath)
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
+                if yara_result and yara_scanner.has_critical_yara_match(yara_result):
+                    critical_rules = [getattr(m, 'rule', 'unknown') for m in yara_result if yara_scanner.get_match_severity(m) == 'critical']
+                    output.write(f"[CRITICAL YARA] Critical rule(s) matched for {filepath}: {', '.join(critical_rules)}. Forcing quarantine.\n")
+                    malware_found = True
+                    msg = f"Critical YARA match: {', '.join(critical_rules)}"
         except Exception as yara_exc:
             with results_lock:
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")

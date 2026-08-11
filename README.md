@@ -16,7 +16,7 @@ A Windows-first security suite with YARA malware scanning, real-time network and
 - **YARA Rule Scanning** — Signature-based detection with the rule sets in `security/yara_rules/`.
 - **Real-Time Process Monitor** — Scans running user processes, flags suspicious activity, and can terminate infected processes.
 - **Network Traffic Monitoring** — Live connection, protocol, and process statistics plus heuristic C2-pattern and DNS reputation detection.
-- **ML & Heuristic Threat Detection** — EMBER/synthetic-ML scoring and ransomware heuristic checks.
+- **ML & Heuristic Threat Detection** — EMBER, BODMAS, synthetic-ML scoring, and ransomware heuristic checks.
 - **Encrypted Quarantine** — Fernet-encrypted quarantine files with user-confirmed safe release and deletion.
 - **Folder Watching** — Tracks configured directories and performs live on-access scanning.
 - **Conditional Startup Scan** — One-click combined scan of monitored directories, running processes, and startup areas with live progress reporting.
@@ -130,6 +130,37 @@ dist\antivirus_server\
 ```
 
 `dist\ssdeep_runner.exe` is built as a sibling file for fuzzy-hash scanning.
+
+### Datasets and Models
+
+The project can be trained on several malware detection datasets:
+
+- **EMBER 2018** — `data\ember2018\ember2018\`
+  - Public PE feature dataset from Endgame.
+  - Files: `train_features_0.jsonl` .. `train_features_5.jsonl` and `test_features.jsonl`.
+  - Train the EMBER classifier with:
+    ```powershell
+    python train_ember_classifier.py --data-dir data\ember2018\ember2018
+    ```
+
+- **BODMAS** — `data\bodmas\`
+  - 134,435 Windows PE feature vectors with benign/malicious labels.
+  - Downloaded from: https://drive.google.com/drive/folders/1Uf-LebLWyi9eCv97iBal7kL1NgiGEsv_?usp=sharing
+  - The included BODMAS malware classifier is saved as `models\bodmas_malware_classifier.pkl`.
+  - It scores ~0.999 AUC and ~0.997 F1 on the BODMAS test split.
+
+- **Synthetic threat-type models** — `data\labeled\`
+  - Labeled JSON files for ~150 threat categories.
+  - Train all category models with:
+    ```powershell
+    python train_with_real_data.py
+    ```
+  - Produces `models\<threat_type>_model.pkl` for each discovered category.
+
+- **Static file malware classifier** — `train_malware_classifier.py`
+  - Trains on `data\labeled\` for adware/malware/trojan/worm.
+  - Produces `models\file_malware_classifier.pkl`.
+  - The reported score is static-only (dynamic features zeroed), giving a realistic real-world estimate.
 
 ### Running the Packaged Application
 

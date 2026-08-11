@@ -38,7 +38,10 @@ from network_api_bridge import register_network_api_bridge
 import shutil
 
 # Import YARA scanner functionality
-from security.yara_scanner import load_yara_rules, scan_file_with_yara, scan_all_folders_with_yara
+from security.yara_scanner import (
+    load_yara_rules, scan_file_with_yara, scan_all_folders_with_yara,
+    get_match_severity, has_critical_yara_match
+)
 # Import network traffic monitoring module
 from network_traffic_monitor import register_traffic_monitor_endpoints
 # Import network endpoint handler
@@ -751,11 +754,18 @@ def yara_scan():
                 for match in matches:
                     rule_name = getattr(match, 'rule', 'Unknown rule')
                     meta = getattr(match, 'meta', {})
+                    severity = get_match_severity(match)
                     results.append({
                         'rule': rule_name,
                         'description': meta.get('description', 'No description'),
+                        'severity': severity,
                         'file': file_path
                     })
+
+                critical_alert = has_critical_yara_match(matches)
+                if critical_alert:
+                    logger.warning(f"CRITICAL YARA match for {file_path}: " + 
+                                   ', '.join(r['rule'] for r in results if r.get('severity') == 'critical'))
                     
                 # If suspicious, quarantine the file
                 if results:
@@ -764,10 +774,11 @@ def yara_scan():
                         quarantine_data = {
                             'matches': [r['rule'] for r in results],
                             'descriptions': [r.get('description', '') for r in results],
+                            'severities': [r.get('severity', '') for r in results],
                             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         }
                         
-                        # Quarantine file
+                        # Quarantine file (critical or any match)
                         quarantine_suspicious_file(file_path, quarantine_data)
                     except Exception as e:
                         logger.error(f"Error quarantining file: {e}")
@@ -775,6 +786,7 @@ def yara_scan():
             return jsonify({
                 'file': file_path,
                 'matches': len(results),
+                'critical_alert': has_critical_yara_match(matches) if matches else False,
                 'scan_time': f"{scan_time:.2f}s",
                 'results': results,
                 'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')

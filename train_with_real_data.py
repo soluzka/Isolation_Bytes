@@ -165,6 +165,20 @@ class RealDataTrainer:
             logging.error(f"Error training {threat_type} models: {e}", exc_info=True)
             return False
             
+    def discover_threat_types(self):
+        """Discover all threat types present in data/labeled."""
+        data_dir = self.data_dir / 'labeled'
+        types = set()
+        for p in data_dir.glob('*.json'):
+            stem = p.stem
+            if '_extra_' in stem:
+                continue
+            if '_' not in stem:
+                continue
+            t = stem.rsplit('_', 1)[0]
+            types.add(t)
+        return sorted(types)
+
     def train_all_models(self):
         """Train all threat detection models with real data."""
         threat_types = [
@@ -244,62 +258,7 @@ if __name__ == "__main__":
     trainer.train_all_models()
     
     # Verify models were saved
-    for threat_type in [
-        'malware', 'ddos', 'exfiltration', 'lateral_movement', 'phishing',
-        'ransomware', 'insider_threat', 'cryptojacking', 'zero_day',
-        'credential_stuffing', 'sql_injection', 'xss', 'mitm', 'fileless',
-        'supply_chain', 'apt', 'rootkit', 'bootkit', 'spyware', 'adware',
-        'backdoor', 'trojan', 'worm', 'keylogger', 'botnet', 'logic_bomb',
-        'formjacking', 'crypto_mining', 'dns_tunneling', 'living_off_land',
-        'password_spraying', 'watering_hole', 'drive_by_download', 'vishing',
-        'smishing', 'social_engineering', 'spear_phishing', 'reverse_shell',
-        'memory_scraping', 'process_injection', 'dll_injection', 'shimming',
-        'pass_hash', 'golden_ticket', 'silver_ticket', 'domain_fronting',
-        'dns_cache_poisoning', 'arp_spoofing', 'session_hijacking'
-        'wifi_attack', 'firmware_attack', 'kernel_exploit', 'evil_twin',
-        'deauth_attack', 'karma_attack', 'uefi_rootkit', 'bootkit_advanced',
-        'kernel_rootkit', 'driver_manipulation',
-        # Add new threat types
-        'hardware_implant', 'cold_boot_attack', 'row_hammer',
-        'side_channel_attack', 'spectre', 'meltdown', 'bluekeep',
-        'eternalblue', 'heartbleed', 'zerologon', 'printnightmare',
-        'log4shell', 'proxylogon', 'proxyshell', 'follina',
-        'dirty_pipe', 'dirty_cow', 'thunderspy', 'plundervolt',
-        'microarchitectural_attack', 'voltage_fault_injection',
-        'electromagnetic_fault_injection', 'optical_fault_injection',
-        'acoustic_attack', 'power_analysis_attack', 'timing_attack',
-        'race_condition', 'replay_attack', 'pass_the_ticket',
-        'kerberoasting', 'dcshadow', 'dcsync', 'ntds_dumping',
-        'forced_authentication', 'usb_rubber_ducky', 'badusb',
-        'rubber_ducky_attack', 'poisoned_torrent', 'source_code_backdoor',
-        'library_poisoning', 'dependency_confusion',
-        # Add new advanced threat types
-        'air_gap_attack', 'shack_attack', 'rowhammer_attack',
-        'clkscrew', 'parametric_attack', 'template_attack',
-        'micro_probing', 'protocol_downgrade', 'clickjacking',
-        'ui_redress', 'tabnabbing', 'cookie_theft',
-        'session_fixation', 'http_response_splitting', 
-        'cache_poisoning', 'web_cache_deception',
-        'host_header_attack', 'request_smuggling',
-        'deserialization_attack', 'xml_injection',
-        'css_injection', 'csv_injection',
-        'ldap_injection', 'xpath_injection',
-        'command_injection', 'buffer_overflow',
-        'integer_overflow', 'format_string',
-        'null_pointer_deref', 'use_after_free',
-        'double_free', 'heap_spray',
-        'return_oriented_programming', 'jump_oriented_programming',
-        'sigreturn_programming', 'blind_rop',
-        'data_oriented_programming', 'control_flow_hijack',
-        'stack_clash', 'stack_pivot',
-        'return_to_libc', 'sandbox_escape',
-        'vm_escape', 'container_escape',
-        'hypervisor_attack', 'smt_attack',
-        'microcode_attack', 'bios_attack',
-        'ime_attack', 'me_attack',
-        'psp_attack', 'sgx_attack',
-        'tpm_attack', 'secure_boot_attack'
-    ]:
+    for threat_type in trainer.discover_threat_types():
         model_path = trainer.model_dir / f"{threat_type}_model.pkl"
         if model_path.exists():
             logging.info(f"Model saved: {model_path}")
