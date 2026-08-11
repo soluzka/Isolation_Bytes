@@ -31,17 +31,19 @@ ensure_file_exists(
     '# List each directory to scan, one per line.\n# Example:\nC:\\Users\\USER\\Downloads\nC:\\Users\\USER\\Desktop\n'
 )
 
-def load_scan_directories(config_path="scan_directories.txt"):
+def load_scan_directories(config_path="scan_directories.txt", auto_discover=True):
     """
-    Load directories to scan from config file and auto-discover important folders.
-    Works with any format hard drive by discovering all mounted drives.
+    Load directories to scan from config file and optionally auto-discover
+    important folders. Works with any format hard drive by discovering all
+    mounted drives when auto_discover is True.
     """
     scan_dirs = []
-    
-    # First, discover all drives and important folders
-    discovered_folders = discover_all_drives_and_important_folders()
-    scan_dirs.extend(discovered_folders)
-    
+
+    if auto_discover:
+        # First, discover all drives and important folders
+        discovered_folders = discover_all_drives_and_important_folders()
+        scan_dirs.extend(discovered_folders)
+
     # Then add custom directories from config file
     config_full_path = get_resource_path(config_path)
     if os.path.exists(config_full_path):

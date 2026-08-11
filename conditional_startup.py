@@ -1375,8 +1375,11 @@ def _get_monitored_folders(basedir, output):
     fallback_folders = [os.path.join(basedir, 'uploads'), os.path.join(basedir, 'encrypted')]
     try:
         import folder_watcher
-        # Use folder_watcher's load_scan_directories function correctly
-        monitored_folders = folder_watcher.load_scan_directories("scan_directories.txt")
+        # Use folder_watcher's load_scan_directories function correctly.
+        # Disable auto-discovery for the startup scan so it doesn't crawl
+        # every mounted drive (C:\, D:\, Program Files, etc.) before reporting
+        # progress -- that makes the Files Scanned counter stay at 0 for minutes.
+        monitored_folders = folder_watcher.load_scan_directories("scan_directories.txt", auto_discover=False)
         output.write(f"[conditional_startup] Monitored folders: {monitored_folders}\n")
         return monitored_folders
     except AttributeError:
