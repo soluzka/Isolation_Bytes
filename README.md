@@ -15,8 +15,8 @@ A Windows-first security suite with YARA malware scanning, real-time network and
 
 - **YARA Rule Scanning** — Signature-based detection with the rule sets in `security/yara_rules/`.
 - **Real-Time Process Monitor** — Scans running user processes, flags suspicious activity, and can terminate infected processes.
-- **Network Traffic Monitoring** — Live connection, protocol, and process statistics plus heuristic C2-pattern and DNS reputation detection.
-- **ML & Heuristic Threat Detection** — EMBER, BODMAS, synthetic-ML scoring, and ransomware heuristic checks.
+- **Network Traffic Monitoring** — Live connection, protocol, and process statistics plus heuristic C2-pattern and DNS reputation detection. Suspicious connections trigger an automatic scan of the owning process.
+- **ML & Heuristic Threat Detection** — EMBER, BODMAS, BODMAS 1D-CNN via ONNX Runtime, synthetic-ML scoring, and ransomware heuristic checks.
 - **Encrypted Quarantine** — Fernet-encrypted quarantine files with user-confirmed safe release and deletion.
 - **Folder Watching** — Tracks configured directories and performs live on-access scanning.
 - **Conditional Startup Scan** — One-click combined scan of monitored directories, running processes, and startup areas with live progress reporting.
@@ -148,6 +148,7 @@ The project can be trained on several malware detection datasets:
   - Downloaded from: https://drive.google.com/drive/folders/1Uf-LebLWyi9eCv97iBal7kL1NgiGEsv_?usp=sharing
   - The included BODMAS malware classifier is saved as `models\bodmas_malware_classifier.pkl`.
   - It scores ~0.999 AUC and ~0.997 F1 on the BODMAS test split.
+  - A 1D-CNN trained on BODMAS is exported to `models\bodmas_cnn.onnx` with `models\bodmas_cnn_scaler.pkl` and used via ONNX Runtime at scan time.
 
 - **Synthetic threat-type models** — `data\labeled\`
   - Labeled JSON files for ~150 threat categories.
@@ -252,7 +253,7 @@ Check that the process is gone before starting another scan.
 
 ## Conditional Startup Scan
 
-`conditional_startup.py` performs a combined startup scan. In the packaged onedir environment it uses normal package imports; in source runs it falls back to file-based loading. The result is a structured dictionary with the following keys:
+`conditional_startup.py` performs a combined startup scan. Critical YARA matches, high-confidence ML detections (BODMAS CNN / EMBER / synthetic), and ransomware heuristics are all treated as malware and quarantined automatically. In the packaged onedir environment it uses normal package imports; in source runs it falls back to file-based loading. The result is a structured dictionary with the following keys:
 
 - `scanned_files`
 - `quarantined_files`
@@ -371,8 +372,9 @@ python test_environment.py
 - Persistent scan cache with atomic save, backup, and reset logic.
 - Safe `tarfile` extraction with member validation and `filter="data"`.
 - SHA1/MD5 used with `usedforsecurity=False` for non-cryptographic file hashing.
-- Subprocess hardening with `sys.executable`, `shutil.which` resolution, and escaped paths.
-- `.snyk` exclusions for vendored `scikit-learn-main` and test files.
+- Subprocess hardening: `build_config.py` now calls PyInstaller in-process instead of `subprocess.run`.
+- ONNX Runtime inference with `models\bodmas_cnn.onnx` for a 1D-CNN trained on BODMAS PE features.
+- Static frontend JavaScript uses `document.createElement()` and `textContent` instead of HTML string sinks.
 
 ---
 
