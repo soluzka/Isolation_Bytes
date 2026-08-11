@@ -122,6 +122,7 @@ pyinstaller_args = [
     '--clean',
     '--noconfirm',
     '--log-level=DEBUG',
+    '--uac-admin',  # Request admin at launch; no Python self-restart loop
     '--noupx',
     f'--icon={icon_path}',
     '--paths', base_dir,
