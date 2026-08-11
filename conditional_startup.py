@@ -1411,12 +1411,8 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
     """Run the static-file ML classifier and the static-only ransomware
     heuristic against a file, recording any hits into results for visibility.
 
-    These are report-only (not auto-quarantined): the ML model was trained on
-    synthetic data (see train_malware_classifier.py) and the ransomware
-    heuristic is a weak, static-only proxy for behavioral indicators it can't
-    actually observe, so neither has proven real-world accuracy yet. Treating
-    a hit here the same as a YARA/signature match would risk quarantining
-    legitimate files on false positives.
+    ML and ransomware hits that exceed the configured threshold are now
+    treated like other malware detections and will be quarantined.
     """
     with results_lock:
         try:
@@ -1442,7 +1438,7 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                         ml_hit = ("synthetic", float(score))
                 if ml_hit:
                     model, score = ml_hit
-                    output.write(f"[ML/{model.upper()}] Suspicious file (not auto-quarantined): {filepath} (score: {score})\n")
+                    output.write(f"[ML/{model.upper()}] Malicious file detected: {filepath} (score: {score})\n")
                     results["ml_detections"].append({"file": filepath, "anomaly_score": score, "model": model})
 
             with scanner_lock:
@@ -1485,6 +1481,13 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
 
         _run_ml_and_ransomware_checks(filepath, results, output)
+
+        # Also quarantine if a high-confidence ML or ransomware hit was recorded.
+        with results_lock:
+            if any(d.get("file") == filepath for d in results.get("ml_detections", [])) or \
+               any(d.get("file") == filepath for d in results.get("ransomware_indicators", [])):
+                malware_found = True
+                scanned_file_status[filepath]["malware_found"] = True
 
         # Quarantine if malware found
         if malware_found:
