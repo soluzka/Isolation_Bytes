@@ -234,6 +234,7 @@ if os.path.isdir(models_dir):
 
 # Add runtime data/config files that the app reads from the project root
 DATA_FILES = [
+    '.env',
     'antivirus.db',
     'blacklist_fallback.txt',
     'blocked_ips.json',

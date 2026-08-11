@@ -74,7 +74,13 @@ def _request_admin_elevation():
 
 
 _request_admin_elevation()
-load_dotenv()
+# Load the bundled .env from the executable directory when frozen, otherwise
+# load from the current working directory (source checkout).
+if getattr(sys, 'frozen', False):
+    dotenv_path = os.path.join(os.path.dirname(sys.executable), '.env')
+else:
+    dotenv_path = '.env'
+load_dotenv(dotenv_path)
 
 # Seed the web_auth password store from the .env ADMIN_PASSWORD
 try:
