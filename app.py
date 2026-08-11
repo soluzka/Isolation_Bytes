@@ -976,8 +976,6 @@ def network():
 @login_required
 def scan():
     """Run a manual scan."""
-    from security.detector import detector
-    
     # Scan system directories
     scan_dirs = [
         os.path.join(os.environ.get('SYSTEMROOT', r'C:\Windows'), 'System32'),
@@ -995,16 +993,15 @@ def scan():
         try:
             file_path = result.split(": ", 1)[-1].strip()
             if os.path.exists(file_path):
-                # Get ML prediction
-                prediction = detector.predict([file_path])
-                anomaly_score = detector.get_anomaly_score(file_path)
-                
-                if prediction[0] == -1:  # If ML predicts malicious
+                # Get ML prediction from the best available model
+                score, model = _get_best_ml_score(file_path)
+                if score is not None and score >= 0.85:
                     results.append({
                         'file': file_path,
                         'size': os.path.getsize(file_path),
                         'ml_prediction': 'malicious',
-                        'anomaly_score': float(anomaly_score),
+                        'anomaly_score': float(score),
+                        'model': model,
                         'is_malicious': True
                     })
         except Exception as e:
@@ -1361,6 +1358,28 @@ NETWORK_RULES = {
 }
 
 # Scanning functions
+
+def _get_best_ml_score(file_path):
+    """Return a (score, model_name) tuple using the best available malware
+    detector. Tries BODMAS CNN, then EMBER, then the synthetic detector."""
+    try:
+        from security.detector import bodmas_cnn_detector, ember_detector, detector as _detector
+
+        score = bodmas_cnn_detector.score(file_path)
+        if score is not None:
+            return score, 'bodmas_cnn'
+
+        score = ember_detector.score(file_path)
+        if score is not None:
+            return score, 'ember'
+
+        pred = _detector.predict([file_path])
+        return _detector.get_anomaly_score(file_path), 'synthetic'
+    except Exception as e:
+        logger.debug(f"ML scoring failed for {file_path}: {e}")
+        return None, None
+
+
 def perform_yara_scan():
     """Perform YARA-based malware scanning with ML analysis."""
     if not YARA_RULES_FILE:
@@ -1380,28 +1399,19 @@ def perform_yara_scan():
         for result in scan_results:
             if "YARA match" in result:
                 file_path = result.split(": ", 1)[-1].strip()
-                # Extract features for ML analysis
-                features = [
-                    os.path.getsize(file_path),  # File size
-                    os.path.getmtime(file_path),  # Last modified time
-                    os.path.getctime(file_path),  # Creation time
-                    len(os.path.dirname(file_path)),  # Path length
-                    os.path.splitext(file_path)[1] in ['.exe', '.dll', '.sys']  # Binary file
-                ]
+                # Score the file with the best available ML model
+                score, model = _get_best_ml_score(file_path)
+                if score is None:
+                    continue
                 
-                # Convert to numpy array for ML model
-                features_array = np.array(features).reshape(1, -1)
-                
-                # Use ML model to analyze
-                prediction = security_model.pipeline.predict(features_array)
-                anomaly_score = security_model.pipeline.decision_function(features_array)[0]
-                
+                is_malicious = score >= 0.85
                 results.append({
                     'file': file_path,
                     'size': os.path.getsize(file_path),
-                    'ml_prediction': 'malicious' if prediction[0] == -1 else 'benign',
-                    'anomaly_score': float(anomaly_score),
-                    'is_malicious': prediction[0] == -1
+                    'ml_prediction': 'malicious' if is_malicious else 'benign',
+                    'anomaly_score': float(score),
+                    'model': model,
+                    'is_malicious': is_malicious
                 })
     except Exception as e:
         logger.error(f"Error performing YARA scan: {e}")
