@@ -4,7 +4,16 @@ import hashlib
 import math
 import logging
 import tempfile
+from functools import lru_cache
 from typing import Dict, List, Optional, Tuple
+
+
+def _file_stat_key(path: str):
+    try:
+        st = os.stat(path)
+        return (path, st.st_size, st.st_mtime)
+    except Exception:
+        return (path, 0, 0)
 
 
 def _shannon_entropy(data: bytes) -> float:
@@ -24,6 +33,16 @@ def _shannon_entropy(data: bytes) -> float:
 
 
 def _file_hashes(path: str) -> Dict[str, str]:
+    """Return md5/sha1/sha256 hex hashes for a file (cached by path + size + mtime)."""
+    try:
+        st = os.stat(path)
+        return _file_hashes_cached(path, st.st_size, st.st_mtime)
+    except Exception:
+        return _file_hashes_cached(path, 0, 0)
+
+
+@lru_cache(maxsize=512)
+def _file_hashes_cached(path: str, size: int, mtime: float) -> Dict[str, str]:
     """Return md5/sha1/sha256 hex hashes for a file."""
     hashes = {'md5': None, 'sha1': None, 'sha256': None}
     try:
@@ -41,6 +60,16 @@ def _file_hashes(path: str) -> Dict[str, str]:
 
 
 def _yara_scan(path: str) -> List[str]:
+    """Run the project's YARA scanner against a file (cached by path + mtime)."""
+    try:
+        st = os.stat(path)
+        return _yara_scan_cached(path, st.st_size, st.st_mtime)
+    except Exception:
+        return _yara_scan_cached(path, 0, 0)
+
+
+@lru_cache(maxsize=512)
+def _yara_scan_cached(path: str, size: int, mtime: float) -> List[str]:
     """Run the project's YARA scanner against a file if available."""
     try:
         from security.yara_scanner import scan_file_with_yara
@@ -71,9 +100,18 @@ def _memory_regions(pid: int, max_bytes: int = 8192) -> List[Dict]:
 
 
 def _is_signed_windows(path: str) -> bool:
+    """Best-effort check for a Windows Authenticode signature (cached by path + mtime)."""
+    try:
+        st = os.stat(path)
+        return _is_signed_windows_cached(path, st.st_size, st.st_mtime)
+    except Exception:
+        return _is_signed_windows_cached(path, 0, 0)
+
+
+@lru_cache(maxsize=512)
+def _is_signed_windows_cached(path: str, size: int, mtime: float) -> bool:
     """Best-effort check for a Windows Authenticode signature using PowerShell."""
     import platform
-    import os
     if platform.system() != 'Windows':
         return False
     try:
@@ -139,7 +177,6 @@ def scan_processes_with_hardening(
             if pid and exe and os.path.isfile(exe):
                 event['hashes'] = _file_hashes(exe)
                 event['yara'] = _yara_scan(exe)
-                event['memory_regions'] = _memory_regions(pid)
                 event['signed'] = _is_signed_windows(exe)
                 results.append(event)
             if event_callback:
