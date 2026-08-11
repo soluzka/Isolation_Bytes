@@ -30,20 +30,17 @@ YARA_LOG_MIN_SEVERITY = os.environ.get('YARA_LOG_MIN_SEVERITY', 'medium').lower(
 # Hard-coded list of noisy/broad YARA rules that are known to false-positive
 # on normal system files and common legitimate software.
 NOISY_RULE_NAMES = {
-    # Broad synthetic rules in the main yara_rules.yar / index files
+    # Broad synthetic rules in the main yara_rules.yar / index files 
     'AdvancedCodeReuseAttack', 'CustomShellcodePatterns',
-    'AntiDebugCheck', 'AntiVMCheck',
-    'Suspicious_PE_API_Imports', 'PE_Suspicious_Imports',
-    'Suspicious_Network_Connections', 'PDF_Exploit_Indicators',
-    'Dropper_Indicators', 'CryptoSignature', 'SuspiciousExecutable_Strict',
-    # Third-party rules observed false-positiving on normal Windows files
-    'Suspicious_Registry_Persistence', 'Generic_Ransomware_Indicators',
-    'China_Chopper_Webshell', 'AsyncRAT',
-    'cobalt_strike_tmp01925d3f', 'FormBook_Stealer_Strict',
-    'SideChannelAttackTools', 'UseAfterFreePattern',
-    'StackPivotDetection', 'ReturnOrientedProgramming',
-    'Office_Macro_Malware', 'Ransomware_Indicators',
-    'ProtocolManipulation', 'PoetRat_Python',
+    'AntiDebugCheck', 'AntiVMCheck', 'Suspicious_PE_API_Imports',
+    'PE_Suspicious_Imports', 'PDF_Exploit_Indicators',
+    'Dropper_Indicators',  'CryptoSignature',
+    'Suspicious_Registry_Persistence', 
+    'Generic_Ransomware_Indicators', 'China_Chopper_Webshell', 
+    'AsyncRAT', 'cobalt_strike_tmp01925d3f',
+    'FormBook_Stealer_Strict', 'SideChannelAttackTools',
+    'UseAfterFreePattern', 'ReturnOrientedProgramming',
+    'Office_Macro_Malware', 'ProtocolManipulation',
 }
 
 # Rule-name keywords that indicate a known malware family or definitive malware
@@ -62,6 +59,13 @@ DEFINITIVE_MALWARE_KEYWORDS = (
     'nanocore', 'netwire', 'formbook', 'luminositylink', 'revenge',
     'cryptowall', 'petya', 'notpetya', 'blackcat', 'alphv',
     'sliver', 'metasploit', 'mimikatz', 'bloodhound', 'cobaltstrike',
+    # More common RATs, stealers, loaders, and ransomware families
+    'darkcomet', 'plugx', 'poisonivy', 'swrort', 'terminator', 'xtremrat',
+    'cerberus', 'blackshades', 'jrat', 'qbot', 'bumblebee',
+    'amadey', 'colibri', 'danabot', 'darkgate', 'eternity', 'lu0bot',
+    'matanbuchus', 'nymaim', 'phorpiex', 'raccoon', 'recordbreaker',
+    'socgholish', 'tofsee', 'vidar', 'xworm', 'avemaria', 'hawkeye',
+    'oski', 'zeppelin', 'mars', 'cryptotec', 'medusalocker',
 )
 
 def _classify_filetype(filepath):
@@ -193,6 +197,7 @@ def load_yara_rules():
         rule SuspiciousFile {
             meta:
                 description = "Basic detection for potentially suspicious files"
+                severity = "high"
             strings:
                 $s1 = "CreateRemoteThread" nocase
                 $s2 = "VirtualAllocEx" nocase
