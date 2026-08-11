@@ -39,8 +39,21 @@ NOISY_RULE_NAMES = {
     # Third-party rules observed false-positiving on normal Windows files
     'Suspicious_Registry_Persistence', 'Generic_Ransomware_Indicators',
     'China_Chopper_Webshell', 'AsyncRAT',
-    'cobalt_strike_tmp01925d3f',
+    'cobalt_strike_tmp01925d3f', 'FormBook_Stealer_Strict',
 }
+
+# Rule-name keywords that indicate a known malware family or definitive malware
+# class.  If one of these matches a rule whose metadata severity is "high", the
+# severity is promoted to "critical" so it is treated as an automatic quarantine
+# candidate (unless it is also in NOISY_RULE_NAMES).
+DEFINITIVE_MALWARE_KEYWORDS = (
+    'malware', 'ransomware', 'trojan', 'stealer', 'backdoor', 'miner',
+    'rat', 'apt', 'webshell', 'phishing', 'rootkit', 'botnet', 'cobalt',
+    'emotet', 'trickbot', 'trickbot', 'dridex', 'zeus', 'qakbot', 'darkside',
+    'gandcrab', 'lockbit', 'maze', 'netwalker', 'revil', 'ryuk', 'wannacry',
+    'xmrig', 'agenttesla', 'redline', 'remcos', 'njrat', 'asyncrat', 'plugx',
+    'fin7', 'turla', 'carbanak', 'cobaltkitty'
+)
 
 def _classify_filetype(filepath):
     '''Best-effort filetype string for YARA external variables.
@@ -444,11 +457,24 @@ def _normalize_severity(value):
 
 
 def get_match_severity(match):
-    """Return the severity string from a yara.Match object's metadata, or empty."""
+    """Return the severity string from a yara.Match object's metadata, or empty.
+
+    High-severity matches are promoted to critical when the rule name matches a
+    known malware family, so definitive malware triggers automatic quarantine.
+    """
     meta = getattr(match, 'meta', {}) or {}
+    rule = getattr(match, 'rule', '')
+    normalized_rule = rule.lower()
     for key in ('severity', 'Severity', 'SEVERITY'):
         if key in meta:
-            return _normalize_severity(meta[key])
+            sev = _normalize_severity(meta[key])
+            if sev == 'high' and any(kw in normalized_rule for kw in DEFINITIVE_MALWARE_KEYWORDS):
+                return 'critical'
+            return sev
+    # Rules with no explicit severity but a definitive malware-family name are
+    # treated as critical so they are not ignored by the dashboard/quarantine logic.
+    if any(kw in normalized_rule for kw in DEFINITIVE_MALWARE_KEYWORDS):
+        return 'critical'
     return ''
 
 

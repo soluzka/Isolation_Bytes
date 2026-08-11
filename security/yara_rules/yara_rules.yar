@@ -457,6 +457,7 @@ rule Persistence_Autorun_Generic {
 rule Suspicious_PowerShell {
     meta:
         description = "Detects suspicious PowerShell commands"
+        severity = "high"
     strings:
         $cmd1 = "Invoke-Expression"
         $cmd2 = "IEX"
@@ -494,7 +495,7 @@ rule Ransomware_Indicators {
         $ext3 = ".crypt"
         $ext4 = ".ransom"
     condition:
-        2 of ($note*) or 2 of ($ext*)
+        (2 of ($note*) or 2 of ($ext*)) and filesize < 200KB
 }
 
 rule Packed_Executable_UPX {
@@ -615,7 +616,7 @@ rule Office_Macro_Malware {
         $wscript = "WScript.Shell"
         $createobject = "CreateObject"
     condition:
-        2 of ($*)
+        not uint16(0) == 0x5A4D and 2 of ($*) and filesize < 500KB
 }
 
 rule PE_Suspicious_Imports {

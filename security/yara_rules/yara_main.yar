@@ -146,7 +146,7 @@ rule ProtocolManipulation {
         $ssl_strip = "SSLv2" wide ascii
         $protocol_mod = { 16 03 01 }
         $handshake_mod = { 14 03 03 }
-        $cipher_downgrade = { 00 00 }
+        $cipher_downgrade = "TLS_RSA_WITH_NULL" wide ascii
         
     condition:
         all of them and filesize < 20KB
