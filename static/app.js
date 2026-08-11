@@ -30,59 +30,116 @@ $(document).ready(function() {
 
 function updateSystemStatus() {
     $.get('/status', function(data) {
-        const container = $('#system-status').empty();
+        const container = document.getElementById('system-status');
+        if (!container) return;
+        while (container.lastChild) container.removeChild(container.lastChild);
+
+        function makeIndicator(cls) {
+            const el = document.createElement('div');
+            el.className = 'status-indicator ' + cls;
+            return el;
+        }
+
         const rtClass = data.realtime_protection ? 'status-ok' : 'status-error';
         const rtText = data.realtime_protection ? 'Enabled' : 'Disabled';
-        container
-            .append($('<div>').addClass('status-indicator ' + rtClass))
-            .append(document.createTextNode(' Real-time protection: ' + rtText))
-            .append($('<br>'))
-            .append($('<div>').addClass('status-indicator status-ok'))
-            .append(document.createTextNode(' Network Monitor: ' + (data.network_monitor ? 'Enabled' : 'Disabled')))
-            .append($('<br>'))
-            .append($('<div>').addClass('status-indicator status-ok'))
-            .append(document.createTextNode(' Safe Downloader: ' + (data.safe_downloader ? 'Enabled' : 'Disabled')));
+
+        container.appendChild(makeIndicator(rtClass));
+        container.appendChild(document.createTextNode(' Real-time protection: ' + rtText));
+        container.appendChild(document.createElement('br'));
+        container.appendChild(makeIndicator('status-ok'));
+        container.appendChild(document.createTextNode(' Network Monitor: ' + (data.network_monitor ? 'Enabled' : 'Disabled')));
+        container.appendChild(document.createElement('br'));
+        container.appendChild(makeIndicator('status-ok'));
+        container.appendChild(document.createTextNode(' Safe Downloader: ' + (data.safe_downloader ? 'Enabled' : 'Disabled')));
     }).fail(function() {
-        $('#system-status').empty()
-            .append($('<div>').addClass('status-indicator status-error'))
-            .append(document.createTextNode(' Failed to load status'));
+        const container = document.getElementById('system-status');
+        if (container) {
+            while (container.lastChild) container.removeChild(container.lastChild);
+            const el = document.createElement('div');
+            el.className = 'status-indicator status-error';
+            container.appendChild(el);
+            container.appendChild(document.createTextNode(' Failed to load status'));
+        }
     });
 }
 
 function updateThreatDetection() {
     $.get('/threats', function(data) {
-        const container = $('#threat-detection').empty();
+        const container = document.getElementById('threat-detection');
+        if (!container) return;
+        while (container.lastChild) container.removeChild(container.lastChild);
+
         if (data.threats.length > 0) {
-            container.append($('<div>').addClass('alert alert-warning').text('Detected Threats:'));
+            const title = document.createElement('div');
+            title.className = 'alert alert-warning';
+            title.textContent = 'Detected Threats:';
+            container.appendChild(title);
+
             data.threats.forEach(threat => {
-                const div = $('<div>').addClass('alert alert-info');
-                div.append($('<strong>').text(threat.type))
-                   .append(document.createTextNode(' detected in '))
-                   .append($('<strong>').text(threat.location));
-                const btn = $('<button>')
-                    .addClass('btn btn-sm btn-danger float-end quarantine-btn')
-                    .attr('data-id', String(threat.id))
-                    .attr('data-type', threat.type)
-                    .text('Quarantine');
-                div.append(btn);
-                container.append(div);
+                const div = document.createElement('div');
+                div.className = 'alert alert-info';
+
+                const strongType = document.createElement('strong');
+                strongType.textContent = threat.type;
+                div.appendChild(strongType);
+                div.appendChild(document.createTextNode(' detected in '));
+                const strongLoc = document.createElement('strong');
+                strongLoc.textContent = threat.location;
+                div.appendChild(strongLoc);
+
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-sm btn-danger float-end quarantine-btn';
+                btn.setAttribute('data-id', String(threat.id));
+                btn.setAttribute('data-type', threat.type);
+                btn.textContent = 'Quarantine';
+                div.appendChild(btn);
+
+                container.appendChild(div);
             });
         } else {
-            container.append($('<div>').addClass('alert alert-success').text('No threats detected'));
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-success';
+            alert.textContent = 'No threats detected';
+            container.appendChild(alert);
         }
     }).fail(function() {
-        $('#threat-detection').empty().append($('<div>').addClass('alert alert-danger').text('Failed to load threat detection status'));
+        const container = document.getElementById('threat-detection');
+        if (container) {
+            while (container.lastChild) container.removeChild(container.lastChild);
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = 'Failed to load threat detection status';
+            container.appendChild(alert);
+        }
     });
 }
 
 function updateNetworkMonitor() {
     $.get('/network', function(data) {
-        const container = $('#network-monitor').empty();
-        container.append($('<div>').text('Active Connections: ' + String(data.active_connections)));
-        container.append($('<div>').text('Data Rate: ' + String(data.data_rate) + ' KB/s'));
-        container.append($('<div>').text('Packet Rate: ' + String(data.packet_rate) + ' pps'));
+        const container = document.getElementById('network-monitor');
+        if (!container) return;
+        while (container.lastChild) container.removeChild(container.lastChild);
+
+        const conn = document.createElement('div');
+        conn.textContent = 'Active Connections: ' + String(data.active_connections);
+        container.appendChild(conn);
+
+        const rate = document.createElement('div');
+        rate.textContent = 'Data Rate: ' + String(data.data_rate) + ' KB/s';
+        container.appendChild(rate);
+
+        const packet = document.createElement('div');
+        packet.textContent = 'Packet Rate: ' + String(data.packet_rate) + ' pps';
+        container.appendChild(packet);
     }).fail(function() {
-        $('#network-monitor').empty().append($('<div>').addClass('alert alert-danger').text('Failed to load network status'));
+        const container = document.getElementById('network-monitor');
+        if (container) {
+            while (container.lastChild) container.removeChild(container.lastChild);
+            const alert = document.createElement('div');
+            alert.className = 'alert alert-danger';
+            alert.textContent = 'Failed to load network status';
+            container.appendChild(alert);
+        }
     });
 }
 
