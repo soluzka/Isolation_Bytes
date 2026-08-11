@@ -318,6 +318,17 @@ def scan_file_with_yara(filepath, timeout=10):
     if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico'}:
         return []
 
+    # Skip log, event, and crash files that are not useful for YARA malware matching
+    if ext in {'.log', '.evtx', '.evt', '.etl', '.dmp', '.mdmp', '.wer', '.cab'}:
+        logging.debug(f"Skipping non-malware log/crash file: {filepath}")
+        return []
+
+    # Skip common Windows log/crash directories (Panther, Logs, Minidump, etc.)
+    lower_path = filepath.lower()
+    if any(skip in lower_path for skip in {'\\logs\\', '\\panther\\', '\\minidump', '\\crashdumps', '\\diagtrack'}):
+        logging.debug(f"Skipping log/crash directory file: {filepath}")
+        return []
+
     # Load the YARA rules
     try:
         rules = load_yara_rules()
