@@ -445,6 +445,7 @@ conditional_startup_state = {
     'ml_detections': 0,        # Files flagged by the static-file ML classifier (report-only, not quarantined)
     'ransomware_indicators': 0,  # Files flagged by the static ransomware heuristic (report-only, not quarantined)
     'persistence_indicators': 0,  # Processes/autostart entries in unusual locations (report-only, not quarantined)
+    'yara_suspicious': 0,  # High/critical YARA matches for review (not auto-quarantined)
     'last_error': None
 }
 conditional_startup_lock = threading.Lock()
@@ -579,7 +580,7 @@ def _perform_scan_all():
 
                             should_quarantine = False
                             if ml_score is not None:
-                                if ember_detector.available and ml_score >= 0.65:
+                                if ember_detector.available and ml_score >= 0.60:
                                     should_quarantine = True
                                     cache_entry['quarantine_reason'] = 'ember'
                                 elif not ember_detector.available and ml_score >= 0.5:
@@ -695,6 +696,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'ml_detections': len(scan_data.get('ml_detections', [])),
         'ransomware_indicators': len(scan_data.get('ransomware_indicators', [])),
         'persistence_indicators': _count_persistence_indicators(scan_data),
+        'yara_suspicious': len(scan_data.get('yara_suspicious', [])),
         'last_error': str(error) if error else last_internal
     })
 
@@ -729,6 +731,7 @@ def run_conditional_startup_background():
                 'ml_detections': len(partial_results.get('ml_detections', [])),
                 'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
                 'persistence_indicators': _count_persistence_indicators(partial_results),
+                'yara_suspicious': len(partial_results.get('yara_suspicious', [])),
             })
 
     with conditional_startup_lock:
@@ -743,6 +746,7 @@ def run_conditional_startup_background():
             'ml_detections': 0,
             'ransomware_indicators': 0,
             'persistence_indicators': 0,
+            'yara_suspicious': 0,
             'duration': None,
             'last_error': None,
         })
@@ -820,6 +824,7 @@ def run_startup():
                 'ml_detections': 0,
                 'ransomware_indicators': 0,
                 'persistence_indicators': 0,
+                'yara_suspicious': 0,
                 'duration': None,
                 'last_error': None,
             })
@@ -2368,7 +2373,7 @@ def run_scheduled_scans():
                                 # (e.g. libcef.dll).
                                 should_quarantine = False
                                 if ml_score is not None:
-                                    if ember_detector.available and ml_score >= 0.65:
+                                    if ember_detector.available and ml_score >= 0.60:
                                         should_quarantine = True
                                         cache_entry['quarantine_reason'] = 'ember'
                                     elif not ember_detector.available and ml_score >= 0.5:

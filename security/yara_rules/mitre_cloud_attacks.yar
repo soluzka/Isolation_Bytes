@@ -11,7 +11,7 @@ rule CloudCredentialAccess {
         $kubectl_config = ".kube/config" wide ascii
         
     condition:
-        any of them
+        2 of them
 }
 
 rule ContainerEscape {
@@ -27,7 +27,7 @@ rule ContainerEscape {
         $cgroup_release = "notify_on_release" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudPersistence {
@@ -43,7 +43,7 @@ rule CloudPersistence {
         $webhook_create = "MutatingWebhookConfiguration" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule KubernetesAttack {
@@ -59,7 +59,7 @@ rule KubernetesAttack {
         $etcd_access = "etcdctl" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudDataExfil {
@@ -75,7 +75,7 @@ rule CloudDataExfil {
         $rclone_sync = "rclone sync" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ServerlessAttack {
@@ -91,7 +91,7 @@ rule ServerlessAttack {
         $event_injection = "event.body" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudConfigTampering {
@@ -107,7 +107,7 @@ rule CloudConfigTampering {
         $helm_tiller = "tiller" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ServiceMeshAttack {
@@ -123,7 +123,7 @@ rule ServiceMeshAttack {
         $mesh_routing = "VirtualService" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudAPIAbuse {
@@ -139,7 +139,7 @@ rule CloudAPIAbuse {
         $gcp_metadata = "metadata.google.internal" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudSupplyChain {
@@ -155,7 +155,7 @@ rule CloudSupplyChain {
         $image_backdoor = "FROM" wide ascii nocase
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule CloudRansomware {
@@ -171,7 +171,7 @@ rule CloudRansomware {
         $backup_delete = "DeleteBackup" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ServiceAccountAbuse {
@@ -187,5 +187,5 @@ rule ServiceAccountAbuse {
         $sa_impersonation = "as=system:serviceaccount" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }

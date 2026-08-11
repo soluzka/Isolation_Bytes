@@ -11,7 +11,7 @@ rule MetaverseExploitation {
         $spatial_hack = "SpatialAnchor" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule NeuroTechnologyAttack {
@@ -27,7 +27,7 @@ rule NeuroTechnologyAttack {
         $mind_bridge = "CortexBridge" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule QuantumComputingAttack {
@@ -43,7 +43,7 @@ rule QuantumComputingAttack {
         $qkd_breach = "QuantumKey" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule BiocomputingExploit {
@@ -59,7 +59,7 @@ rule BiocomputingExploit {
         $molecular_hack = "MolecularCompute" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule SmartDustAttack {
@@ -75,7 +75,7 @@ rule SmartDustAttack {
         $particle_exploit = "SmartParticle" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule HolographicAttack {
@@ -91,7 +91,7 @@ rule HolographicAttack {
         $wavefront_manip = "LightField" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule NeuromorphicExploit {
@@ -107,7 +107,7 @@ rule NeuromorphicExploit {
         $plasticity_exploit = "NeuroplasticityMod" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule OpticalComputingAttack {
@@ -123,7 +123,7 @@ rule OpticalComputingAttack {
         $interferometer = "OpticalInterference" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule SpintronicsAttack {
@@ -139,7 +139,7 @@ rule SpintronicsAttack {
         $magnon_manip = "SpinWave" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule MolecularComputingExploit {
@@ -155,5 +155,5 @@ rule MolecularComputingExploit {
         $protein_bypass = "MolecularAssembly" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }

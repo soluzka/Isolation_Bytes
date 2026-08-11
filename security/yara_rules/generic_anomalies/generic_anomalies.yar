@@ -39,5 +39,5 @@ rule EntropyAnomaly {
         description = "Detects files with unusually high entropy (potential encryption/packing)"
         author = "CascadeAI"
     condition:
-        math.entropy(0, filesize) > 7.0
+        math.entropy(0, filesize) > 7.8 and filesize > 1KB
 }

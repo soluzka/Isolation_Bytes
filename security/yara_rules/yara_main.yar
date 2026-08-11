@@ -12,7 +12,7 @@ rule AirGapAttackIndicators {
         $modulation = { 68 ?? ?? ?? ?? 6A ?? FF 15 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule ShackAttackIndicators {
@@ -28,7 +28,7 @@ rule ShackAttackIndicators {
         $hw_access = { 0F 3F ?? ?? }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedCodeReuseAttack {
@@ -43,7 +43,7 @@ rule AdvancedCodeReuseAttack {
         $ret2libc = "system" wide ascii
         
     condition:
-        2 of them
+        2 of them and $ret2libc and filesize < 20KB
 }
 
 rule HardwareSecurityBypass {
@@ -58,7 +58,7 @@ rule HardwareSecurityBypass {
         $secure_boot = { 48 83 EC ?? 48 8B 05 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule SideChannelAttackTools {
@@ -74,7 +74,7 @@ rule SideChannelAttackTools {
         $rdtsc = { 0F 31 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule VirtualizationEscape {
@@ -89,7 +89,7 @@ rule VirtualizationEscape {
         $namespace = "unshare" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule InjectionTechniques {
@@ -104,7 +104,7 @@ rule InjectionTechniques {
         $mem_write = "WriteProcessMemory" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule FirmwareManipulation {
@@ -119,7 +119,7 @@ rule FirmwareManipulation {
         $acpi_table = "RSDT" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedPersistence {
@@ -134,7 +134,7 @@ rule AdvancedPersistence {
         $startup_persist = "Startup" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule ProtocolManipulation {
@@ -149,7 +149,7 @@ rule ProtocolManipulation {
         $cipher_downgrade = { 00 00 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedMemoryCorruption {
@@ -165,7 +165,7 @@ rule AdvancedMemoryCorruption {
         $memory_write = { 89 ?? ?? ?? C7 45 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule CustomShellcodePatterns {
@@ -180,7 +180,7 @@ rule CustomShellcodePatterns {
         $stack_align = { 83 EC ?? 81 EC }
         
     condition:
-        any of them
+        2 of them
 }
 
 rule AdvancedAntiAnalysis {
@@ -195,7 +195,7 @@ rule AdvancedAntiAnalysis {
         $sandbox_check = "wine_get_unix_file_name"
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule KernelModeExploit {
@@ -210,7 +210,7 @@ rule KernelModeExploit {
         $cr4_write = { 0F 22 E0 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedRootkit {
@@ -225,7 +225,7 @@ rule AdvancedRootkit {
         $object_hook = { 48 8D 0D ?? ?? ?? ?? E8 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule HardwareManipulation {
@@ -240,7 +240,7 @@ rule HardwareManipulation {
         $acpi_mod = "SSDT" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule BootkitTechniques {
@@ -255,7 +255,7 @@ rule BootkitTechniques {
         $uefi_runtime = "EFI_RUNTIME_SERVICES" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule CovertChannels {
@@ -270,7 +270,7 @@ rule CovertChannels {
         $storage_channel = { 48 8D 15 ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule SupplyChainAttack {
@@ -285,7 +285,7 @@ rule SupplyChainAttack {
         $malicious_dependency = "node_modules" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule ProcessInjectionAdvanced {
@@ -300,7 +300,7 @@ rule ProcessInjectionAdvanced {
         $thread_hijack = "SetThreadContext" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule FirmwareRootkit {
@@ -315,7 +315,7 @@ rule FirmwareRootkit {
         $acpi_hijack = "FACP" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedHypervisorAttack {
@@ -331,7 +331,7 @@ rule AdvancedHypervisorAttack {
         $vmptrld = { 0F C7 ?? }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule TrustedExecutionBypass {
@@ -346,7 +346,7 @@ rule TrustedExecutionBypass {
         $attestation = "sgx_get_report" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedFirmwareAttack {
@@ -361,7 +361,7 @@ rule AdvancedFirmwareAttack {
         $pci_config = { BA F8 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule QuantumChannelAttack {
@@ -376,7 +376,7 @@ rule QuantumChannelAttack {
         $quantum_pattern = { 48 89 E5 41 57 41 56 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AISpoofingAttack {
@@ -391,7 +391,7 @@ rule AISpoofingAttack {
         $tensor_manipulation = "torch.tensor" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule EdgeComputingAttack {
@@ -406,7 +406,7 @@ rule EdgeComputingAttack {
         $gateway_manipulation = "gateway.settings" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule IoTBotnetC2 {
@@ -421,7 +421,7 @@ rule IoTBotnetC2 {
         $zigbee_control = { A1 ?? ?? ?? ?? 85 C0 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedSwarmAttack {
@@ -436,7 +436,7 @@ rule AdvancedSwarmAttack {
         $distributed_exec = { 55 48 89 E5 41 57 41 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule BionicSecurityBypass {
@@ -451,7 +451,7 @@ rule BionicSecurityBypass {
         $implant_manipulation = "neural.bridge" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule QuantumResistanceAttack {
@@ -466,5 +466,5 @@ rule QuantumResistanceAttack {
         $quantum_oracle = { 48 8D 0D ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }

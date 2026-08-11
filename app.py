@@ -995,7 +995,7 @@ def scan():
             if os.path.exists(file_path):
                 # Get ML prediction from the best available model
                 score, model = _get_best_ml_score(file_path)
-                if score is not None and score >= 0.65:
+                if score is not None and score >= 0.60:
                     results.append({
                         'file': file_path,
                         'size': os.path.getsize(file_path),
@@ -1404,7 +1404,7 @@ def perform_yara_scan():
                 if score is None:
                     continue
                 
-                is_malicious = score >= 0.65
+                is_malicious = score >= 0.60
                 results.append({
                     'file': file_path,
                     'size': os.path.getsize(file_path),
@@ -2043,6 +2043,7 @@ conditional_startup_state = {
     'ml_detections': 0,
     'ransomware_indicators': 0,
     'persistence_indicators': 0,
+    'yara_suspicious': 0,
     'last_error': None,
 }
 
@@ -2083,6 +2084,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'ml_detections': count('ml_detections'),
         'ransomware_indicators': count('ransomware_indicators'),
         'persistence_indicators': persistence_count,
+        'yara_suspicious': count('yara_suspicious'),
         'last_error': str(error) if error else None,
     })
     return conditional_startup_state

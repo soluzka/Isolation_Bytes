@@ -572,6 +572,7 @@ if (stopAutoUpdatesBtn) {
                         ${tile(data.ml_detections || 0, 'ML Suspicious', true)}
                         ${tile(data.ransomware_indicators || 0, 'Ransomware Indicators', true)}
                         ${tile(data.persistence_indicators || 0, 'Persistence Indicators', true)}
+                        ${tile(data.yara_suspicious || 0, 'YARA Suspicious', true)}
                     </div>`;
                 if (data.last_error) {
                     html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;

@@ -32,7 +32,7 @@ rule SuspiciousFile {
         $s6 = "inject" nocase
     
     condition:
-        2 of them
+        3 of them
 }
 
 rule AntiDebugCheck {
@@ -47,7 +47,7 @@ rule AntiDebugCheck {
         $a3 = "OutputDebugString" nocase
     
     condition:
-        any of them
+        2 of them
 }
 
 rule AntiVMCheck {
@@ -62,5 +62,5 @@ rule AntiVMCheck {
         $vm3 = "qemu" nocase
     
     condition:
-        any of them
+        2 of them
 }

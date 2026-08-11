@@ -25,7 +25,7 @@ def test_yara_rules():
 
 def test_file_scanning():
     """Test scanning a specific file with YARA"""
-    test_file = os.path.abspath(__file__)  # Use this script as a test file
+    test_file = os.environ.get('YARA_TEST_FILE', os.path.abspath(__file__))
     logger.info(f"Testing YARA file scanning on: {test_file}")
     
     matches = scan_file_with_yara(test_file)
@@ -39,8 +39,8 @@ def test_file_scanning():
     return True
 
 def test_folder_scanning():
-    """Test scanning a folder with YARA"""
-    test_folder = os.path.dirname(os.path.abspath(__file__))
+    """Test scanning a folder with YARA for false positives."""
+    test_folder = os.environ.get('YARA_TEST_FOLDER', r'C:\Windows\System32')
     logger.info(f"Testing YARA folder scanning on: {test_folder}")
     
     results = scan_all_folders_with_yara([test_folder])

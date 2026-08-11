@@ -10,7 +10,7 @@ rule ServerlessAttackPattern {
         $event_poison = { 22 65 76 65 6E 74 22 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule K8sClusterAttack {
@@ -25,7 +25,7 @@ rule K8sClusterAttack {
         $kube_inject = "kubectl exec" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ServiceMeshExploit {
@@ -40,7 +40,7 @@ rule ServiceMeshExploit {
         $policy_bypass = "AuthorizationPolicy" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule DevOpsToolchainAttack {
@@ -55,7 +55,7 @@ rule DevOpsToolchainAttack {
         $build_compromise = "docker build" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule MicroservicesAttack {
@@ -70,7 +70,7 @@ rule MicroservicesAttack {
         $mesh_exploit = { 48 8B 45 ?? 48 8D 15 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ApiGatewayBypass {
@@ -85,7 +85,7 @@ rule ApiGatewayBypass {
         $gateway_inject = { 48 89 E5 41 57 41 56 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule GraphQLInjection {
@@ -100,7 +100,7 @@ rule GraphQLInjection {
         $directive_inject = "@include" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule EventStreamingAttack {
@@ -115,7 +115,7 @@ rule EventStreamingAttack {
         $event_inject = { 48 8D 0D ?? ?? ?? ?? E8 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule EdgeComputingExploit {
@@ -130,7 +130,7 @@ rule EdgeComputingExploit {
         $edge_inject = { 48 89 E5 41 56 41 55 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule InfraAsCodeAttack {
@@ -145,7 +145,7 @@ rule InfraAsCodeAttack {
         $pulumi_attack = "pulumi.runtime" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule ZeroTrustBypass {
@@ -160,7 +160,7 @@ rule ZeroTrustBypass {
         $context_spoof = { 48 8B 45 ?? 48 89 45 ?? }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule BlockchainNodeAttack {
@@ -175,7 +175,7 @@ rule BlockchainNodeAttack {
         $wallet_attack = "wallet.sign" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule MLModelAttack {
@@ -190,7 +190,7 @@ rule MLModelAttack {
         $gradient_hack = "optimizer.step" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule QuantumComputeAttack {
@@ -205,5 +205,5 @@ rule QuantumComputeAttack {
         $entangle_hack = "entangle(" wide ascii
         
     condition:
-        2 of them
+        3 of them
 }

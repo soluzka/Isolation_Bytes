@@ -23,6 +23,25 @@ _YARA_EXTERNALS_DEFAULTS = {
     'filetype': '',
 }
 
+# Minimum YARA match severity to log. Defaults to 'medium' to reduce noise.
+# Can be overridden with the YARA_LOG_MIN_SEVERITY environment variable.
+YARA_LOG_MIN_SEVERITY = os.environ.get('YARA_LOG_MIN_SEVERITY', 'medium').lower().strip()
+
+# Hard-coded list of noisy/broad YARA rules that are known to false-positive
+# on normal system files and common legitimate software.
+NOISY_RULE_NAMES = {
+    # Broad synthetic rules in the main yara_rules.yar / index files
+    'AdvancedCodeReuseAttack', 'CustomShellcodePatterns',
+    'AntiDebugCheck', 'AntiVMCheck',
+    'Suspicious_PE_API_Imports', 'PE_Suspicious_Imports',
+    'Suspicious_Network_Connections', 'PDF_Exploit_Indicators',
+    'Dropper_Indicators', 'CryptoSignature', 'SuspiciousExecutable_Strict',
+    # Third-party rules observed false-positiving on normal Windows files
+    'Suspicious_Registry_Persistence', 'Generic_Ransomware_Indicators',
+    'China_Chopper_Webshell', 'AsyncRAT',
+    'cobalt_strike_tmp01925d3f',
+}
+
 def _classify_filetype(filepath):
     '''Best-effort filetype string for YARA external variables.
 
@@ -221,7 +240,8 @@ def load_yara_rules():
         failed_rules = []
         successful_rules = []
         
-        # Compile each rule file individually
+        # Compile each rule file individually, using the source filename as the
+        # rule namespace so matches can be grouped by rule family later.
         for rule_path in rule_files:
             file_name = os.path.basename(rule_path)
             try:
@@ -242,8 +262,8 @@ def load_yara_rules():
                     # extension/filename/filepath/filetype conditions) reference but that
                     # aren't YARA builtins -- the real per-file values are supplied at match
                     # time in scan_file_with_yara(); these defaults just let them compile.
-                    rule = yara_module.compile(filepath=rule_path, includes=True, error_on_warning=False,
-                                                externals=_YARA_EXTERNALS_DEFAULTS)
+                    rule = yara_module.compile(filepaths={file_name: rule_path}, includes=True,
+                                                error_on_warning=False, externals=_YARA_EXTERNALS_DEFAULTS)
                     compiled_rules.append(rule)
                     successful_rules.append(file_name)
                     logging.info(f"Successfully loaded YARA rule: {file_name}")
@@ -251,8 +271,8 @@ def load_yara_rules():
                     # If includes fail, try again without them as a fallback
                     logging.warning(f"Failed to load YARA rule with includes, trying without: {file_name}. Error: {include_error}")
                     try:
-                        rule = yara_module.compile(filepath=rule_path, includes=False, error_on_warning=False,
-                                                    externals=_YARA_EXTERNALS_DEFAULTS)
+                        rule = yara_module.compile(filepaths={file_name: rule_path}, includes=False,
+                                                    error_on_warning=False, externals=_YARA_EXTERNALS_DEFAULTS)
                         compiled_rules.append(rule)
                         successful_rules.append(file_name)
                         logging.info(f"Successfully loaded YARA rule (without includes): {file_name}")
@@ -373,9 +393,16 @@ def scan_file_with_yara(filepath, timeout=10):
                 
                 # Process any matches found
                 if matches:
+                    # Hard-coded suppression of known noisy/broad rules.
+                    matches = [m for m in matches if getattr(m, 'rule', '') not in NOISY_RULE_NAMES]
+                    if not matches:
+                        continue
                     all_matches.extend(matches)
                     rule_names = [getattr(m, 'rule', f'Rule-{rule_index}') for m in matches]
-                    logging.warning(f"YARA match in {filepath}: {', '.join(rule_names)}")
+                    # Only log this rule if its highest severity meets the configured threshold.
+                    rule_highest = get_highest_severity(matches)
+                    if _rank_of(rule_highest) >= _rank_of(YARA_LOG_MIN_SEVERITY):
+                        logging.warning(f"{rule_highest.upper() if rule_highest else 'YARA'} match in {filepath}: {', '.join(rule_names)}")
             except YaraError as ye:
                 if 'timeout' in str(ye).lower():
                     timeouts += 1
@@ -389,10 +416,14 @@ def scan_file_with_yara(filepath, timeout=10):
                 logging.error(f"Error applying YARA rule to {filepath}: {str(e)}")
                 continue
         
-        # Log scan summary
+        # Log scan summary, but only if any match reaches the configured threshold.
         scan_time = time.time() - scan_start
         if all_matches:
-            logging.warning(f"Found {len(all_matches)} YARA matches in {filepath} (scan time: {scan_time:.2f}s)")
+            highest = get_highest_severity(all_matches)
+            if _rank_of(highest) >= _rank_of(YARA_LOG_MIN_SEVERITY):
+                logging.warning(f"Found {len(all_matches)} YARA matches in {filepath} (highest: {highest}, scan time: {scan_time:.2f}s)")
+            else:
+                logging.debug(f"Found {len(all_matches)} low-severity YARA matches in {filepath} (scan time: {scan_time:.2f}s)")
         else:
             logging.info(f"No YARA matches in {filepath} (scan time: {scan_time:.2f}s, timeouts: {timeouts}, errors: {errors})")
             

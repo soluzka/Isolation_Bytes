@@ -10,7 +10,7 @@ rule HeapSprayPattern {
         $large_alloc = { 68 00 00 10 00 }  // PUSH 0x100000
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule StackPivotDetection {
@@ -25,7 +25,7 @@ rule StackPivotDetection {
         $add_esp = { 83 C4 }     // ADD ESP,imm8
         
     condition:
-        2 of them
+        all of them and filesize < 20KB and filesize < 20KB
 }
 
 rule MemoryDisclosure {
@@ -40,7 +40,7 @@ rule MemoryDisclosure {
         $heap_walk = "HeapWalk" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule UseAfterFreePattern {
@@ -55,7 +55,7 @@ rule UseAfterFreePattern {
         $realloc_pattern = "HeapReAlloc" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule KernelPoolOverflow {
@@ -70,7 +70,7 @@ rule KernelPoolOverflow {
         $pool_spray = { B9 ?? ?? 00 00 F3 }  // MOV ECX, X; REP
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule ReturnOrientedProgramming {
@@ -85,7 +85,7 @@ rule ReturnOrientedProgramming {
         $move_esp = { 8B ?? 24 ?? ?? ?? ?? C3 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB and filesize < 20KB
 }
 
 rule HeapFungibility {
@@ -100,7 +100,7 @@ rule HeapFungibility {
         $heap_cookie = { 8B 4D FC 33 4D F8 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule StackCookieBypasses {
@@ -115,7 +115,7 @@ rule StackCookieBypasses {
         $exception_handler = "SetUnhandledExceptionFilter" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule PageTableManipulation {
@@ -130,7 +130,7 @@ rule PageTableManipulation {
         $page_fault = { CD 0E }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule MemoryMappingExploit {
@@ -145,7 +145,7 @@ rule MemoryMappingExploit {
         $mem_device = "\\\\.\\MemoryDevice" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule AdvancedHeapExploit {
@@ -160,7 +160,7 @@ rule AdvancedHeapExploit {
         $house_of_force = { 8B 15 ?? ?? ?? ?? 81 C2 }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule KernelMemoryDisclosure {
@@ -175,7 +175,7 @@ rule KernelMemoryDisclosure {
         $probe_read = { 0F B6 ?? ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule ThreadContextManipulation {
@@ -190,7 +190,7 @@ rule ThreadContextManipulation {
         $resume_thread = "ResumeThread" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule StackCanaryBypass {
@@ -205,7 +205,7 @@ rule StackCanaryBypass {
         $fail_handler = "__security_check_fail" wide ascii
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }
 
 rule MemoryDebuggingAbuse {
@@ -220,5 +220,5 @@ rule MemoryDebuggingAbuse {
         $memory_bp = { 0F 0B }  // UD2 instruction
         
     condition:
-        2 of them
+        all of them and filesize < 20KB
 }

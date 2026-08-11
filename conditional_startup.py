@@ -189,7 +189,7 @@ def routine_maintenance_and_system_recovery():
                                 # (+1/-1 outlier labels) correctly.
                                 if bodmas_cnn_detector.available:
                                     score = bodmas_cnn_detector.score(filepath)
-                                    if score is not None and score >= 0.65:
+                                    if score is not None and score >= 0.60:
                                         recovery_results["ml_scans"].append({
                                             "file": filepath,
                                             "prediction": "malicious",
@@ -200,7 +200,7 @@ def routine_maintenance_and_system_recovery():
                                         output.write(f"[ML/BODMAS-CNN] Malicious file detected: {filepath} (score: {score:.3f})\n")
                                 elif ember_detector.available:
                                     score = ember_detector.score(filepath)
-                                    if score is not None and score >= 0.65:
+                                    if score is not None and score >= 0.60:
                                         recovery_results["ml_scans"].append({
                                             "file": filepath,
                                             "prediction": "malicious",
@@ -1435,11 +1435,11 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                     # synthetic-data classifier otherwise.
                     if bodmas_cnn_detector.available:
                         score = bodmas_cnn_detector.score(filepath)
-                        if score is not None and score >= 0.65:
+                        if score is not None and score >= 0.60:
                             ml_hit = ("bodmas_cnn", score)
                     elif ember_detector.available:
                         score = ember_detector.score(filepath)
-                        if score is not None and score >= 0.65:
+                        if score is not None and score >= 0.60:
                             ml_hit = ("ember", score)
                     elif detector.is_malicious(filepath):
                         score = detector.get_anomaly_score(filepath)
@@ -1456,6 +1456,24 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                 results["ransomware_indicators"].append({"file": filepath, "reason": reason})
         except Exception as ml_exc:
             output.write(f"[INFO] ML/ransomware check skipped for {filepath}: {ml_exc}\n")
+
+
+def _is_trusted_windows_path(filepath):
+    """Return True for paths that are part of the normal Windows installation.
+
+    These locations are very unlikely to hold malware in a normal system, so
+    YARA-only matches there are downgraded unless another detector corroborates.
+    """
+    try:
+        lower = filepath.lower()
+        if not lower.startswith('c:\\\\'):
+            return False
+        parts = lower.split('\\\\')
+        # C:\Windows and C:\Program Files* are treated as trusted core system
+        # directories. We deliberately do not include user profile or appdata.
+        return parts[1] in {'windows', 'program files', 'program files (x86)'}
+    except Exception:
+        return False
 
 
 def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output, progress_callback=None):
@@ -1479,16 +1497,54 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 yara_result = yara_scanner.scan_file_with_yara(filepath)
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
-                if yara_result and yara_scanner.has_critical_yara_match(yara_result):
-                    critical_rules = [getattr(m, 'rule', 'unknown') for m in yara_result if yara_scanner.get_match_severity(m) == 'critical']
-                    output.write(f"[CRITICAL YARA] Critical rule(s) matched for {filepath}: {', '.join(critical_rules)}. Forcing quarantine.\n")
-                    malware_found = True
-                    msg = f"Critical YARA match: {', '.join(critical_rules)}"
+                if yara_result:
+                    highest = yara_scanner.get_highest_severity(yara_result)
+                    # Confidence scoring: count distinct rule families (namespaces).
+                    # A hit from multiple independent rule files is stronger than a
+                    # single broad rule firing on a clean file.
+                    yara_namespaces = {getattr(m, 'namespace', 'default') for m in yara_result}
+                    rule_names = [getattr(m, 'rule', 'unknown') for m in yara_result]
+                    multi_family = len(yara_namespaces) >= 2
+                    trusted_path = _is_trusted_windows_path(filepath)
+
+                    if yara_scanner._rank_of(highest) >= yara_scanner._rank_of('high'):
+                        # Path-based trust: in trusted Windows directories we only
+                        # record the hit as suspicious if multiple families matched.
+                        if not trusted_path or multi_family:
+                            results["yara_suspicious"].append({
+                                "file": filepath,
+                                "highest_severity": highest,
+                                "rules": rule_names,
+                                "namespaces": sorted(yara_namespaces)
+                            })
+
+                    # Critical YARA only forces quarantine if we have confidence.
+                    # For protected Windows paths, wait for ML corroboration.
+                    if yara_scanner.has_critical_yara_match(yara_result):
+                        critical_rules = [getattr(m, 'rule', 'unknown') for m in yara_result
+                                          if yara_scanner.get_match_severity(m) == 'critical']
+                        if not trusted_path or multi_family:
+                            output.write(f"[CRITICAL YARA] Critical rule(s) matched for {filepath}: {', '.join(critical_rules)}. Forcing quarantine.\n")
+                            malware_found = True
+                            msg = f"Critical YARA match: {', '.join(critical_rules)}"
+                        else:
+                            output.write(f"[INFO] Critical YARA match for {filepath} ({', '.join(critical_rules)}) on trusted path; waiting for ML corroboration.\n")
         except Exception as yara_exc:
             with results_lock:
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
 
         _run_ml_and_ransomware_checks(filepath, results, output)
+
+        # Escalate high-severity YARA matches to critical when ML also flags the file.
+        if yara_result:
+            highest = yara_scanner.get_highest_severity(yara_result)
+            if yara_scanner._rank_of(highest) >= yara_scanner._rank_of('high'):
+                has_ml = any(d.get("file") == filepath for d in results.get("ml_detections", []))
+                if has_ml:
+                    with results_lock:
+                        output.write(f"[CRITICAL YARA] High YARA match for {filepath} escalated to critical because ML also flagged it.\n")
+                        malware_found = True
+                        scanned_file_status[filepath]["malware_found"] = True
 
         # Also quarantine if a high-confidence ML or ransomware hit was recorded.
         with results_lock:
@@ -1613,7 +1669,8 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         "routine_maintenance": {},  # Add routine maintenance results
         "ml_detections": [],  # Files flagged by the static-file ML classifier (report-only)
         "ransomware_indicators": [],  # Files flagged by the static ransomware heuristic (report-only)
-        "persistence_indicators": {}  # Processes/autostart entries in unusual locations (report-only)
+        "persistence_indicators": {},  # Processes/autostart entries in unusual locations (report-only)
+        "yara_suspicious": []  # High/critical YARA matches for review (not auto-quarantined)
     }
     scanned_file_status = {}  # Track status for each scanned file
     results['scanned_files'] = scanned_file_status  # used for progress/idle counts

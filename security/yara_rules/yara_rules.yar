@@ -110,7 +110,12 @@ rule SuspiciousExecutable_Strict {
         $mal20 = "startup"
         // More can be added for even greater empowerment
     condition:
-        $mz at 0 and 10 of ($upx*, $aspack, $fsg, $mpress, $petite*, $pecompact, $themida, $molebox, $yoda, $execryptor, $nsPack, $telock, $armadillo, $svkp, $upack, $section*, $rich, $dosmode, $padd, $mzpad, $dll, $exe, $bat, $scr, $com, $antidbg*, $antivm*, $obf*, $mal*)
+        $mz at 0 and
+        5 of ($section*, $rich, $dosmode, $dll, $exe, $bat, $scr, $com) and
+        (
+            (3 of ($antidbg*, $antivm*, $mal*) and (2 of ($antivm*) or 1 of ($antidbg2, $antidbg4, $antidbg5))) or
+            (1 of ($upx*, $aspack, $fsg, $mpress, $petite*, $pecompact, $themida, $molebox, $yoda, $execryptor, $nsPack, $telock, $armadillo, $svkp, $upack, $padd, $mzpad) and 2 of ($antidbg*, $antivm*, $obf*, $mal*))
+        )
 }
 
 // NOTE: this rule's header (rule NAME { ... strings:) was missing in the
@@ -119,40 +124,19 @@ rule SuspiciousExecutable_Strict {
 // name matching its content (suspicious API imports + executable extensions).
 rule Suspicious_PE_API_Imports {
     meta:
-        description = "Detects suspicious Windows API imports commonly used by malware"
+        description = "Detects multiple suspicious Windows API imports commonly used by malware"
     strings:
         $mz = {4D 5A}
-        $exe = ".exe"
-        $bat = ".bat"
-        $scr = ".scr"
-        $com = ".com"
-        $susp1 = "kernel32.dll"
-        $susp2 = "VirtualAlloc"
-        $susp3 = "LoadLibrary"
-        $susp4 = "GetProcAddress"
-        $susp5 = "CreateRemoteThread"
-        $susp6 = "WriteProcessMemory"
-        $susp7 = "SetWindowsHookEx"
-        $susp8 = "NtUnmapViewOfSection"
-        $susp9 = "ZwUnmapViewOfSection"
-        $susp10 = "IsDebuggerPresent"
-        $susp11 = "FindWindow"
-        $susp12 = "OpenProcess"
-        $susp13 = "TerminateProcess"
-        $susp14 = "GetTickCount"
-        $susp15 = "GetForegroundWindow"
-        $susp16 = "GetAsyncKeyState"
-        $susp17 = "RegOpenKeyEx"
-        $susp18 = "RegSetValueEx"
-        $susp19 = "RegCreateKeyEx"
-        $susp20 = "RegDeleteKey"
-        // ...add more as needed
+        $susp1 = "CreateRemoteThread"
+        $susp2 = "WriteProcessMemory"
+        $susp3 = "SetWindowsHookEx"
+        $susp4 = "NtUnmapViewOfSection"
+        $susp5 = "ZwUnmapViewOfSection"
+        $susp6 = "IsDebuggerPresent"
+        $susp7 = "FindWindow"
+        $susp8 = "GetAsyncKeyState"
     condition:
-        // Original condition referenced strings ($upx*, $aspack, $section*, etc.)
-        // from the previous rule that aren't defined here -- a copy-paste
-        // artifact from the missing-header bug above. Narrowed to the strings
-        // actually defined in this rule.
-        $mz at 0 and 5 of ($exe, $bat, $scr, $com, $susp*)
+        $mz at 0 and 3 of ($susp1, $susp2, $susp3, $susp4, $susp5, $susp6, $susp7, $susp8)
 }
 
 rule Suspicious_PowerShell_Strict {
@@ -279,7 +263,7 @@ rule EICAR_Test_File_Strict {
         $eicar5 = "H+H*"
         $eicar6 = "X5O!P%@AP[4\\PZX54(P^)7CC)7}"
     condition:
-        2 of them
+        3 of them
 }
 
 // Additional empowered rules for generic and fileless malware, droppers, macro exploits, and more can be added below as needed for full coverage.
@@ -355,7 +339,7 @@ rule CobaltStrike_Beacon {
         $payload1 = { fc e8 89 00 00 00 60 89 e5 31 c0 64 8b 50 30 }
         // ...add more
     condition:
-        2 of them
+        3 of them
 }
 
 rule LOLBins_Generic {
@@ -380,7 +364,7 @@ rule LOLBins_Generic {
         $mavinject = "mavinject.exe"
         // ...add more
     condition:
-        2 of them
+        3 of them
 }
 
 rule Suspicious_Document_Macros {
@@ -405,7 +389,7 @@ rule Suspicious_Document_Macros {
         $vba15 = "bitsadmin"
         // ...add more
     condition:
-        2 of them
+        3 of them
 }
 
 rule Process_Injection_Generic {
@@ -445,7 +429,7 @@ rule Credential_Dumping_Generic {
         $out6 = "WDigest"
         // ...add more
     condition:
-        2 of them
+        3 of them
 }
 
 rule Persistence_Autorun_Generic {
@@ -464,7 +448,7 @@ rule Persistence_Autorun_Generic {
         $taskschd = "taskschd.msc"
         // ...add more
     condition:
-        2 of them
+        3 of them
 }
 
 // ...additional rules for Dridex, QakBot, AgentTesla, LokiBot, AZORult, NanoCore, Remcos, Cobalt Strike, REvil, Ryuk, Dharma, Maze, LockBit, GandCrab, Sodinokibi, etc. can be added in this same format for maximum coverage.
@@ -478,7 +462,7 @@ rule Suspicious_PowerShell {
         $cmd2 = "IEX"
         $cmd3 = "DownloadString"
     condition:
-        any of ($cmd*)
+        2 of ($cmd*)
 }
 
 rule Generic_Malware_Strings {
@@ -496,7 +480,7 @@ rule Generic_Malware_Strings {
         $str9 = "certutil"
         $str10 = "bypass"
     condition:
-        any of ($str*)
+        3 of ($str*) and filesize < 200KB
 }
 
 rule Ransomware_Indicators {
@@ -510,7 +494,7 @@ rule Ransomware_Indicators {
         $ext3 = ".crypt"
         $ext4 = ".ransom"
     condition:
-        any of ($note*) or any of ($ext*)
+        2 of ($note*) or 2 of ($ext*)
 }
 
 rule Packed_Executable_UPX {
@@ -531,7 +515,7 @@ rule Exploit_Macro_Documents {
         $macro3 = "CreateObject"
         $macro4 = "WScript.Shell"
     condition:
-        any of ($macro*)
+        2 of ($macro*)
 }
 
 rule Suspicious_Network_Connections {
@@ -545,7 +529,7 @@ rule Suspicious_Network_Connections {
         $net5 = "curl"
         $net6 = "Invoke-WebRequest"
     condition:
-        any of ($net*)
+        2 of ($net*)
 }
 
 rule Keylogger_Indicators {
@@ -556,7 +540,7 @@ rule Keylogger_Indicators {
         $key2 = "SetWindowsHookEx"
         $key3 = "keylog"
     condition:
-        any of ($key*)
+        2 of ($key*)
 }
 
 rule Reverse_Shell_Indicators {
@@ -568,7 +552,7 @@ rule Reverse_Shell_Indicators {
         $rev3 = "powershell -nop -c"
         $rev4 = "/bin/sh -i"
     condition:
-        any of ($rev*)
+        2 of ($rev*)
 }
 
 rule Suspicious_JS_Script {
@@ -580,7 +564,7 @@ rule Suspicious_JS_Script {
         $fromCharCode = "String.fromCharCode"
         $wscript = "WScript.Shell"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Suspicious_VBS_Script {
@@ -591,7 +575,7 @@ rule Suspicious_VBS_Script {
         $run = "Shell.Run"
         $base64 = "base64decode"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Suspicious_Batch_File {
@@ -604,7 +588,7 @@ rule Suspicious_Batch_File {
         $schtasks = "schtasks /create"
         $powershell = "powershell -"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule PDF_Exploit_Indicators {
@@ -617,7 +601,7 @@ rule PDF_Exploit_Indicators {
         $aa = "/AA"
         $embedded = "/EmbeddedFile"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Office_Macro_Malware {
@@ -631,7 +615,7 @@ rule Office_Macro_Malware {
         $wscript = "WScript.Shell"
         $createobject = "CreateObject"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule PE_Suspicious_Imports {
@@ -645,7 +629,7 @@ rule PE_Suspicious_Imports {
         $loadlibrary = "LoadLibraryA"
         $wsasocket = "WSASocketA"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Packed_Obfuscated_Executable {
@@ -657,7 +641,7 @@ rule Packed_Obfuscated_Executable {
         $petite = ".petite"
         $fsg = ".FSG!"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Credential_Dumper_Indicators {
@@ -669,7 +653,7 @@ rule Credential_Dumper_Indicators {
         $sekurlsa = "sekurlsa::logonpasswords"
         $procdump = "procdump"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Dropper_Indicators {
@@ -681,7 +665,7 @@ rule Dropper_Indicators {
         $drop3 = "URLDownloadToFile"
         $drop4 = "WinExec"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Exploit_Payloads {
@@ -693,7 +677,7 @@ rule Exploit_Payloads {
         $buf = "\x90\x90\x90\x90"
         $cmd = "cmd.exe /c"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Emotet_Malware {
@@ -705,7 +689,7 @@ rule Emotet_Malware {
         $str3 = "emotet"
         $str4 = "outlook.exe"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule TrickBot_Malware {
@@ -717,7 +701,7 @@ rule TrickBot_Malware {
         $str3 = "group_tag"
         $str4 = "TrickBot"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Ryuk_Ransomware {
@@ -730,7 +714,7 @@ rule Ryuk_Ransomware {
         $ext2 = ".RYUK"
         $proc1 = "kill.bat"
     condition:
-        any of ($note*) or any of ($ext*) or $proc1
+        2 of ($note*) or 2 of ($ext*) or $proc1
 }
 
 rule WannaCry_Ransomware {
@@ -742,7 +726,7 @@ rule WannaCry_Ransomware {
         $mutex = "Global\\MsWinZonesCacheCounterMutexA0"
         $url = "iuqerfsodp9ifjaposdfjhgosurijfaewrwergwea.com"
     condition:
-        any of ($note*) or $ext1 or $mutex or $url
+        2 of ($note*) or $ext1 or $mutex or $url
 }
 
 rule XMRig_Miner_Strict {
@@ -812,7 +796,7 @@ rule CONTI_Ransomware {
         $ext1 = ".CONTI"
         $proc1 = "vssadmin delete shadows"
     condition:
-        any of ($note*) or $ext1 or $proc1
+        2 of ($note*) or $ext1 or $proc1
 }
 
 rule REvil_Ransomware {
@@ -824,7 +808,7 @@ rule REvil_Ransomware {
         $ext2 = ".sodinokibi"
         $url1 = "decryptor.top"
     condition:
-        any of ($note*) or any of ($ext*) or $url1
+        2 of ($note*) or 2 of ($ext*) or $url1
 }
 
 rule Maze_Ransomware {
@@ -835,7 +819,7 @@ rule Maze_Ransomware {
         $ext1 = ".maze"
         $maze = "maze ransomware"
     condition:
-        any of ($note*) or $ext1 or $maze
+        2 of ($note*) or $ext1 or $maze
 }
 
 rule AgentTesla_Stealer {
@@ -846,7 +830,7 @@ rule AgentTesla_Stealer {
         $str2 = "smtp.gmail.com"
         $str3 = "password recovery"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule RedLine_Stealer {
@@ -857,7 +841,7 @@ rule RedLine_Stealer {
         $str2 = "TelegramAPI"
         $str3 = "PasswordRecovery"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule njRAT_Trojan {
@@ -869,7 +853,7 @@ rule njRAT_Trojan {
         $str3 = "njw0rm"
         $str4 = "cmd.exe /c"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Remcos_RAT {
@@ -880,7 +864,7 @@ rule Remcos_RAT {
         $str2 = "remcos.exe"
         $str3 = "Remcos Client"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule CobaltKitty_APT {
@@ -891,7 +875,7 @@ rule CobaltKitty_APT {
         $str2 = "Cobalt Kitty"
         $str3 = "apt32"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Turla_APT_Tool {
@@ -902,7 +886,7 @@ rule Turla_APT_Tool {
         $str2 = "Snake"
         $str3 = "Carbon"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Dridex_Banking_Trojan {
@@ -914,7 +898,7 @@ rule Dridex_Banking_Trojan {
         $str3 = "botnet_id"
         $str4 = "dridex_config"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Zeus_Banking_Trojan {
@@ -926,7 +910,7 @@ rule Zeus_Banking_Trojan {
         $str3 = "botnet"
         $str4 = "zeus_config"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule QakBot_Banking_Trojan {
@@ -938,7 +922,7 @@ rule QakBot_Banking_Trojan {
         $str3 = "qakbot_config"
         $str4 = "qbot_id"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule DarkSide_Ransomware {
@@ -949,7 +933,7 @@ rule DarkSide_Ransomware {
         $ext1 = ".darkside"
         $proc1 = "vssadmin delete shadows"
     condition:
-        any of ($note*) or $ext1 or $proc1
+        2 of ($note*) or $ext1 or $proc1
 }
 
 rule GandCrab_Ransomware {
@@ -961,7 +945,7 @@ rule GandCrab_Ransomware {
         $ext2 = ".KRAB"
         $url1 = "gandcrab"
     condition:
-        any of ($note*) or any of ($ext*) or $url1
+        2 of ($note*) or 2 of ($ext*) or $url1
 }
 
 rule LockBit_Ransomware {
@@ -972,7 +956,7 @@ rule LockBit_Ransomware {
         $ext1 = ".lockbit"
         $proc1 = "vssadmin delete shadows"
     condition:
-        any of ($note*) or $ext1 or $proc1
+        2 of ($note*) or $ext1 or $proc1
 }
 
 rule Netwalker_Ransomware_Strict {
@@ -1072,7 +1056,7 @@ rule AZORult_Stealer {
         $str2 = "azorult"
         $str3 = "passwords.txt"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Nanocore_RAT {
@@ -1083,7 +1067,7 @@ rule Nanocore_RAT {
         $str2 = "nanocore"
         $str3 = "nanocore_config"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule PlugX_RAT {
@@ -1094,7 +1078,7 @@ rule PlugX_RAT {
         $str2 = "plugx"
         $str3 = "plugx_config"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule FIN7_Carbanak_APT {
@@ -1106,7 +1090,7 @@ rule FIN7_Carbanak_APT {
         $str3 = "fin7"
         $str4 = "Anunak"
     condition:
-        any of ($*)
+        2 of ($*)
 }
 
 rule Trickbot_Malware {
@@ -1118,7 +1102,7 @@ rule Trickbot_Malware {
         $b = "tabDll32"
         $c = "client_id"
     condition:
-        any of them
+        2 of them
 }
 
 rule Suspicious_Macro_Doc {
@@ -1131,7 +1115,7 @@ rule Suspicious_Macro_Doc {
         $c = "CreateObject"
         $d = "WScript.Shell"
     condition:
-        any of them
+        2 of them
 }
 
 rule Ransomware_Generic {
@@ -1144,7 +1128,7 @@ rule Ransomware_Generic {
         $c = "bitcoin"
         $d = "ransom"
     condition:
-        2 of them
+        3 of them
 }
 
 // This rule detects files that begin with the ASCII string 'CC8UPTDOGVX1HPJK', which is the start of the user's Pollux cipher binary output. This can be used to flag or ignore files encrypted or encoded with the user's custom Pollux cipher.

@@ -10,7 +10,7 @@ rule ModelPoisoningAttack {
         $model_inject = { 48 8D 15 ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule AIModelTheft {
@@ -25,7 +25,7 @@ rule AIModelTheft {
         $param_copy = { 0F AE ?? 48 8B 45 }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule AdversarialAttack {
@@ -40,7 +40,7 @@ rule AdversarialAttack {
         $patch_inject = { 48 8D 0D ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule AIInferenceAttack {
@@ -55,7 +55,7 @@ rule AIInferenceAttack {
         $inference_bypass = { 0F AE E8 48 8B }
         
     condition:
-        2 of them
+        3 of them
 }
 
 rule AISupplyChainAttack {
@@ -70,5 +70,5 @@ rule AISupplyChainAttack {
         $model_hub_exploit = { 48 8D 0D ?? ?? ?? ?? }
         
     condition:
-        2 of them
+        3 of them
 }
