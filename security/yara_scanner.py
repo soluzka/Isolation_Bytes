@@ -420,6 +420,42 @@ def has_critical_yara_match(matches):
     return False
 
 
+# Severity ranking (higher number = more severe)
+SEVERITY_RANK = {
+    'low': 1,
+    'medium': 2,
+    'high': 3,
+    'critical': 4
+}
+
+
+def _rank_of(severity):
+    """Return the numeric rank for a severity string."""
+    return SEVERITY_RANK.get(severity, 0)
+
+
+def get_highest_severity(matches):
+    """Return the highest severity string among a list of yara matches."""
+    if not matches:
+        return ''
+    highest = ''
+    highest_rank = 0
+    for match in matches:
+        severity = get_match_severity(match)
+        rank = _rank_of(severity)
+        if rank > highest_rank:
+            highest = severity
+            highest_rank = rank
+    return highest
+
+
+def _severity_prefix(severity):
+    """Return a human-readable prefix for a YARA match severity."""
+    if not severity:
+        return 'YARA match'
+    return f'{severity.upper()} YARA match'
+
+
 def scan_all_folders_with_yara(monitored_folders, rules_path=None):
     """
     YARA-based scanning utilities for security module.
@@ -454,11 +490,14 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         'total_subdirectories': 0,
         'total_matches': 0,
         'total_critical_matches': 0,
+        'total_high_matches': 0,
+        'total_medium_matches': 0,
+        'total_low_matches': 0,
         'total_quarantined': 0,
         'total_errors': 0,
         'directories': []
     }
-    
+
     for folder in monitored_folders:
         folder_stats = {
             'path': folder,
@@ -469,6 +508,9 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
             'subdirectory_count': 0,
             'matches': 0,
             'critical_matches': 0,
+            'high_matches': 0,
+            'medium_matches': 0,
+            'low_matches': 0,
             'quarantined': 0,
             'errors': 0,
             'subdirectories': []  # List to store subdirectories
@@ -514,15 +556,30 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
                     if matches:
                         folder_stats['matches'] += len(matches)
                         scan_stats['total_matches'] += len(matches)
-                        is_critical = has_critical_yara_match(matches)
-                        if is_critical:
+                        highest = get_highest_severity(matches)
+
+                        # Track match counts by highest severity for this file
+                        if highest == 'critical':
                             folder_stats['critical_matches'] += 1
                             scan_stats['total_critical_matches'] += 1
+                        elif highest == 'high':
+                            folder_stats['high_matches'] += 1
+                            scan_stats['total_high_matches'] += 1
+                        elif highest == 'medium':
+                            folder_stats['medium_matches'] += 1
+                            scan_stats['total_medium_matches'] += 1
+                        elif highest == 'low':
+                            folder_stats['low_matches'] += 1
+                            scan_stats['total_low_matches'] += 1
+
                         for match in matches:
                             rule_name = getattr(match, 'rule', 'Unknown rule')
                             severity = get_match_severity(match)
-                            prefix = 'CRITICAL YARA match' if severity == 'critical' else 'YARA match'
+                            prefix = _severity_prefix(severity)
                             results.append(f"{prefix} ({rule_name}): {filepath}")
+
+                        # Quarantine only critical matches
+                        is_critical = highest == 'critical'
                         fernet_key = os.environ.get('FERNET_KEY')
                         if is_critical and quarantine_utils and fernet_key and len(fernet_key) == 44:
                             try:

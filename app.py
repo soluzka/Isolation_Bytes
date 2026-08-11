@@ -993,7 +993,7 @@ def scan():
     results = []
     for result in yara_results:
         try:
-            file_path = result.split("YARA match:", 1)[1].strip()
+            file_path = result.split(": ", 1)[-1].strip()
             if os.path.exists(file_path):
                 # Get ML prediction
                 prediction = detector.predict([file_path])
@@ -1379,7 +1379,7 @@ def perform_yara_scan():
         scan_results = scan_data.get('results', []) if isinstance(scan_data, dict) else scan_data
         for result in scan_results:
             if "YARA match" in result:
-                file_path = result.split("YARA match:", 1)[1].strip()
+                file_path = result.split(": ", 1)[-1].strip()
                 # Extract features for ML analysis
                 features = [
                     os.path.getsize(file_path),  # File size
