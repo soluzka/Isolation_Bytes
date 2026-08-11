@@ -20,6 +20,11 @@ import os
 import json
 from sklearn.feature_extraction import FeatureHasher
 
+try:
+    lief.logging.set_level(lief.logging.LEVEL.ERROR)
+except Exception:
+    pass
+
 # NOTE: This file is vendored from https://github.com/elastic/ember (features.py)
 # and patched to work with modern lief (0.17.x) and numpy (2.x), which the
 # original 2018-era code wasn't written against. The training-time
