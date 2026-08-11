@@ -845,13 +845,18 @@ def view_quarantine():
                     except Exception as e:
                         logger.error(f"Error reading metadata for {filename}: {e}")
                 
-                # Build quarantined file info
+                # Build quarantined file info to match quarantine.html template
+                display_name = metadata.get('filename', filename.replace('.enc', ''))
+                detection_info = metadata.get('detection_info', {})
+                if 'matches' not in detection_info:
+                    detection_info['matches'] = []
                 quarantined_files.append({
-                    'name': filename.replace('.enc', ''),
-                    'size': size,
-                    'date_quarantined': metadata.get('quarantine_time', date_quarantined),
-                    'original_path': metadata.get('original_path', 'Unknown'),
-                    'detection_info': metadata.get('detection_info', {})
+                    'filename': display_name,
+                    'quarantine_path': file_path,
+                    'original_path': metadata.get('original_path', ''),
+                    'quarantine_time': metadata.get('quarantine_time', date_quarantined),
+                    'detection_info': detection_info,
+                    'size': size
                 })
     except Exception as e:
         logger.error(f"Error listing quarantine folder: {e}")
@@ -910,7 +915,21 @@ def quarantine_suspicious_file(file_path, detection_info):
         # Write to quarantine
         with open(quarantine_path, 'wb') as f:
             f.write(encrypted_content)
-            
+
+        # Write JSON metadata sidecar for restore/delete operations
+        metadata = {
+            'filename': os.path.basename(file_path),
+            'original_path': file_path,
+            'quarantine_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'quarantine_path': quarantine_path,
+            'detection_info': detection_info
+        }
+        try:
+            with open(quarantine_path + '.json', 'w', encoding='utf-8') as f:
+                json.dump(metadata, f)
+        except Exception as e:
+            logger.warning(f'Could not write quarantine metadata: {e}')
+
         # Add to database - include quarantine info in the result JSON
         detection_info['quarantined'] = True
         detection_info['quarantine_path'] = quarantine_path
@@ -4487,7 +4506,7 @@ def quarantine_download(filename):
     return send_file(io.BytesIO(decrypted), download_name=filename[:-4] if filename.endswith('.enc') else filename, as_attachment=True)
 
 
-@app.route('/quarantine/delete/<path:filename>')
+@app.route('/quarantine/delete/<path:filename>', methods=['GET', 'POST'])
 def quarantine_delete(filename):
     from quarantine_utils import force_unlock_windows
     file_path = os.path.join(QUARANTINE_FOLDER, filename)
@@ -4495,17 +4514,79 @@ def quarantine_delete(filename):
         return jsonify({'error': 'File not found', 'filename': filename}), 404
     try:
         os.remove(file_path)
+        # Remove the optional metadata sidecar
+        meta_path = file_path + '.json'
+        if os.path.exists(meta_path):
+            os.remove(meta_path)
         return jsonify({'status': 'success', 'message': f'{filename} deleted from quarantine'})
     except PermissionError:
         force_unlock_windows(file_path)
         try:
             os.remove(file_path)
+            meta_path = file_path + '.json'
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
             return jsonify({'status': 'success', 'message': f'{filename} deleted from quarantine after unlocking'})
         except Exception as e:
             return jsonify({'error': f'Failed to delete {filename}: {str(e)}'}), 500
     except Exception as e:
         return jsonify({'error': f'Failed to delete {filename}: {str(e)}'}), 500
 
+
+@app.route('/restore_file', methods=['POST'])
+def restore_file():
+    """Restore a quarantined .enc file to its original or chosen path."""
+    try:
+        quarantine_path = request.form.get('file_path', '').strip()
+        destination = request.form.get('destination', '').strip()
+
+        if not quarantine_path or not os.path.exists(quarantine_path):
+            return jsonify({'error': 'Quarantined file not found'}), 404
+
+        if not destination:
+            return jsonify({'error': 'Destination is required'}), 400
+
+        # Determine final output path; if destination is a folder, reuse the base name
+        if os.path.isdir(destination):
+            out_name = os.path.basename(quarantine_path)
+            if out_name.endswith('.enc'):
+                out_name = out_name[:-4]
+            destination = os.path.join(destination, out_name)
+
+        key = os.environ.get('FERNET_KEY')
+        if not key:
+            return jsonify({'error': 'FERNET_KEY not configured'}), 500
+
+        fernet = Fernet(key)
+        with open(quarantine_path, 'rb') as f:
+            encrypted = f.read()
+        try:
+            decrypted = fernet.decrypt(encrypted)
+        except Exception:
+            return jsonify({'error': 'Failed to decrypt file; check FERNET_KEY'}), 500
+
+        # Ensure the destination directory exists
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        with open(destination, 'wb') as f:
+            f.write(decrypted)
+
+        # Remove quarantine and metadata sidecar
+        try:
+            os.remove(quarantine_path)
+            meta_path = quarantine_path + '.json'
+            if os.path.exists(meta_path):
+                os.remove(meta_path)
+        except Exception as e:
+            logging.warning(f'Could not remove quarantine files after restore: {e}')
+
+        return jsonify({
+            'success': True,
+            'restored_to': destination,
+            'message': f'File restored to {destination}'
+        })
+    except Exception as e:
+        logging.error(f'Error restoring quarantined file: {e}')
+        return jsonify({'error': f'Failed to restore file: {str(e)}'}), 500
 
 
 @app.route('/logs')
