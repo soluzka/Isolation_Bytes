@@ -279,7 +279,7 @@ class EmberMalwareDetector:
             self.logger.debug(f"EMBER scoring failed for {file_path}: {e}")
             return None
 
-    def is_malicious(self, file_path, threshold=0.85):
+    def is_malicious(self, file_path, threshold=0.65):
         """Threshold chosen conservatively (favoring precision over recall)
         since this is a report-only signal, not an auto-quarantine trigger --
         see conditional_startup.py's _run_ml_and_ransomware_checks()."""
@@ -365,7 +365,7 @@ class BodmasCnnDetector:
             self.logger.debug(f'BODMAS CNN scoring failed for {file_path}: {e}')
             return None
 
-    def is_malicious(self, file_path, threshold=0.85):
+    def is_malicious(self, file_path, threshold=0.65):
         score = self.score(file_path)
         return score is not None and score >= threshold
 

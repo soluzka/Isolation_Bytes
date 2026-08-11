@@ -189,7 +189,7 @@ def routine_maintenance_and_system_recovery():
                                 # (+1/-1 outlier labels) correctly.
                                 if bodmas_cnn_detector.available:
                                     score = bodmas_cnn_detector.score(filepath)
-                                    if score is not None and score >= 0.85:
+                                    if score is not None and score >= 0.65:
                                         recovery_results["ml_scans"].append({
                                             "file": filepath,
                                             "prediction": "malicious",
@@ -200,7 +200,7 @@ def routine_maintenance_and_system_recovery():
                                         output.write(f"[ML/BODMAS-CNN] Malicious file detected: {filepath} (score: {score:.3f})\n")
                                 elif ember_detector.available:
                                     score = ember_detector.score(filepath)
-                                    if score is not None and score >= 0.85:
+                                    if score is not None and score >= 0.65:
                                         recovery_results["ml_scans"].append({
                                             "file": filepath,
                                             "prediction": "malicious",
@@ -1435,11 +1435,11 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                     # synthetic-data classifier otherwise.
                     if bodmas_cnn_detector.available:
                         score = bodmas_cnn_detector.score(filepath)
-                        if score is not None and score >= 0.85:
+                        if score is not None and score >= 0.65:
                             ml_hit = ("bodmas_cnn", score)
                     elif ember_detector.available:
                         score = ember_detector.score(filepath)
-                        if score is not None and score >= 0.85:
+                        if score is not None and score >= 0.65:
                             ml_hit = ("ember", score)
                     elif detector.is_malicious(filepath):
                         score = detector.get_anomaly_score(filepath)

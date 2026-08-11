@@ -995,7 +995,7 @@ def scan():
             if os.path.exists(file_path):
                 # Get ML prediction from the best available model
                 score, model = _get_best_ml_score(file_path)
-                if score is not None and score >= 0.85:
+                if score is not None and score >= 0.65:
                     results.append({
                         'file': file_path,
                         'size': os.path.getsize(file_path),
@@ -1404,7 +1404,7 @@ def perform_yara_scan():
                 if score is None:
                     continue
                 
-                is_malicious = score >= 0.85
+                is_malicious = score >= 0.65
                 results.append({
                     'file': file_path,
                     'size': os.path.getsize(file_path),

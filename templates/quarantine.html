@@ -21,6 +21,9 @@
     <h2>Quarantine Management</h2>
     <p>Manage quarantined files below. You can view details, download files, release them, or delete them permanently.</p>
 
+    <div style="margin: 1em 0;">
+        <button type="button" class="btn-delete js-delete-all-btn">Delete All Quarantined Files</button>
+    </div>
     <table>
         <thead>
             <tr>
@@ -37,8 +40,8 @@
                 <td>{% if file.detection_info and file.detection_info.matches %}{{ file.detection_info.matches|join(', ') }}{% else %}Unknown{% endif %}</td>
                 <td>{{ file.quarantine_time }}</td>
                 <td class="actions">
-                    <button onclick="restoreFile('{{ file.quarantine_path }}', '{{ file.original_path }}')" class="btn-restore">Restore</button>
-                    <button onclick="deleteFile('{{ file.quarantine_path }}')" class="btn-delete">Delete</button>
+                    <button type="button" class="btn-restore js-restore-btn" data-quarantine-path="{{ file.quarantine_path|e }}" data-destination="{{ file.original_path|e }}">Restore</button>
+                    <button type="button" class="btn-delete js-delete-btn" data-quarantine-path="{{ file.quarantine_path|e }}">Delete</button>
                 </td>
             </tr>
             {% endfor %}
@@ -59,40 +62,34 @@
     </nav>
     
     <script>
-        function restoreFile(filePath, originalPath) {
-            if (confirm('Are you sure you want to restore this file? It may contain malware.')) {
-                const formData = new FormData();
-                formData.append('file_path', filePath);
-                if (originalPath) {
-                    formData.append('destination', originalPath);
-                }
-                
-                fetch('/restore_file', {
-                    method: 'POST',
-                    body: formData
-                })
+        function getFilename(path) {
+            return path.split(/[\\/]/).pop();
+        }
+
+        function restoreFile(filePath, destination) {
+            if (!confirm('Are you sure you want to restore this file? It may contain malware.')) return;
+            const formData = new FormData();
+            formData.append('file_path', filePath);
+            if (destination) {
+                formData.append('destination', destination);
+            }
+            fetch('/restore_file', { method: 'POST', body: formData })
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
                         alert('File restored successfully to: ' + data.restored_to);
-                        location.reload();
+                        window.location.reload();
                     } else {
                         alert('Error: ' + data.error);
                     }
                 })
-                .catch(error => {
-                    alert('Error: ' + error);
-                });
-            }
+                .catch(error => alert('Error: ' + error));
         }
-        
+
         function deleteFile(quarantinePath) {
-            if (confirm('Are you sure you want to permanently delete this file?')) {
-                // Extract filename from path if needed
-                let filename = quarantinePath.split(/[\\/]/).pop();
-                fetch(`/quarantine/delete/${encodeURIComponent(filename)}`, {
-                    method: 'POST'
-                })
+            if (!confirm('Are you sure you want to permanently delete this file?')) return;
+            const filename = getFilename(quarantinePath);
+            fetch('/quarantine/delete/' + encodeURIComponent(filename), { method: 'POST' })
                 .then(async response => {
                     const text = await response.text();
                     if (response.status === 404) {
@@ -108,15 +105,38 @@
                     }
                     if (data.status === 'success') {
                         alert('File deleted successfully');
-                        location.reload();
+                        window.location.reload();
                     } else {
                         alert('Error: ' + (data.error || 'Unknown error'));
                     }
                 })
-                .catch(error => {
-                    alert('Error: ' + error);
-                });
-            }
+                .catch(error => alert('Error: ' + error));
+        }
+
+        function deleteAllFiles() {
+            if (!confirm('Are you sure you want to permanently delete ALL quarantined files?')) return;
+            fetch('/quarantine/delete_all', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success' || data.status === 'partial') {
+                        alert('Deleted ' + data.deleted + ' file(s)' + (data.errors ? ', ' + data.errors + ' error(s)' : ''));
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+        }
+
+        document.querySelectorAll('.js-restore-btn').forEach(btn => {
+            btn.addEventListener('click', () => restoreFile(btn.dataset.quarantinePath, btn.dataset.destination));
+        });
+        document.querySelectorAll('.js-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteFile(btn.dataset.quarantinePath));
+        });
+        const deleteAllBtn = document.querySelector('.js-delete-all-btn');
+        if (deleteAllBtn) {
+            deleteAllBtn.addEventListener('click', deleteAllFiles);
         }
     </script>
 </body>

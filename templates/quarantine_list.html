@@ -43,8 +43,8 @@
                     <td>{{ file.original_path }}</td>
                     <td>{{ file.reason }}</td>
                     <td>
-                        <button type="button" class="button restore" onclick="restoreFile('{{ file.path|e }}', '{{ file.original_path|e }}')">Restore</button>
-<button type="button" class="button delete" onclick="deleteFile('{{ file.path|e }}')">Delete</button>
+                        <button type="button" class="button restore js-restore-btn" data-filename="{{ file.name|e }}" data-destination="{{ file.original_path|e }}">Restore</button>
+                        <button type="button" class="button delete js-delete-btn" data-filename="{{ file.name|e }}">Delete</button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -69,48 +69,47 @@
     </p>
 </body>
 <script>
-function restoreFile(filePath, originalPath) {
-    if (confirm('Are you sure you want to restore this file? It may contain malware.')) {
-        const formData = new FormData();
-        formData.append('file_path', filePath);
-        if (originalPath) {
-            formData.append('destination', originalPath);
-        }
-        fetch('/restore_file', {
+    function restoreFile(filename, destination) {
+        if (!confirm('Are you sure you want to restore this file? It may contain malware.')) return;
+        fetch('/quarantine/release', {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename, destination: destination })
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
-                alert('File restored successfully to: ' + data.restored_to);
-                location.reload();
+            if (data.status === 'success' || data.success) {
+                alert('File restored successfully' + (data.message ? ': ' + data.message : ''));
+                window.location.reload();
             } else {
-                alert('Error: ' + data.error);
+                alert('Error: ' + (data.error || data.message || 'Unknown error'));
             }
         })
         .catch(error => alert('Error: ' + error));
     }
-}
-function deleteFile(filePath) {
-    if (confirm('Are you sure you want to permanently delete this file?')) {
-        const formData = new FormData();
-        formData.append('file_path', filePath);
-        fetch('/delete_file', {
+    function deleteFile(filename) {
+        if (!confirm('Are you sure you want to permanently delete this file?')) return;
+        fetch('/quarantine/delete', {
             method: 'POST',
-            body: formData
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ filename: filename })
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
-                alert('File deleted from quarantine.');
-                location.reload();
+            if (data.status === 'success' || data.success) {
+                alert('File deleted from quarantine' + (data.message ? ': ' + data.message : ''));
+                window.location.reload();
             } else {
-                alert('Error: ' + data.error);
+                alert('Error: ' + (data.error || data.message || 'Unknown error'));
             }
         })
         .catch(error => alert('Error: ' + error));
     }
-}
+    document.querySelectorAll('.js-restore-btn').forEach(btn => {
+        btn.addEventListener('click', () => restoreFile(btn.dataset.filename, btn.dataset.destination));
+    });
+    document.querySelectorAll('.js-delete-btn').forEach(btn => {
+        btn.addEventListener('click', () => deleteFile(btn.dataset.filename));
+    });
 </script>
 </html>

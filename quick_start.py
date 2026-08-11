@@ -565,7 +565,7 @@ def _perform_scan_all():
 
                             should_quarantine = False
                             if ml_score is not None:
-                                if ember_detector.available and ml_score >= 0.85:
+                                if ember_detector.available and ml_score >= 0.65:
                                     should_quarantine = True
                                     cache_entry['quarantine_reason'] = 'ember'
                                 elif not ember_detector.available and ml_score >= 0.5:
@@ -2132,6 +2132,35 @@ def delete_quarantined_file(filename):
         logger.error(f"Error deleting quarantined file: {e}")
         return jsonify({'status': 'error', 'error': str(e)})
 
+
+@app.route('/quarantine/delete_all', methods=['POST'])
+def delete_all_quarantined_files():
+    """Delete every file currently in the quarantine folder."""
+    try:
+        quarantine_dir = os.path.join(
+            os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
+            'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+        )
+        os.makedirs(quarantine_dir, exist_ok=True)
+        deleted = 0
+        errors = 0
+        for filename in os.listdir(quarantine_dir):
+            file_path = os.path.join(quarantine_dir, filename)
+            try:
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+                    deleted += 1
+            except Exception as e:
+                logger.error(f"Error deleting {file_path}: {e}")
+                errors += 1
+        if errors:
+            return jsonify({'status': 'partial', 'deleted': deleted, 'errors': errors})
+        return jsonify({'status': 'success', 'deleted': deleted})
+    except Exception as e:
+        logger.error(f"Error deleting all quarantined files: {e}")
+        return jsonify({'status': 'error', 'error': str(e)})
+
+
 @app.route('/antivirus_log')
 def antivirus_log():
     return 'Antivirus Log'
@@ -2325,7 +2354,7 @@ def run_scheduled_scans():
                                 # (e.g. libcef.dll).
                                 should_quarantine = False
                                 if ml_score is not None:
-                                    if ember_detector.available and ml_score >= 0.85:
+                                    if ember_detector.available and ml_score >= 0.65:
                                         should_quarantine = True
                                         cache_entry['quarantine_reason'] = 'ember'
                                     elif not ember_detector.available and ml_score >= 0.5:
