@@ -291,6 +291,88 @@ class EmberMalwareDetector:
 ember_detector = EmberMalwareDetector()
 
 
+_BODMAS_CNN_MODEL_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'bodmas_cnn.onnx'
+)
+_BODMAS_CNN_SCALER_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'bodmas_cnn_scaler.pkl'
+)
+
+
+class BodmasCnnDetector:
+    """Static-file malware classifier using a 1D CNN exported to ONNX.
+
+    Uses the same EMBER/BODMAS 2381-dim PE feature extraction and the
+    StandardScaler that was fit with the model. Falls back if onnxruntime
+    or the model files are missing.
+    """
+
+    def __init__(self):
+        self.logger = logging.getLogger('bodmas_cnn_detector')
+        self.available = False
+        self.session = None
+        self.scaler = None
+        self.extractor = None
+        self._load()
+
+    def _load(self):
+        try:
+            import onnxruntime as ort
+        except ImportError:
+            self.logger.info('onnxruntime not installed; BODMAS CNN unavailable.')
+            return
+
+        if not os.path.exists(_BODMAS_CNN_MODEL_PATH):
+            self.logger.info(f'BODMAS CNN not found at {_BODMAS_CNN_MODEL_PATH}.')
+            return
+        if not os.path.exists(_BODMAS_CNN_SCALER_PATH):
+            self.logger.info(f'BODMAS CNN scaler not found at {_BODMAS_CNN_SCALER_PATH}.')
+            return
+
+        try:
+            from security.ember_vendor import PEFeatureExtractor
+            self.extractor = PEFeatureExtractor(2, print_feature_warning=False)
+            self.scaler = joblib.load(_BODMAS_CNN_SCALER_PATH)
+            self.session = ort.InferenceSession(
+                _BODMAS_CNN_MODEL_PATH,
+                providers=['CPUExecutionProvider']
+            )
+            self.available = True
+            self.logger.info(f'Loaded BODMAS CNN from {_BODMAS_CNN_MODEL_PATH}')
+        except Exception as e:
+            self.logger.error(f'Failed to load BODMAS CNN: {e}')
+            self.available = False
+
+    def _softmax(self, x):
+        e = np.exp(x - np.max(x, axis=1, keepdims=True))
+        return e / np.sum(e, axis=1, keepdims=True)
+
+    def score(self, file_path):
+        """Return a malicious probability in [0, 1], or None on failure."""
+        if not self.available:
+            return None
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+            raw = self.extractor.raw_features(data)
+            vec = self.extractor.process_raw_features(raw).reshape(1, -1)
+            scaled = self.scaler.transform(vec).astype(np.float32)
+            x = scaled.reshape(1, 1, -1)
+            logits = self.session.run(None, {'features': x})[0]
+            probs = self._softmax(logits)
+            return float(probs[0, 1])
+        except Exception as e:
+            self.logger.debug(f'BODMAS CNN scoring failed for {file_path}: {e}')
+            return None
+
+    def is_malicious(self, file_path, threshold=0.85):
+        score = self.score(file_path)
+        return score is not None and score >= threshold
+
+
+bodmas_cnn_detector = BodmasCnnDetector()
+
+
 @functools.lru_cache(maxsize=4096)
 def _directory_has_ransom_note(directory):
     """Cached per-directory check so a directory with thousands of files

@@ -164,7 +164,7 @@ def routine_maintenance_and_system_recovery():
         # 2. Machine Learning-based scanning
         output.write("[ROUTINE MAINTENANCE] Performing ML-based anomaly detection...\n")
         try:
-            from security.detector import detector, ember_detector
+            from security.detector import detector, ember_detector, bodmas_cnn_detector
 
             # Both classifiers were trained on PE-executable samples; running
             # them against arbitrary files (photos, videos, documents) floods
@@ -187,7 +187,18 @@ def routine_maintenance_and_system_recovery():
                                 # fallback handles both the trained classifier (0/1
                                 # labels) and the untrained IsolationForest fallback
                                 # (+1/-1 outlier labels) correctly.
-                                if ember_detector.available:
+                                if bodmas_cnn_detector.available:
+                                    score = bodmas_cnn_detector.score(filepath)
+                                    if score is not None and score >= 0.85:
+                                        recovery_results["ml_scans"].append({
+                                            "file": filepath,
+                                            "prediction": "malicious",
+                                            "anomaly_score": score,
+                                            "model": "bodmas_cnn",
+                                            "action": "detected"
+                                        })
+                                        output.write(f"[ML/BODMAS-CNN] Malicious file detected: {filepath} (score: {score:.3f})\n")
+                                elif ember_detector.available:
                                     score = ember_detector.score(filepath)
                                     if score is not None and score >= 0.85:
                                         recovery_results["ml_scans"].append({
@@ -1409,7 +1420,7 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
     """
     with results_lock:
         try:
-            from security.detector import detector, ember_detector, check_ransomware_indicators
+            from security.detector import detector, ember_detector, bodmas_cnn_detector, check_ransomware_indicators
 
             _, ext = os.path.splitext(filepath)
             ml_hit = None
@@ -1418,7 +1429,11 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                     # Prefer the EMBER-trained classifier (real malware/benign data)
                     # when its model file is present; fall back to the
                     # synthetic-data classifier otherwise.
-                    if ember_detector.available:
+                    if bodmas_cnn_detector.available:
+                        score = bodmas_cnn_detector.score(filepath)
+                        if score is not None and score >= 0.85:
+                            ml_hit = ("bodmas_cnn", score)
+                    elif ember_detector.available:
                         score = ember_detector.score(filepath)
                         if score is not None and score >= 0.85:
                             ml_hit = ("ember", score)
