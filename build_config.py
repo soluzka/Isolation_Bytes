@@ -5,6 +5,7 @@ import glob
 import shutil
 import logging
 import platform
+import time
 
 
 
@@ -324,17 +325,44 @@ redis_config = os.path.join(base_dir, 'redis', 'redis.conf')
 if os.path.exists(redis_config):
     pyinstaller_args.append(f'--add-data={redis_config}{sep}redis')
 
+def _cleanup_dir(path):
+    """Remove path if possible; otherwise rename it so PyInstaller can create a fresh one."""
+    if not os.path.exists(path):
+        return
+    for attempt in range(3):
+        try:
+            shutil.rmtree(path)
+            print(f"Removed {path}")
+            return
+        except (PermissionError, OSError) as e:
+            print(f"Warning: could not remove {path}: {e} (attempt {attempt + 1}/3)")
+            time.sleep(1)
+    # Fallback: rename the locked directory out of the way
+    for i in range(100):
+        backup = f"{path}.old{i}"
+        if not os.path.exists(backup):
+            try:
+                os.rename(path, backup)
+                print(f"Renamed {path} to {backup}")
+                return
+            except Exception as e:
+                print(f"Warning: could not rename {path}: {e}")
+                break
+    print(f"Warning: {path} is still present; PyInstaller may fail to overwrite it.")
+
+# Remove stale build output directories so PyInstaller can create fresh ones.
+# This avoids the WinError 5 'Access is denied' failures when locked files remain.
+if '--clean' in pyinstaller_args:
+    pyinstaller_args.remove('--clean')
+for stale in [os.path.join(base_dir, 'build', app_name), os.path.join(base_dir, 'dist', app_name)]:
+    _cleanup_dir(stale)
+
 # Run PyInstaller
 try:
     print("Starting EXE build...")
     print("Redis status:", "Available" if redis_available else "Not Available")
     PyInstaller.__main__.run(pyinstaller_args)
     print("Build completed successfully!")
-except PermissionError as e:
-    print(f"Warning: Permission error occurred: {e}")
-    print("Continuing with build without cleaning previous build directory...")
-    pyinstaller_args.remove('--clean')
-    PyInstaller.__main__.run(pyinstaller_args)
 except Exception as e:
     print(f"Error during build: {e}")
     sys.exit(1)
