@@ -22,7 +22,7 @@ rule SuspiciousFile {
         author = "Windows Defender Clone"
         reference = "Internal"
         date = "2025-05-11"
-        severity = "high"
+        severity = "medium"
     
     strings:
         $s1 = "CreateRemoteThread" nocase
