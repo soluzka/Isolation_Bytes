@@ -131,6 +131,54 @@ dist\antivirus_server\
 
 `dist\ssdeep_runner.exe` is built as a sibling file for fuzzy-hash scanning.
 
+### Creating Installer Files
+
+The onedir package at `dist\antivirus_server` can be wrapped in either an executable installer (Inno Setup) or a per-user Windows Installer (MSI).
+
+Both require the onedir build to exist first:
+
+```powershell
+python build_config.py
+```
+
+#### Inno Setup `.exe` Installer
+
+1. Install **Inno Setup 6** from [jrsoftware.org](https://jrsoftware.org/isinfo.php).
+2. Run:
+
+   ```powershell
+   build_installer.bat
+   ```
+
+3. The installer is created at:
+
+   ```
+   dist\AntivirusServer_Setup.exe
+   ```
+
+By default `installer.iss` requests admin privileges. To make the installer per-user, change `PrivilegesRequired` in `installer.iss` to:
+
+```iss
+PrivilegesRequired=lowest
+```
+
+#### WiX Toolset `.msi` Installer
+
+1. Install **WiX Toolset v3.11** from [wixtoolset.org/docs/wix3](https://wixtoolset.org/docs/wix3/).
+2. Run:
+
+   ```powershell
+   build_msi.bat
+   ```
+
+3. The MSI is created at:
+
+   ```
+   dist\AntivirusServer.msi
+   ```
+
+`installer.wxs` is already configured for a per-user install in the current user's local programs folder (`%LOCALAPPDATA%\Programs\Antivirus Server`).
+
 ### Datasets and Models
 
 The project can be trained on several malware detection datasets:
