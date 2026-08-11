@@ -4,6 +4,7 @@ import sys
 import io
 import json
 import getpass
+import logging
 import threading
 import subprocess
 import tempfile

@@ -15,7 +15,7 @@ from hash_verify import HashVerifier
 from ml_security import SecurityMLModel
 
 POWERSHELL_PATH = shutil.which('powershell') or 'powershell'
-from network_monitor import BLACKLISTED_IPS, is_blacklisted, analyze_connection_pattern
+from network_monitor import BLACKLISTED_IPS, is_blacklisted, analyze_connection_pattern, NetworkMonitor
 from datetime import datetime
 
 # Base directory for writable runtime state.
