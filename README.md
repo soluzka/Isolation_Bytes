@@ -92,6 +92,22 @@ A Windows-first security suite with YARA malware scanning, real-time network and
 
 A local DNS server, folder watcher, and real-time network monitor start automatically in the background.
 
+### Logging In
+
+The dashboard uses HTTP Basic/Digest-style admin authentication. The default credentials are:
+
+- **Username:** `admin`
+- **Password:** `admin123`
+
+Set different values in the `.env` file:
+
+```dotenv
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=admin123
+```
+
+> **Warning:** Change `ADMIN_PASSWORD` before exposing the dashboard. This is a local, single-user dashboard and the default credentials are not secure.
+
 ---
 
 ## Building the Standalone Application
