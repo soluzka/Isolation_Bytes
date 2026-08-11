@@ -40,6 +40,10 @@ NOISY_RULE_NAMES = {
     'Suspicious_Registry_Persistence', 'Generic_Ransomware_Indicators',
     'China_Chopper_Webshell', 'AsyncRAT',
     'cobalt_strike_tmp01925d3f', 'FormBook_Stealer_Strict',
+    'SideChannelAttackTools', 'UseAfterFreePattern',
+    'StackPivotDetection', 'ReturnOrientedProgramming',
+    'Office_Macro_Malware', 'Ransomware_Indicators',
+    'ProtocolManipulation', 'PoetRat_Python',
 }
 
 # Rule-name keywords that indicate a known malware family or definitive malware
