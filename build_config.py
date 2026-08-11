@@ -2,6 +2,7 @@ import PyInstaller.__main__
 import os
 import sys
 import glob
+import shutil
 import logging
 import platform
 
@@ -330,6 +331,17 @@ if os.path.exists(runner_script):
         ]
         PyInstaller.__main__.run(runner_args)
         print("ssdeep_runner build completed.")
+
+        # Move the standalone runner into the onedir package root so it lives
+        # next to antivirus_server.exe and the packaged app can call it without
+        # depending on the source-tree layout.
+        runner_src = os.path.join(base_dir, 'dist', 'ssdeep_runner.exe')
+        onedir_root = os.path.join(base_dir, 'dist', app_name)
+        runner_dst = os.path.join(onedir_root, 'ssdeep_runner.exe')
+        if os.path.exists(runner_src) and os.path.isdir(onedir_root):
+            os.makedirs(onedir_root, exist_ok=True)
+            shutil.move(runner_src, runner_dst)
+            print(f"Moved ssdeep_runner.exe to {runner_dst}")
     except Exception as e:
         print(f"Warning: ssdeep_runner build failed: {e}")
 else:
