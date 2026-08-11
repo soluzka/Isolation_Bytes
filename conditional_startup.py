@@ -1278,7 +1278,7 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
             results["errors"].append({"stage": "process_hardening", "error": str(e)})
 
 
-def _check_persistence_indicators_step(results, output):
+def _check_persistence_indicators_step(results, output, progress_callback=None):
     """Fast, report-only check for processes/autostart entries in unusual
     locations and autorun.inf on removable drives -- see
     security/persistence_checks.py for why this replaces the old
@@ -1294,6 +1294,11 @@ def _check_persistence_indicators_step(results, output):
         results["persistence_indicators"] = findings
         total = sum(len(v) for v in findings.values())
         output.write(f"[conditional_startup] Persistence checks found {total} indicator(s).\n")
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception as e:
+                output.write(f"[WARNING] progress_callback raised during persistence checks: {e}\n")
     except Exception as e:
         output.write(f"[ERROR] Persistence checks failed: {e}\n")
         results["errors"].append({"stage": "persistence_checks", "error": str(e)})
@@ -1506,8 +1511,8 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                     output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
                     scanned_file_status[filepath]["error"] = str(quarantine_exc)
                     results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
-                if callable(progress_callback):
-                    progress_callback(results)
+        if callable(progress_callback):
+            progress_callback(results)
     except (PermissionError, OSError) as perm_error:
         with results_lock:
             output.write(f"[INFO] Permission issue for {filepath}: {perm_error}\n")
@@ -1648,7 +1653,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None):
         _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
 
     _scan_processes_hardening_step(modules['process_security'], results, output, progress_callback)
-    _check_persistence_indicators_step(results, output)
+    _check_persistence_indicators_step(results, output, progress_callback)
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
     _start_antivirus_cli_step(basedir, output)

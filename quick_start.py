@@ -689,6 +689,7 @@ def run_conditional_startup_background():
     """Run the conditional startup scan once in a background thread."""
     from conditional_startup import run_conditional_startup_logic
     start_time = time.time()
+    _last_progress_report = 0.0
 
     def report_progress(partial_results):
         """Update shared state with in-progress counts so the status API
@@ -696,6 +697,11 @@ def run_conditional_startup_background():
         used to only update counts, leaving 'last_run' as 'never' for the
         entire (sometimes multi-minute) duration of a run, since that field
         was only ever set once the whole scan finished."""
+        nonlocal _last_progress_report
+        now = time.time()
+        if now - _last_progress_report < 0.5:
+            return
+        _last_progress_report = now
         errors = partial_results.get('errors', [])
         with conditional_startup_lock:
             conditional_startup_state.update({
