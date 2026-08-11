@@ -4,7 +4,7 @@ import sys
 import glob
 import logging
 import platform
-import subprocess
+
 
 
 # Application details
@@ -313,13 +313,24 @@ except Exception as e:
 
 # Build the standalone ssdeep_runner helper so both executables are produced
 # by the same top-level build command.
-runner_script = os.path.join(base_dir, 'tools', 'build_runner_exe.py')
+runner_script = os.path.join(base_dir, 'security', 'yara_rules', 'ssdeep_runner.py')
 if os.path.exists(runner_script):
     try:
         print("Building ssdeep_runner.exe...")
-        subprocess.run([sys.executable, runner_script], check=True)
+        sep = ';' if sys.platform.startswith('win') else ':'
+        runner_args = [
+            '--name=ssdeep_runner',
+            '--onefile',
+            '--noconfirm',
+            '--log-level=INFO',
+            '--add-data', f"{os.path.join(base_dir, 'security', 'yara_rules')}{sep}security\\yara_rules",
+            '--collect-all', 'pyssdeep',
+            '--hidden-import', 'yara',
+            runner_script,
+        ]
+        PyInstaller.__main__.run(runner_args)
         print("ssdeep_runner build completed.")
     except Exception as e:
         print(f"Warning: ssdeep_runner build failed: {e}")
 else:
-    print("Warning: tools/build_runner_exe.py not found; skipping ssdeep_runner build.")
+    print("Warning: ssdeep_runner.py not found; skipping ssdeep_runner build.")
