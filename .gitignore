@@ -2,6 +2,8 @@
 malware_signatures.txt
 uploads/malware_signatures.txt
 yara_scanner.log
+AntivirusServer_Store.msix
+AntivirusServer_Test_Launcher.msix
 
 # Log files
 *.log

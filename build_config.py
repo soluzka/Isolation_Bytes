@@ -131,7 +131,6 @@ pyinstaller_args = [
     '--clean',
     '--noconfirm',
     '--log-level=DEBUG',
-    '--uac-admin',  # Request admin at launch; no Python self-restart loop
     '--noupx',
     f'--icon={icon_path}',
     '--paths', base_dir,
@@ -150,6 +149,10 @@ if redis_available:
     logging.info("Redis configured for EXE build")
 
 # Add hidden imports
+if '--admin' in sys.argv:
+    pyinstaller_args.append('--uac-admin')
+    print('Admin mode enabled: --uac-admin added for local admin build')
+
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 
 # Collect the entire pyssdeep package (including bin/windows/fuzzy_64.dll)

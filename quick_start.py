@@ -36,9 +36,15 @@ from dotenv import load_dotenv
 # reparse point, fall back to the user's AppData\Local directory.
 if getattr(sys, 'frozen', False):
     onedir = os.path.dirname(sys.executable)
-    if os.access(onedir, os.W_OK):
-        runtime_dir = onedir
-    else:
+    runtime_dir = onedir
+    # Some packaged locations (e.g. WindowsApps) report W_OK but are not
+    # actually writable for files, so probe by creating a test file.
+    try:
+        test_path = os.path.join(onedir, '.write_probe')
+        with open(test_path, 'w') as f:
+            f.write('probe')
+        os.remove(test_path)
+    except (OSError, IOError, PermissionError):
         runtime_dir = os.path.join(
             os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
             'antivirus_server'
@@ -2547,9 +2553,9 @@ if __name__ == '__main__':
         install_startup()
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")
-    print(f"Real-Time Protection: {'ENABLED' if folder_watcher_state['active'] else 'DISABLED'}")
-    print(f"Network Monitoring: {'ENABLED' if network_state['monitoring_enabled'] else 'DISABLED'}")
-    print(f"Auto-Block: {'ENABLED' if network_state['auto_block_enabled'] else 'DISABLED'}")
+    print("Real-Time Protection: " + ('ENABLED' if folder_watcher_state['active'] else 'DISABLED'))
+    print("Network Monitoring: " + ('ENABLED' if network_state['monitoring_enabled'] else 'DISABLED'))
+    print("Auto-Block: " + ('ENABLED' if network_state['auto_block_enabled'] else 'DISABLED'))
 
     # Ensure desktop shortcuts exist
     try:
@@ -2560,35 +2566,109 @@ if __name__ == '__main__':
         import create_yara_scanner_shortcut
     except Exception:
         pass
-    
-    # Initialize DNS server and start it automatically
+
+    import threading
+    import queue
+
+    # Start the Flask server first so the dashboard is available immediately
+    port_queue = queue.Queue()
+
+    def start_server_and_report(default_port=5000):
+        actual_port = start_server(default_port)
+        if actual_port is not None:
+            try:
+                port_queue.put(actual_port, block=False)
+            except queue.Full:
+                pass
+        return actual_port
+
+    server_port = 5000
+    server_thread = threading.Thread(target=lambda: start_server_and_report(server_port), daemon=True)
+    server_thread.start()
+
+    detected_port = None
     try:
-        dns_server, dns_resolver = start_dns_server(allow_network=False)  # Localhost only for security
+        detected_port = port_queue.get(timeout=10)
+        print(f"Server reported running on port {detected_port}")
+    except queue.Empty:
+        print("Server did not report its port. Attempting detection...")
+        potential_ports = [5000, 5001, 8080, 8000, 3000]
+        max_retries = 3
+        for attempt in range(max_retries):
+            time.sleep(1 + attempt)
+            for port in potential_ports:
+                try:
+                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    test_socket.settimeout(1.0)
+                    result = test_socket.connect_ex(('127.0.0.1', port))
+                    test_socket.close()
+                    if result == 0:
+                        try:
+                            import requests
+                            if requests.get(f"http://127.0.0.1:{port}", timeout=2).status_code == 200:
+                                detected_port = port
+                                print(f"Verified server running on port {port} with HTTP request")
+                                break
+                        except Exception:
+                            if detected_port is None:
+                                detected_port = port
+                except Exception:
+                    pass
+            if detected_port:
+                break
+
+    if detected_port is None:
+        print("Trying one last attempt to find the server...")
+        for port in [5000, 5001, 8080, 8000, 3000]:
+            try:
+                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                test_socket.settimeout(0.3)
+                result = test_socket.connect_ex(('127.0.0.1', port))
+                test_socket.close()
+                if result == 0:
+                    detected_port = port
+                    print(f"Found a service on port {port} - assuming it's our server")
+                    break
+            except Exception:
+                pass
+
+    if detected_port is not None:
+        base_url = f"http://127.0.0.1:{detected_port}"
+        browser_path = '/yara-scanner' if '--open-yara' in sys.argv else ''
+        url = f"{base_url}{browser_path}"
+        print(f"Server is ready at {url}")
+    else:
+        print("\nCould not detect which port the server is running on.")
+        print("The server is likely running on one of: 5000, 5001, 8080, 8000")
+        print("Please try opening these URLs in your browser manually:")
+        print("  - http://127.0.0.1:5000")
+        print("  - http://127.0.0.1:5001")
+        print("  - http://localhost:5000")
+        print("  - http://localhost:5001")
+
+    # Initialize DNS server (localhost only)
+    try:
+        dns_server, dns_resolver = start_dns_server(allow_network=False)
         logging.info("DNS server started automatically at application startup")
     except Exception as e:
         logging.error(f"Failed to start DNS server: {str(e)}. This is normal if not running as administrator.")
-    
-    import threading
-    import queue
-    
+
     # Start scheduled scanning thread for continuous YARA scanning
     scan_thread = threading.Thread(target=run_scheduled_scans, daemon=True)
     scan_thread.start()
     logger.info("Scheduled scanning thread started for continuous YARA scanning")
 
-    # Auto-block monitor thread -- active by default because auto_block_enabled
-    # is initialized to True. It can still be toggled via /toggle_auto_block.
+    # Auto-block monitor thread
     auto_block_thread = threading.Thread(target=run_auto_block_monitor, daemon=True)
     auto_block_thread.start()
     logger.info("Auto-block monitor thread started (active by default)")
 
-    # Process hardening monitor thread -- scans running EXEs for YARA, entropy,
-    # missing signatures, and memory-region anomalies.
+    # Process hardening monitor thread
     process_hardening_thread = threading.Thread(target=run_process_hardening_monitor, daemon=True)
     process_hardening_thread.start()
     logger.info("Process hardening monitor thread started")
 
-    # Start conditional startup scan automatically the first time the app runs
+    # Start conditional startup scan in the background after the server is up
     with conditional_startup_lock:
         if not conditional_startup_state['running']:
             conditional_startup_state.update({
@@ -2600,126 +2680,12 @@ if __name__ == '__main__':
             conditional_startup_thread.start()
             logger.info("Conditional startup scan auto-started")
 
-    # Start automatic signature updates (every 24 hours)
+    # Start automatic signature updates
     from auto_update_signatures import start_auto_update_thread
     auto_update_sig_thread = threading.Thread(target=start_auto_update_thread, daemon=True)
     auto_update_sig_thread.start()
     logger.info("Automatic signature update thread started")
 
-    # Create a queue for passing the port from server thread to main thread
-    port_queue = queue.Queue()
-    
-    # Modified start_server function to communicate back the port
-    def start_server_and_report(default_port=5000):
-        actual_port = start_server(default_port)
-        # Put the actual port in the queue
-        if actual_port is not None:
-            try:
-                port_queue.put(actual_port, block=False)
-            except queue.Full:
-                pass
-        return actual_port
-    
-    # Start the server in a background thread
-    server_port = 5000  # Default port
-    server_thread = threading.Thread(target=lambda: start_server_and_report(server_port), daemon=True)
-    server_thread.start()
-    
-    # Wait for the port to be reported or use detection
-    detected_port = None
-    
-    # First, see if the server thread reported a port
-    try:
-        # Wait up to 10 seconds for the port to be reported
-        detected_port = port_queue.get(timeout=10)
-        print(f"Server reported running on port {detected_port}")
-    except queue.Empty:
-        print("Server did not report its port. Attempting detection...")
-        
-        # If no port reported, try to detect by probing common ports
-        # Check common ports with increased timeouts and retries
-        potential_ports = [5000, 5001, 8080, 8000, 3000]
-        max_retries = 3
-        
-        for attempt in range(max_retries):
-            # Increasing wait time with each retry
-            time.sleep(1 + attempt)  
-            
-            for port in potential_ports:
-                try:
-                    test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    test_socket.settimeout(1.0)  # Longer timeout
-                    result = test_socket.connect_ex(('127.0.0.1', port))
-                    test_socket.close()
-                    
-                    if result == 0:  # Port is in use (our server should be running here)
-                        # Additional verification - try to get a response
-                        try:
-                            import requests
-                            if requests.get(f"http://127.0.0.1:{port}", timeout=2).status_code == 200:
-                                detected_port = port
-                                print(f"Verified server running on port {port} with HTTP request")
-                                break
-                        except:
-                            # If we can connect but not get a response, it might be our server still starting
-                            # Mark as potential port but continue checking others
-                            if detected_port is None:
-                                detected_port = port
-                except Exception:
-                    # Connection or request failed; the for-loop will move to the next port
-                    pass
-            
-            if detected_port:
-                break
-    
-    # As last resort, try common ports with lighter validation
-    if detected_port is None:
-        print("Trying one last attempt to find the server...")
-        for port in [5000, 5001, 8080, 8000, 3000]:
-            try:
-                test_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                test_socket.settimeout(0.3)
-                result = test_socket.connect_ex(('127.0.0.1', port))
-                test_socket.close()
-                
-                if result == 0:  # Something is on this port
-                    detected_port = port
-                    print(f"Found a service on port {port} - assuming it's our server")
-                    break
-            except Exception:
-                # Port check failed; the for-loop will continue to the next candidate
-                pass
-    
-    # Show a popup with the URL; clicking OK opens the browser.
-    if detected_port is not None:
-        base_url = f"http://127.0.0.1:{detected_port}"
-        browser_path = '/yara-scanner' if '--open-yara' in sys.argv else ''
-        url = f"{base_url}{browser_path}"
-        print(f"Server is ready at {url}")
-        if sys.platform == 'win32':
-            try:
-                title = 'YARA Scanner' if browser_path else 'Antivirus Dashboard'
-                result = ctypes.windll.user32.MessageBoxW(
-                    0,
-                    f"{title} is ready at {url}\n\n"
-                    "Click OK to open it.",
-                    title,
-                    0x00000000  # MB_OK
-                )
-                if result == 1:  # IDOK
-                    import webbrowser
-                    webbrowser.open(url, new=2)
-            except Exception:
-                print('Failed to open browser')
-    else:
-        print("\nCould not detect which port the server is running on.")
-        print("The server is likely running on one of: 5000, 5001, 8080, 8000")
-        print("Please try opening these URLs in your browser manually:")
-        print("  - http://127.0.0.1:5000")
-        print("  - http://127.0.0.1:5001")
-        print("  - http://localhost:5000")
-        print("  - http://localhost:5001")
-    
     # Keep the main thread alive
     try:
         while True:
@@ -2730,3 +2696,4 @@ if __name__ == '__main__':
         print(f"Error in main thread: {e}")
         print("Server may still be running in background.")
         print("Close this console window to shut down completely.")
+
