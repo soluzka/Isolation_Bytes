@@ -449,7 +449,10 @@ if os.path.exists(dotenv_path):
     load_dotenv(dotenv_path)
 
 # Database configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'antivirus.db')
+runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
+if runtime_dir != basedir:
+    os.makedirs(runtime_dir, exist_ok=True)
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(runtime_dir, 'antivirus.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
