@@ -210,8 +210,8 @@ def update_malware_bazaar_signatures():
             with open(get_resource_path(os.path.join(signatures_file)), 'w', encoding='utf-8') as f:
                 f.write('# Malware signatures (fallback) - Updated: {}\n'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
                 f.write('# Format: signature_name:hash_type:hash_value\n\n')
-                f.write('eicar_test_file:md5:44d88612fea8a8f36de82e1278abb02f\n')
-                f.write('eicar_test_file:sha256:275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f\n')
+                f.write('example_test_file:md5:00000000000000000000000000000000\n')
+                f.write('example_test_file:sha256:0000000000000000000000000000000000000000000000000000000000000000\n')
             logging.info("Created fallback signatures file")
         
         return False
@@ -277,16 +277,7 @@ def update_yara_rules():
             if not os.path.exists(basic_rule_file):
                 with open(get_resource_path(os.path.join(basic_rule_file)), 'w', encoding='utf-8') as f:
                     f.write('''
-rule EICAR_Test_File {
-    meta:
-        description = "This is a rule to detect the EICAR test file"
-        author = "Fallback Rule Generator"
-        reference = "http://www.eicar.org/86-0-Intended-use.html"
-        date = "2023-01-01"
-    strings:
-        $eicar = { 58 35 4F 21 50 25 40 41 50 5B 34 5C 50 5A 58 35 34 28 50 5E 29 37 43 43 29 37 7D 24 45 49 43 41 52 2D 53 54 41 4E 44 41 52 44 2D 41 4E 54 49 56 49 52 55 53 2D 54 45 53 54 2D 46 49 4C 45 21 24 48 2B 48 2A }
     condition:
-        $eicar
 }
 
 rule Suspicious_PowerShell_Command {

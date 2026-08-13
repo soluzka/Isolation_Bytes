@@ -251,17 +251,9 @@ rule Suspicious_PowerShell_Strict {
         8 of them
 }
 
-rule EICAR_Test_File_Strict {
     meta:
-        description = "Strict detection of the EICAR antivirus test file and variants"
         author = "CascadeAI"
     strings:
-        $eicar1 = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
-        $eicar2 = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR"
-        $eicar3 = "EICAR-STANDARD-ANTIVIRUS-TEST-FILE"
-        $eicar4 = "X5O!P%@AP[4\\PZX54(P^)7CC)7}"
-        $eicar5 = "H+H*"
-        $eicar6 = "X5O!P%@AP[4\\PZX54(P^)7CC)7}"
     condition:
         3 of them
 }
@@ -269,14 +261,10 @@ rule EICAR_Test_File_Strict {
 // Additional empowered rules for generic and fileless malware, droppers, macro exploits, and more can be added below as needed for full coverage.
 
 
-rule EICAR_Test_File {
     meta:
-        description = "Detects the EICAR antivirus test file"
         author = "CascadeAI"
     strings:
-        $eicar = "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
     condition:
-        $eicar
 }
 
 // === Broad Coverage Expansion ===
