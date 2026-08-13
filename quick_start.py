@@ -62,6 +62,12 @@ if getattr(sys, 'frozen', False):
             dst = os.path.join(runtime_dir, seed)
             if os.path.exists(src) and not os.path.exists(dst):
                 shutil.copy2(src, dst)
+        os.makedirs(os.path.join(runtime_dir, 'blocklists'), exist_ok=True)
+        for seed in ('blocklists/phishing_domains.txt', 'blocklists/phishing_ips.txt'):
+            src = os.path.join(onedir, seed)
+            dst = os.path.join(runtime_dir, seed)
+            if os.path.exists(src) and not os.path.exists(dst):
+                shutil.copy2(src, dst)
 
 
 def _request_admin_elevation():

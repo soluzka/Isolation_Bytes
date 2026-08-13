@@ -5,6 +5,8 @@ import sys
 from logging.handlers import RotatingFileHandler
 
 def get_basedir():
+    if 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
+        return os.environ['ANTIVIRUS_RUNTIME_DIR']
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
