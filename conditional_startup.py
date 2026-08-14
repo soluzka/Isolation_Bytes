@@ -30,6 +30,9 @@ def import_module_from_path(module_name, path):
 results_lock = threading.RLock()
 scanner_lock = threading.RLock()
 
+# Cooperative stop signal used by the dashboard "Break the cycle" button.
+STOP_EVENT = threading.Event()
+
 def _resolve_critical_directories():
     """Resolve critical system directories, auto-detecting the Windows drive
     when SYSTEMROOT/USERPROFILE/PROGRAMDATA environment variables are missing."""
@@ -1622,12 +1625,18 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
     quarantine_utils = modules['quarantine_utils']
 
     for folder in monitored_folders:
+        if STOP_EVENT.is_set():
+            return
         for root, dirs, files in os.walk(folder):
             # Skip OneDriveTemp directories entirely
             if "OneDriveTemp" in root:
                 continue
+            if STOP_EVENT.is_set():
+                return
 
             for filename in files:
+                if STOP_EVENT.is_set():
+                    return
                 filepath = os.path.join(root, filename)
 
                 # Skip files that can't be accessed due to permissions
@@ -1679,6 +1688,8 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
 
+    STOP_EVENT.clear()
+
     output = io.StringIO()
     results = {
         "scanned_files": {},
@@ -1718,6 +1729,9 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     if _load_scheduled_scan_state(state_file, output):
         output.write('[conditional_startup] Running scheduled scans...\n')
         monitored_folders = _get_monitored_folders(basedir, output)
+        if STOP_EVENT.is_set():
+            results["log"] = output.getvalue()
+            return results
         with ThreadPoolExecutor(max_workers=4) as executor:
             future_process = executor.submit(
                 _scan_running_processes_step,

@@ -1,5 +1,4 @@
-# #Requires -RunAsAdministrator
-# Build the AntivirusServer Store and Test Launcher MSIX packages from the
+# # Build the AntivirusServer Store and Test Launcher MSIX packages from the
 # PyInstaller onedir at dist\antivirus_server, then sign them.
 # The Store package is signed with soluzka.pfx for upload to Microsoft Partner
 # Center. The store cert is NOT trusted on this machine, so it will not install.
@@ -14,6 +13,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $NoCertManagement -and -not $isAdmin) {
+    throw 'Administrator privileges are required to manage certificate trust. Run with -NoCertManagement to pack/sign only, or as Administrator.'
+}
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $Dist = Join-Path $Root 'dist'

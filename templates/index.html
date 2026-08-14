@@ -518,6 +518,9 @@ if (stopAutoUpdatesBtn) {
                     <button type="button" id="run_conditional_startup_panel_btn" style="background:#b36200;color:#fff;">
                         Run Conditional Startup
                     </button>
+                    <button type="button" id="break_the_cycle_btn" style="background:#c0392b;color:#fff;">
+                        Break the Cycle
+                    </button>
                     <button type="button" id="refresh_conditional_startup_btn" style="background:#7f8c8d;color:#fff;">
                         Refresh Status
                     </button>
@@ -534,6 +537,7 @@ if (stopAutoUpdatesBtn) {
             const mlDiv = document.getElementById('ml_models_status');
             const messageDiv = document.getElementById('conditional_startup_panel_message');
             const runBtn = document.getElementById('run_conditional_startup_panel_btn');
+            const breakBtn = document.getElementById('break_the_cycle_btn');
             const refreshBtn = document.getElementById('refresh_conditional_startup_btn');
             if (!statusDiv) return;
 
@@ -744,6 +748,29 @@ if (stopAutoUpdatesBtn) {
 
             if (refreshBtn) {
                 refreshBtn.onclick = refreshStatus;
+            }
+
+            if (breakBtn) {
+                breakBtn.onclick = function () {
+                    breakBtn.disabled = true;
+                    messageDiv.innerHTML = '<p style="color:#c0392b;">Stopping conditional startup...</p>';
+                    fetch('/api/conditional_startup/stop', {method: 'POST', credentials: 'include'})
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.status === 'success') {
+                                messageDiv.innerHTML = `<div class="alert alert-info">${data.message}</div>`;
+                            } else {
+                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || data.error || 'Unknown error'}</div>`;
+                            }
+                            return refreshStatus();
+                        })
+                        .catch(error => {
+                            messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message || error}</div>`;
+                        })
+                        .finally(() => {
+                            breakBtn.disabled = false;
+                        });
+                };
             }
 
             refreshStatus();

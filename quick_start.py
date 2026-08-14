@@ -760,7 +760,8 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
 def run_conditional_startup_background():
     """Run the conditional startup scan once in a background thread."""
     global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
-    from conditional_startup import run_conditional_startup_logic
+    from conditional_startup import run_conditional_startup_logic, STOP_EVENT
+    STOP_EVENT.clear()
     start_time = time.time()
     _last_progress_report = 0.0
     last_counts = {k: 0 for k in ['scanned_files', 'quarantined_files', 'errors', 'process_events', 'ml_detections', 'ransomware_indicators', 'persistence_indicators', 'yara_suspicious']}
@@ -931,6 +932,26 @@ def run_startup():
     except Exception as e:
         conditional_startup_state['running'] = False
         logger.error(f"Error running conditional startup: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route('/api/conditional_startup/stop', methods=['POST'])
+def stop_conditional_startup():
+    """Signal the conditional startup scan to stop as soon as it can."""
+    try:
+        from conditional_startup import STOP_EVENT
+        STOP_EVENT.set()
+        with conditional_startup_lock:
+            conditional_startup_state.update({
+                'stop_requested': True,
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        return jsonify({
+            "status": "success",
+            "message": "Stop requested. The scan will exit as soon as the current file finishes."
+        })
+    except Exception as e:
+        logger.error(f"Error stopping conditional startup: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # -- Web auth for quick_start.py dashboard --

@@ -4,6 +4,8 @@ import sys
 import glob
 import shutil
 import logging
+import subprocess
+import ctypes
 import platform
 import time
 
@@ -398,3 +400,35 @@ if os.path.exists(runner_script):
         print(f"Warning: ssdeep_runner build failed: {e}")
 else:
     print("Warning: ssdeep_runner.py not found; skipping ssdeep_runner build.")
+
+# Build the MSIX packages from the onedir that was just produced.
+# When running as Administrator, build_msix.ps1 also manages certificate trust
+# (store cert not trusted, test cert trusted). When not, it packs/signs only.
+build_msix_ps1 = os.path.join(base_dir, 'build_msix.ps1')
+if os.path.exists(build_msix_ps1):
+    try:
+        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        if is_admin:
+            print("Building MSIX packages and managing certificate trust...")
+            args = [
+                'powershell.exe',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', build_msix_ps1,
+                '-SkipBuild'
+            ]
+        else:
+            print("Building MSIX packages (not running as Admin; skipping cert trust)...")
+            print("Run build_config.py as Administrator to make the test launcher installable.")
+            args = [
+                'powershell.exe',
+                '-ExecutionPolicy', 'Bypass',
+                '-File', build_msix_ps1,
+                '-SkipBuild',
+                '-NoCertManagement'
+            ]
+        subprocess.check_call(args)
+        print("MSIX build completed.")
+    except Exception as e:
+        print(f"Warning: MSIX build failed: {e}")
+else:
+    print("Warning: build_msix.ps1 not found; skipping MSIX build.")
