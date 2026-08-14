@@ -134,6 +134,13 @@ Build everything with:
 python build_config.py
 ```
 
+To also make the test launcher MSIX installable locally, run PowerShell as Administrator first:
+
+```powershell
+Set-Location "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c"
+python build_config.py
+```
+
 `build_config.py`:
 
 - Builds `dist\antivirus_server\antivirus_server.exe` as an onedir bundle.
@@ -456,13 +463,13 @@ python test_environment.py
 
 ---
 
-## Known Limitations
+## Deployment Notes
 
-- The bundled WSGI server is **Waitress**. It is suitable for local and trusted-LAN use; for internet-facing or high-traffic deployments, run behind a reverse proxy with HTTPS (IIS, nginx, Caddy).
-- UAC elevation, Windows Firewall blocking, WMI, and some secure-memory helpers require Windows.
-- `pywin32` installation may need manual steps on some environments.
-- The packaged executable is a local onedir bundle. It is meant to be moved as a whole directory, not as a single `.exe` file.
-- YARA rules have been tuned to produce very few false positives on legitimate Windows components, but high-confidence matches should still be reviewed before quarantining system files.
+- **WSGI server** — The dashboard runs under **Waitress** by default. It is a production-capable server suitable for local and trusted-LAN use. For internet-facing or high-traffic deployments, run it behind a reverse proxy with HTTPS (IIS, nginx, or Caddy).
+- **Windows-only features** — UAC elevation, Windows Firewall blocking, WMI, and some secure-memory helpers require Windows 10/11.
+- **pywin32** — Some Windows environments need manual `pywin32` installation; see `requirements.txt`.
+- **Packaged layout** — The built distribution is a PyInstaller onedir bundle. Move the entire `dist\antivirus_server` folder; the `.exe` is the launcher but depends on the surrounding files.
+- **YARA review** — Rules are tuned to produce very few false positives on legitimate Windows components. High-confidence matches are still shown for review before any quarantine or deletion action.
 
 ---
 
