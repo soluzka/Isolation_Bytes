@@ -116,6 +116,8 @@ try:
 except Exception:
     verify_password = None
 
+import secrets
+
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 
 # Simple in-memory rate limiter for login attempts per remote address.
@@ -1043,7 +1045,32 @@ def _require_login():
     if request.path.startswith(YARA_SCANNER_PREFIXES):
         return
     if session.get('logged_in'):
+        if 'csrf_token' not in session:
+            session['csrf_token'] = secrets.token_urlsafe(32)
         return
+
+
+def _is_exempt_from_csrf():
+    """Return True if the current request does not need a CSRF token."""
+    if request.method not in ('POST', 'PUT', 'DELETE', 'PATCH'):
+        return True
+    if request.endpoint in ('login', 'logout', 'static'):
+        return True
+    if request.path.startswith(YARA_SCANNER_PREFIXES):
+        return True
+    if not session.get('logged_in'):
+        return True
+    return False
+
+
+@app.before_request
+def _require_csrf():
+    """Validate X-CSRF-Token header for state-changing requests."""
+    if _is_exempt_from_csrf():
+        return
+    token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token') or request.args.get('csrf_token')
+    if not token or token != session.get('csrf_token'):
+        return jsonify({'status': 'error', 'message': 'Invalid or missing CSRF token'}), 403
     is_api = (
         request.is_json
         or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
@@ -1076,6 +1103,7 @@ def login():
         if username == ADMIN_USERNAME and password_ok:
             _login_attempts.pop(remote_addr, None)
             session['logged_in'] = True
+            session['csrf_token'] = secrets.token_urlsafe(32)
             next_page = request.form.get('next') or request.args.get('next') or url_for('index')
             return redirect(next_page)
         error = 'Invalid username or password'

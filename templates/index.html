@@ -3,7 +3,31 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
     <title>Antivirus Home</title>
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
     <script src="{{ url_for('static', filename='traffic_display.js') }}"></script>
@@ -754,7 +778,12 @@ if (stopAutoUpdatesBtn) {
                 breakBtn.onclick = function () {
                     breakBtn.disabled = true;
                     messageDiv.innerHTML = '<p style="color:#c0392b;">Stopping conditional startup...</p>';
-                    fetch('/api/conditional_startup/stop', {method: 'POST', credentials: 'include'})
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                    fetch('/api/conditional_startup/stop', {
+                        method: 'POST',
+                        credentials: 'include',
+                        headers: {'X-CSRF-Token': csrfToken}
+                    })
                         .then(response => response.json())
                         .then(data => {
                             if (data.status === 'success') {

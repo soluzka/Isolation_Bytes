@@ -37,16 +37,27 @@ We do not sell, rent, or share your personal data. The application may contact t
 
 These services receive only the minimum data necessary for the lookup or update (e.g., a hash value or domain name).
 
-## 4. Data Storage and Security
+## 4. Security and Access Controls
+
+- **Authentication** — The dashboard requires a username and password configured in `.env` (`ADMIN_USERNAME` and `ADMIN_PASSWORD`).
+- **CSRF protection** — State-changing requests from the browser must include a per-session `X-CSRF-Token` header.
+- **Session cookies** — Login state is stored in a browser cookie signed with the `SECRET_KEY` from `.env`.
+
+## 5. Data Storage and Security
 
 - File scan results, quarantine data, logs, and runtime state are stored locally on your device.
 - Quarantined files are stored in a dedicated, access-controlled directory.
 - Quarantined payloads are encrypted before storage. Metadata sidecars are JSON and do not contain the encryption key.
 - Cryptographic keys for quarantine/restore operations are generated and stored on your device.
-- Dashboard session cookies are signed using the `SECRET_KEY` from your `.env` file.
+- The web server is **Waitress**, bound to `127.0.0.1` by default, so it is not exposed to the internet.
 - The application does not maintain an account or collect personally identifiable information (PII) such as email addresses, phone numbers, or postal addresses.
 
-## 5. Your Choices
+## 6. Scan Controls
+
+- **Conditional startup** and other scans run locally and can be cancelled at any time using the dashboard's **Break the Cycle** control.
+- Scans respect user-defined monitored folders and do not automatically upload files to external services.
+
+## 7. Your Choices
 
 You may at any time:
 
@@ -55,14 +66,14 @@ You may at any time:
 - Delete quarantined files.
 - Clear application logs and runtime data from the local storage directory.
 
-## 6. Children’s Privacy
+## 8. Children’s Privacy
 
 This product is not intended for use by children under 13. We do not knowingly collect data from children.
 
-## 7. Changes to This Policy
+## 9. Changes to This Policy
 
 We may update this Privacy Policy from time to time. Changes will be posted with an updated effective date.
 
-## 8. Contact
+## 10. Contact
 
 For questions or concerns about this Privacy Policy, please open an issue in the project repository or contact the project maintainer.
