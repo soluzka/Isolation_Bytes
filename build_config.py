@@ -58,6 +58,7 @@ def configure_redis():
 
 # Hidden imports for scikit-learn and related packages
 hidden_imports = [
+    'waitress',
     'sklearn',
     'sklearn.utils',
     'sklearn.utils._cython_blas',

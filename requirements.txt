@@ -3,6 +3,7 @@ Flask>=3.1.3
 flask-cors
 flask-sqlalchemy
 Flask-Login>=0.6.3
+waitress>=2.1.2
 markupsafe
 itsdangerous
 click>=8.3.3

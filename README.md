@@ -7,7 +7,7 @@ A Windows-first security suite with YARA malware scanning, real-time network and
 - Quarantine and encrypt suspect files using Fernet.
 - Review results and manage quarantine through a local browser-based UI.
 
-> This is a local, research-oriented antivirus dashboard. It is **not** a replacement for commercial endpoint protection and should not be exposed to the public internet.
+> This is a local, research-oriented antivirus dashboard. It is **not** a replacement for commercial endpoint protection and should not be exposed to the public internet. `quick_start.py` uses Flask's built-in development server, which is not intended for production use.
 
 ---
 
@@ -458,11 +458,11 @@ python test_environment.py
 
 ## Known Limitations
 
-- `quick_start.py` uses Flask's built-in development server — not intended for production internet exposure.
+- The bundled WSGI server is **Waitress**. It is suitable for local and trusted-LAN use; for internet-facing or high-traffic deployments, run behind a reverse proxy with HTTPS (IIS, nginx, Caddy).
 - UAC elevation, Windows Firewall blocking, WMI, and some secure-memory helpers require Windows.
 - `pywin32` installation may need manual steps on some environments.
 - The packaged executable is a local onedir bundle. It is meant to be moved as a whole directory, not as a single `.exe` file.
-- Broad YARA rules can produce many heuristic matches on legitimate Windows components. Review matches before deleting or quarantining system files.
+- YARA rules have been tuned to produce very few false positives on legitimate Windows components, but high-confidence matches should still be reviewed before quarantining system files.
 
 ---
 

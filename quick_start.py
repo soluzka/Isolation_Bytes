@@ -118,6 +118,69 @@ except Exception:
 
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 
+# Simple in-memory rate limiter for login attempts per remote address.
+_login_attempts = {}
+
+
+def _is_login_rate_limited(remote_addr):
+    now = time.time()
+    window = 300  # 5 minutes
+    max_attempts = 10
+    attempts = _login_attempts.get(remote_addr, [])
+    attempts = [t for t in attempts if now - t < window]
+    _login_attempts[remote_addr] = attempts
+    if len(attempts) >= max_attempts:
+        return True
+    _login_attempts[remote_addr].append(now)
+    return False
+
+
+def _warn_default_credentials():
+    """Warn if the admin account is still using the default values."""
+    if os.environ.get('ADMIN_USERNAME', 'admin') == 'admin' and os.environ.get('ADMIN_PASSWORD', 'admin123') == 'admin123':
+        logger.warning('Admin credentials are still the defaults (admin / admin123). Set ADMIN_USERNAME and ADMIN_PASSWORD in .env for production.')
+        print('WARNING: Default admin credentials are in use. Set ADMIN_USERNAME and ADMIN_PASSWORD in .env before production use.')
+
+
+def _validate_production_config():
+    """Abort startup if production mode is enabled with unsafe defaults."""
+    if os.environ.get('FLASK_ENV', '').lower() != 'production':
+        return
+    errors = []
+    if os.environ.get('SECRET_KEY') == 'dev-key-please-set-SECRET_KEY-in-dotenv' or not os.environ.get('SECRET_KEY'):
+        errors.append('SECRET_KEY must be set to a real secret in .env when FLASK_ENV=production')
+    if not os.environ.get('FERNET_KEY'):
+        errors.append('FERNET_KEY must be set in .env when FLASK_ENV=production')
+    admin_user = os.environ.get('ADMIN_USERNAME', 'admin')
+    admin_pass = os.environ.get('ADMIN_PASSWORD', 'admin123')
+    if admin_user == 'admin' or admin_pass == 'admin123' or not admin_pass:
+        errors.append('ADMIN_USERNAME and ADMIN_PASSWORD must be changed from the defaults when FLASK_ENV=production')
+    if admin_pass and len(admin_pass) < 12:
+        errors.append('ADMIN_PASSWORD must be at least 12 characters when FLASK_ENV=production')
+    if errors:
+        for e in errors:
+            logger.error(f'Production config error: {e}')
+            print(f'ERROR: {e}')
+        raise SystemExit('Refusing to start in production mode with unsafe configuration.')
+
+
+
+def _quarantine_dir():
+    return os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+
+
+def _is_safe_quarantine_path(path, base_dir=None):
+    """Return True if the resolved path is inside the quarantine directory."""
+    if not path:
+        return False
+    base = base_dir or _quarantine_dir()
+    try:
+        base = os.path.realpath(base)
+        target = os.path.realpath(os.path.join(base, path) if not os.path.isabs(path) else path)
+        return os.path.commonpath([base, target]) == base
+    except (ValueError, OSError):
+        return False
+
 # Import DNS server functionality
 from dns_server import start_dns_server
 # Fernet key provider for quarantine encryption
@@ -283,6 +346,11 @@ app = Flask(__name__,
 # encryption/decryption feature's file uploads).
 app.config['MAX_CONTENT_LENGTH'] = 125 * 1024 * 1024
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY') or 'dev-key-please-set-SECRET_KEY-in-dotenv'
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# SECURE_SESSION_COOKIE should only be True when serving over HTTPS.
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV', '').lower() == 'production'
+app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 
 # Create a blueprint for network-related API endpoints
 network_bp = Blueprint('network', __name__, url_prefix='/api/network')
@@ -990,6 +1058,10 @@ def _require_login():
 def login():
     error = None
     if request.method == 'POST':
+        remote_addr = request.remote_addr or 'unknown'
+        if _is_login_rate_limited(remote_addr):
+            return render_template('login.html', error='Too many login attempts. Please wait 5 minutes.'), 429
+
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
 
@@ -1002,6 +1074,7 @@ def login():
             password_ok = (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
 
         if username == ADMIN_USERNAME and password_ok:
+            _login_attempts.pop(remote_addr, None)
             session['logged_in'] = True
             next_page = request.form.get('next') or request.args.get('next') or url_for('index')
             return redirect(next_page)
@@ -2381,6 +2454,8 @@ def restore_file():
         file_path = request.form.get('file_path')
         destination = request.form.get('destination')
         
+        if not _is_safe_quarantine_path(file_path):
+            return jsonify({'success': False, 'error': 'Invalid quarantine path'})
         if not file_path or not os.path.exists(file_path):
             return jsonify({'success': False, 'error': 'File not found'})
         
@@ -2428,8 +2503,9 @@ def restore_file():
 def delete_quarantined_file(filename):
     """Delete a quarantined file and its metadata sidecar"""
     try:
-        # Path to the quarantine directory
-        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+        quarantine_dir = _quarantine_dir()
+        if not _is_safe_quarantine_path(filename, quarantine_dir):
+            return jsonify({'status': 'error', 'error': 'Invalid filename'}), 400
         file_path = os.path.join(quarantine_dir, filename)
         sidecar_path = file_path + '.json'
 
@@ -2459,10 +2535,7 @@ def delete_quarantined_file(filename):
 def delete_all_quarantined_files():
     """Delete every file currently in the quarantine folder."""
     try:
-        quarantine_dir = os.path.join(
-            os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
-            'AppData', 'Local', 'Temp', 'Defender_Quarantine'
-        )
+        quarantine_dir = _quarantine_dir()
         os.makedirs(quarantine_dir, exist_ok=True)
         deleted = 0
         errors = 0
@@ -2808,6 +2881,24 @@ def delete_quarantined_files_quick_start():
         return 0
 
 # -- Start the server --
+def _serve_app(host, port, debug=False, use_reloader=False):
+    """Serve the Flask app using Waitress if available, otherwise the dev server."""
+    try:
+        import waitress
+        waitress.serve(
+            app,
+            host=host,
+            port=port,
+            threads=16,
+            channel_timeout=300,
+            connection_limit=1000,
+            expose_tracebacks=debug
+        )
+    except ImportError:
+        logger.warning("waitress is not installed; falling back to Flask development server.")
+        app.run(host=host, port=port, debug=debug, use_reloader=use_reloader, threaded=True)
+
+
 def start_server(port=5000):
     """
     Start the Flask server with fallback options for port conflicts.
@@ -2822,7 +2913,7 @@ def start_server(port=5000):
             # Port is available
             print(f"Server running at http://127.0.0.1:{port}")
             # Start server in non-debug mode to avoid reloader issues
-            app.run(host='127.0.0.1', port=port, debug=FLASK_DEBUG, use_reloader=False, threaded=True)
+            _serve_app(host='127.0.0.1', port=port, debug=FLASK_DEBUG)
             return port
         except OSError:
             # Port is already in use, try fallback ports
@@ -2833,7 +2924,7 @@ def start_server(port=5000):
                 try:
                     print(f"Port {port} is in use. Trying port {fallback_port}...")
                     print(f"Server running at http://127.0.0.1:{fallback_port if fallback_port != 0 else '<assigned by OS>'}")
-                    app.run(host='127.0.0.1', port=fallback_port, debug=FLASK_DEBUG, threaded=True, use_reloader=False)
+                    _serve_app(host='127.0.0.1', port=fallback_port, debug=FLASK_DEBUG)
                     return fallback_port
                 except OSError as e:
                     print(f"Port {fallback_port} also unavailable: {e}")
@@ -2849,7 +2940,7 @@ def start_server(port=5000):
             # Try with different parameters that avoid socket reuse
             # Use localhost only with random port
             print("Server running with OS-assigned port on localhost only")
-            app.run(host='127.0.0.1', port=0, debug=FLASK_DEBUG, threaded=False, use_reloader=False)
+            _serve_app(host='127.0.0.1', port=0, debug=FLASK_DEBUG)
             return -1  # Unknown port
         except Exception as ex:
             print(f"Failed to start server: {ex}")
@@ -3087,6 +3178,8 @@ if __name__ == '__main__':
                 pass
         return actual_port
 
+    _validate_production_config()
+    _warn_default_credentials()
     server_port = 5000
     server_thread = threading.Thread(target=lambda: start_server_and_report(server_port), daemon=True)
     server_thread.start()

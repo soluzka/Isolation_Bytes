@@ -40,18 +40,16 @@ $StorePfx = Join-Path $Root 'soluzka.pfx'
 if (-not (Test-Path $TestPfx)) { throw "soluzka_test.pfx not found at $TestPfx" }
 if (-not (Test-Path $StorePfx)) { throw "soluzka.pfx not found at $StorePfx" }
 
-function Read-PfxSubject($Pfx, $Password) {
-    $secure = if ($Password -is [System.Security.SecureString]) { $Password } else {
-        $s = New-Object System.Security.SecureString
-        $Password.ToCharArray() | ForEach-Object { $s.AppendChar($_) }
-        $s
-    }
-    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $secure)
+function Read-PfxSubject($Pfx, [SecureString]$Password) {
+    $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $Password)
     return $cert
 }
 
-$TestCert = Read-PfxSubject $TestPfx 'Test1234!'
-$StoreCert = Read-PfxSubject $StorePfx 'password'
+$TestPassword = ConvertTo-SecureString -String 'Test1234!' -AsPlainText -Force
+$StorePassword = ConvertTo-SecureString -String 'password' -AsPlainText -Force
+
+$TestCert = Read-PfxSubject $TestPfx $TestPassword
+$StoreCert = Read-PfxSubject $StorePfx $StorePassword
 
 function Export-PublicCer($Cert, $OutPath) {
     $bytes = $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
