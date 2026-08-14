@@ -13,16 +13,30 @@ A Windows-first security suite with YARA malware scanning, real-time network and
 
 ## Key Features
 
+### Detection & Scanning
 - **YARA Rule Scanning** — Signature-based detection with the rule sets in `security/yara_rules/`.
 - **Real-Time Process Monitor** — Scans running user processes, flags suspicious activity, and can terminate infected processes.
 - **Network Traffic Monitoring** — Live connection, protocol, and process statistics plus heuristic C2-pattern and DNS reputation detection. Suspicious connections trigger an automatic scan of the owning process.
 - **ML & Heuristic Threat Detection** — EMBER, BODMAS, BODMAS 1D-CNN via ONNX Runtime, synthetic-ML scoring, and ransomware heuristic checks.
-- **Encrypted Quarantine** — Fernet-encrypted quarantine files with user-confirmed safe release and deletion.
 - **Folder Watching** — Tracks configured directories and performs live on-access scanning.
-- **Conditional Startup Scan** — One-click combined scan of monitored directories, running processes, and startup areas with live progress reporting.
+
+### Quarantine & Remediation
+- **Encrypted Quarantine** — Fernet-encrypted quarantine files with user-confirmed safe release and deletion.
+- **Safe Quarantine Logic** — Does not leave encrypted copies when the original file cannot be safely removed, and protects Windows system / installed-software paths.
+- **Heuristic Review & Bulk Actions** — Review ransomware/persistence heuristic findings with checkboxes, then quarantine selected items.
+- **Quarantine Restore/Delete/Delete-All** — Authenticated UI to restore, remove individual, or purge all quarantined payloads.
+
+### Dashboard & Control
 - **Flask Web Dashboard** — Browser-based UI with live tiles for scans, quarantine, process events, ML detections, ransomware indicators, and persistence indicators.
+- **Conditional Startup Scan** — One-click combined scan of monitored directories, running processes, and startup areas with live progress reporting.
+- **Break the Cycle** — In-dashboard button to request an immediate, cooperative stop of a running conditional startup scan.
 - **Windows Firewall Integration** — Optionally blocks remote IPs associated with malicious processes (requires admin privileges).
 - **File Encryption/Decryption** — In-browser file encryption for sensitive files, capped at 125 MB.
+
+### Packaging & Distribution
+- **One-Step PyInstaller Build** — `python build_config.py` builds `dist\antivirus_server\antivirus_server.exe` plus bundled assets.
+- **Store-Ready MSIX Package** — `build_config.py` also produces `dist\AntivirusServer_Store.msix`, signed for upload to Microsoft Partner Center and not trusted locally.
+- **Local Test Launcher MSIX** — `dist\AntivirusServer_Test_Launcher.msix` is signed and trusted for local sideload testing.
 
 ---
 
