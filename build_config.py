@@ -408,6 +408,7 @@ else:
 build_msix_ps1 = os.path.join(base_dir, 'build_msix.ps1')
 if os.path.exists(build_msix_ps1):
     try:
+        skip_test = '--no-test' in sys.argv
         is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
         if is_admin:
             print("Building MSIX packages and managing certificate trust...")
@@ -427,6 +428,9 @@ if os.path.exists(build_msix_ps1):
                 '-SkipBuild',
                 '-NoCertManagement'
             ]
+        if skip_test:
+            args.append('-SkipTest')
+            print("Skipping test launcher (--no-test).")
         subprocess.check_call(args)
         print("MSIX build completed.")
     except Exception as e:

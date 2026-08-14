@@ -64,36 +64,40 @@ Export-PublicCer $StoreCert $StoreCer
 if (-not $NoCertManagement) {
     Write-Host 'Managing certificate trust...'
 
-    # Remove soluzka (the store cert) from all trust stores on this machine
-    # so the Store package cannot be installed/launched locally.
+    # Trust both certificates in the machine stores so both packages can be
+    # installed and launched locally for testing. Partner Center will re-sign
+    # the Store package with the Store certificate when it is published.
     $stores = @(
         'Cert:\CurrentUser\Root',
         'Cert:\CurrentUser\TrustedPeople',
         'Cert:\LocalMachine\Root',
         'Cert:\LocalMachine\TrustedPeople'
     )
-    foreach ($store in $stores) {
-        try {
-            Get-ChildItem $store | Where-Object { $_.Subject -eq $StoreCert.Subject } | Remove-Item -Force -ErrorAction SilentlyContinue
-            Get-ChildItem $store | Where-Object { $_.Thumbprint -eq $StoreCert.Thumbprint } | Remove-Item -Force -ErrorAction SilentlyContinue
-        } catch {
-            Write-Warning "Could not clean $store : $_"
-        }
-    }
-    Write-Host '  soluzka (store) cert removed from trust stores.'
 
-    # Remove any stale soluzka_test duplicates, then trust the new test cert.
-    foreach ($store in $stores) {
-        try {
-            Get-ChildItem $store | Where-Object { $_.Subject -eq $TestCert.Subject -or $_.Thumbprint -eq $TestCert.Thumbprint } | Remove-Item -Force -ErrorAction SilentlyContinue
-        } catch {
-            Write-Warning "Could not clean test cert from $store : $_"
+    # Remove any stale duplicates first.
+    foreach ($cert in @($StoreCert, $TestCert)) {
+        foreach ($store in $stores) {
+            try {
+                Get-ChildItem $store | Where-Object { $_.Subject -eq $cert.Subject -or $_.Thumbprint -eq $cert.Thumbprint } | Remove-Item -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Warning "Could not clean $store : $_"
+            }
         }
     }
 
-    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+    # Store cert (soluzka) - makes the Store MSIX installable/launchable locally.
+    Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
+    Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+    Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+    Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+    Write-Host '  soluzka (store) cert added to trust stores.'
+
+    # Test cert (soluzka_test) - makes the Test Launcher MSIX installable/launchable locally.
+    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
     Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
-    Write-Host '  soluzka_test (test) cert added to TrustedPeople.'
+    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+    Write-Host '  soluzka_test (test) cert added to trust stores.'
 }
 
 # Re-run PyInstaller build unless skipped, so the EXE is fresh.
