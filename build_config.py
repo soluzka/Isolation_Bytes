@@ -272,7 +272,7 @@ if os.path.isdir(models_dir):
     pyinstaller_args.append(f'--add-data={models_dir}{sep}models')
     logging.info(f'Including models directory in build: {models_dir}')
 
-# Add runtime data/config files that the app reads from the project root
+# Add runtime data/config files that the app reads from the project root.
 DATA_FILES = [
     '.env',
     'antivirus.db',
