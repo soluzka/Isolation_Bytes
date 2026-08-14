@@ -2097,6 +2097,35 @@ def quarantine_list():
         logger.error(f"Error listing quarantined files: {e}")
         return jsonify({'error': str(e), 'files': []})
 
+@app.route('/quarantine/yara-matches', methods=['POST'])
+def quarantine_yara_matches():
+    """Quarantine cached files with ransomware/persistence YARA matches."""
+    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantined = []
+    failed = []
+    for entry in scan_cache.all():
+        path = entry.get('path')
+        yara_matches = entry.get('yara_matches', [])
+        if not path or not yara_matches:
+            continue
+        is_ransomware = any('ransomware' in str(m).lower() for m in yara_matches)
+        is_persistence = any('persistence' in str(m).lower() for m in yara_matches)
+        if not (is_ransomware or is_persistence):
+            continue
+        try:
+            if not os.path.exists(path):
+                continue
+            success, msg = safe_quarantine(path, quarantine_dir, encrypt_file, force=True)
+            if success:
+                quarantined.append(path)
+                entry['quarantined'] = True
+            else:
+                failed.append(f'{path}: {msg}')
+        except Exception as e:
+            failed.append(f'{path}: {e}')
+    scan_cache._save()
+    return jsonify({'quarantined': quarantined, 'failed': failed, 'count': len(quarantined)})
+
 @app.route('/restore_file', methods=['POST'])
 def restore_file():
     """Restore a quarantined file by decrypting it if necessary"""
@@ -2431,8 +2460,9 @@ def run_scheduled_scans():
                                         cache_entry['quarantine_reason'] = 'persistence_yara'
                                     for match in yara_matches:
                                         logger.warning(f"Threat detected: {file_path} - Rule: {getattr(match, 'rule', match)}")
-                                    
-                                    success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
+
+                                    force = is_ransomware or is_persistence
+                                    success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file, force=force)
                                     logger.warning(message)
                                     cache_entry['quarantined'] = success
                                 else:
@@ -2684,7 +2714,8 @@ def break_the_cycle_engage():
                                     logger.warning(f'Critical YARA match on {fp}: {highest}')
                         except Exception:
                             pass
-                        success, qmsg = safe_quarantine(fp, quarantine_dir, encrypt_file)
+                        force = is_ransomware or is_persistence
+                        success, qmsg = safe_quarantine(fp, quarantine_dir, encrypt_file, force=force)
                         if success:
                             ai_quarantined += 1
                         else:

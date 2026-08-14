@@ -607,9 +607,26 @@ if (stopAutoUpdatesBtn) {
                 if (data.last_error) {
                     html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;
                 }
+                html += `<div style="margin-top:10px;">
+                    <button onclick="quarantineYaraMatches()" style="background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine YARA ransomware/persistence</button>
+                    <span id="quarantineYaraMsg" style="margin-left:10px;"></span>
+                </div>`;
                 statusDiv.innerHTML = html;
                 renderMlModels(data.ml_models);
             }
+
+            window.quarantineYaraMatches = function () {
+                fetch('/quarantine/yara-matches', {method: 'POST'})
+                    .then(r => r.json())
+                    .then(d => {
+                        const span = document.getElementById('quarantineYaraMsg');
+                        if (span) span.textContent = `Quarantined ${d.count}`;
+                    })
+                    .catch(e => {
+                        const span = document.getElementById('quarantineYaraMsg');
+                        if (span) span.textContent = 'Error: ' + e;
+                    });
+            };
 
             function refreshStatus() {
                 return fetch('/api/conditional_startup/status', {credentials: 'include'})

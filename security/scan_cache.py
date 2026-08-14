@@ -154,6 +154,10 @@ class FileScanCache:
             return None
         return self._cache.get(fp)
 
+    def all(self):
+        """Return all cached scan results."""
+        return list(self._cache.values())
+
     def set(self, file_path, result):
         """Store a scan result, keyed by the file's content fingerprint."""
         fp = _file_fingerprint(file_path)
@@ -178,19 +182,22 @@ class FileScanCache:
                 logger.warning(f'Failed to delete cache file: {e}')
 
 
-def safe_quarantine(file_path, quarantine_dir, encrypt_fn, max_size=100 * 1024 * 1024):
+def safe_quarantine(file_path, quarantine_dir, encrypt_fn, max_size=100 * 1024 * 1024, force=False):
     """Safely encrypt and remove a suspicious file.
 
     Returns ``(success, message)``.  Protected system files, files too large
     to read into memory, and files that cannot be accessed are skipped with
     a descriptive message instead of raising an exception.
+
+    Set ``force=True`` to bypass the protected-location guard for confirmed
+    high-confidence threats such as ransomware or persistence.
     """
     file_path = str(file_path)
     try:
         if not os.path.exists(file_path):
             return False, 'File does not exist'
 
-        if _is_protected(file_path):
+        if not force and _is_protected(file_path):
             return False, f'Skipped protected system location: {file_path}'
 
         size = os.path.getsize(file_path)
