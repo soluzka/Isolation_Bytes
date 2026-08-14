@@ -1534,7 +1534,18 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
             with results_lock:
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
 
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception as e:
+                output.write(f"[WARNING] progress_callback raised during YARA update: {e}\n")
+
         _run_ml_and_ransomware_checks(filepath, results, output)
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception as e:
+                output.write(f"[WARNING] progress_callback raised during ML/ransomware check: {e}\n")
 
         # Escalate high-severity YARA matches to critical when ML also flags the file.
         if yara_result:
@@ -1699,7 +1710,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     if _load_scheduled_scan_state(state_file, output):
         output.write('[conditional_startup] Running scheduled scans...\n')
         monitored_folders = _get_monitored_folders(basedir, output)
-        with ThreadPoolExecutor(max_workers=2) as executor:
+        with ThreadPoolExecutor(max_workers=4) as executor:
             future_process = executor.submit(
                 _scan_running_processes_step,
                 modules['process_monitor'], modules['scan_utils'], results, output, progress_callback
@@ -1708,13 +1719,21 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
                 _scan_monitored_folders_step,
                 monitored_folders, modules, results, scanned_file_status, output, progress_callback
             )
+            future_persistence = executor.submit(
+                _check_persistence_indicators_step,
+                results, output, progress_callback
+            )
+            future_hardening = executor.submit(
+                _scan_processes_hardening_step,
+                modules['process_security'], results, output, progress_callback
+            )
             future_process.result()
             future_file.result()
+            future_persistence.result()
+            future_hardening.result()
     else:
         _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
 
-    _scan_processes_hardening_step(modules['process_security'], results, output, progress_callback)
-    _check_persistence_indicators_step(results, output, progress_callback)
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
     _start_antivirus_cli_step(basedir, output)
