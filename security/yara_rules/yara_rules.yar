@@ -251,21 +251,7 @@ rule Suspicious_PowerShell_Strict {
         8 of them
 }
 
-    meta:
-        author = "CascadeAI"
-    strings:
-    condition:
-        3 of them
-}
-
 // Additional empowered rules for generic and fileless malware, droppers, macro exploits, and more can be added below as needed for full coverage.
-
-
-    meta:
-        author = "CascadeAI"
-    strings:
-    condition:
-}
 
 // === Broad Coverage Expansion ===
 

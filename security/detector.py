@@ -13,6 +13,19 @@ try:
 except ImportError:
     pefile = None
 
+SYSTEM_PATHS = ('\\windows\\', '\\windows$', '\\program files\\', '\\program files (x86)\\',
+                '\\programdata\\', '\\winsxs\\', '\\windowsapps\\', '\\system volume information')
+
+def _large_system_file(file_path, max_mb=200):
+    """Return True if the file is in a system path and larger than max_mb."""
+    lower = file_path.lower()
+    if not any(excl in lower for excl in SYSTEM_PATHS):
+        return False
+    try:
+        return os.path.getsize(file_path) > max_mb * 1024 * 1024
+    except Exception:
+        return False
+
 # Known ransomware-related file extensions/ransom-note filename patterns.
 # This is a lightweight, static-only heuristic (see NOTE on
 # check_ransomware_indicators) -- ransomware's real detection features
@@ -269,7 +282,10 @@ class EmberMalwareDetector:
         (e.g. the file isn't a parseable PE)."""
         if not self.available:
             return None
+        if os.path.getsize(file_path) > 50 * 1024 * 1024:
+            return None
         try:
+
             with open(file_path, 'rb') as f:
                 data = f.read()
             raw = self.extractor.raw_features(data)
@@ -349,7 +365,10 @@ class BodmasCnnDetector:
         """Return a malicious probability in [0, 1], or None on failure."""
         if not self.available:
             return None
+        if os.path.getsize(file_path) > 200 * 1024 * 1024:
+            return None
         try:
+
             with open(file_path, 'rb') as f:
                 data = f.read()
             raw = self.extractor.raw_features(data)

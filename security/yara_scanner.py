@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 import functools
+import warnings
 from yara import Error as YaraError
 
 def get_basedir():
@@ -447,7 +448,7 @@ def load_yara_rules():
             return [fallback_rule]
         return []
 
-def scan_file_with_yara(filepath, timeout=10):
+def scan_file_with_yara(filepath, timeout=5):
     """
     Scan a file using all available YARA rules. 
     Returns a list of match objects if suspicious, or an empty list if not suspicious.
@@ -462,18 +463,9 @@ def scan_file_with_yara(filepath, timeout=10):
         logging.warning(f"File does not exist: {filepath}")
         return []
     
-    # Skip files that are extremely large (now increased to 500MB)
     file_size = 0
     try:
         file_size = os.path.getsize(filepath)
-        if file_size > 500 * 1024 * 1024:  # 500MB
-            # Silently skip files that are too large without logging warnings
-            logging.debug(f"Skipping large file (>500MB): {filepath} ({file_size/1024/1024:.2f}MB)")
-            return []
-        elif file_size > 100 * 1024 * 1024:  # Special handling for large files (100MB - 500MB)
-            # Just log at debug level instead of info to reduce noise
-            logging.debug(f"Large file being scanned (performance may be impacted): {filepath} ({file_size/1024/1024:.2f}MB)")
-            # We could implement special handling for large files if needed
     except Exception as e:
         logging.error(f"Error checking file size: {str(e)}")
     
@@ -491,6 +483,8 @@ def scan_file_with_yara(filepath, timeout=10):
     if any(skip in lower_path for skip in {'\\logs\\', '\\panther\\', '\\minidump', '\\crashdumps', '\\diagtrack'}):
         logging.debug(f"Skipping log/crash directory file: {filepath}")
         return []
+
+
 
     # Load the YARA rules
     try:
@@ -520,7 +514,7 @@ def scan_file_with_yara(filepath, timeout=10):
         # locked/protected or oddly-handled files. Keep using the file path for
         # anything > 100 MB to avoid excessive memory use.
         data = None
-        use_data = file_size <= 100 * 1024 * 1024
+        use_data = file_size <= 5 * 1024 * 1024
 
         # Apply each rule with a timeout
         for rule_index, rule in enumerate(rules):
@@ -530,9 +524,12 @@ def scan_file_with_yara(filepath, timeout=10):
                     if data is None:
                         with open(filepath, 'rb') as fh:
                             data = fh.read()
-                    matches = rule.match(data=data, timeout=timeout, externals=externals, fast=True)
-                else:
-                    matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', RuntimeWarning)
+                    if use_data:
+                        matches = rule.match(data=data, timeout=timeout, externals=externals, fast=True)
+                    else:
+                        matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
                 
                 # Process any matches found
                 if matches:

@@ -1,5 +1,6 @@
 import os
 import sys
+import glob
 
 FLASK_DEBUG = '--debug' in sys.argv
 
@@ -701,14 +702,8 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'running': False,
         'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
-        'scanned_files': len(scan_data.get('scanned_files', [])),
-        'quarantined_files': len(scan_data.get('quarantined_files', [])),
         'errors': len(errors),
         'process_events': len(scan_data.get('process_events', [])),
-        'ml_detections': len(scan_data.get('ml_detections', [])),
-        'ransomware_indicators': len(scan_data.get('ransomware_indicators', [])),
-        'persistence_indicators': _count_persistence_indicators(scan_data),
-        'yara_suspicious': len(scan_data.get('yara_suspicious', [])),
         'last_error': str(error) if error else last_internal
     })
 
@@ -718,6 +713,13 @@ def run_conditional_startup_background():
     from conditional_startup import run_conditional_startup_logic
     start_time = time.time()
     _last_progress_report = 0.0
+    last_counts = {k: 0 for k in ['scanned_files', 'quarantined_files', 'errors', 'process_events', 'ml_detections', 'ransomware_indicators', 'persistence_indicators', 'yara_suspicious']}
+
+    def _add_delta(key, current):
+        delta = current - last_counts[key]
+        if delta:
+            conditional_startup_state[key] = conditional_startup_state.get(key, 0) + delta
+            last_counts[key] = current
 
     def report_progress(partial_results):
         """Update shared state with in-progress counts so the status API
@@ -727,23 +729,23 @@ def run_conditional_startup_background():
         was only ever set once the whole scan finished."""
         nonlocal _last_progress_report
         now = time.time()
-        if now - _last_progress_report < 0.5:
+        if now - _last_progress_report < 0.2:
             return
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         with conditional_startup_lock:
+            _add_delta('scanned_files', len(partial_results.get('scanned_files', [])))
+            _add_delta('quarantined_files', len(partial_results.get('quarantined_files', [])))
+            _add_delta('errors', len(errors))
+            _add_delta('process_events', len(partial_results.get('process_events', [])))
+            _add_delta('ml_detections', len(partial_results.get('ml_detections', [])))
+            _add_delta('ransomware_indicators', len(partial_results.get('ransomware_indicators', [])))
+            _add_delta('persistence_indicators', _count_persistence_indicators(partial_results))
+            _add_delta('yara_suspicious', len(partial_results.get('yara_suspicious', [])))
             conditional_startup_state.update({
                 'running': True,
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'scanned_files': len(partial_results.get('scanned_files', [])),
-                'quarantined_files': len(partial_results.get('quarantined_files', [])),
-                'errors': len(errors),
                 'last_error': str(errors[-1]) if errors else None,
-                'process_events': len(partial_results.get('process_events', [])),
-                'ml_detections': len(partial_results.get('ml_detections', [])),
-                'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
-                'persistence_indicators': _count_persistence_indicators(partial_results),
-                'yara_suspicious': len(partial_results.get('yara_suspicious', [])),
             })
 
     with conditional_startup_lock:
@@ -751,21 +753,16 @@ def run_conditional_startup_background():
             'running': True,
             'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
             'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'scanned_files': 0,
-            'quarantined_files': 0,
-            'errors': 0,
-            'process_events': 0,
-            'ml_detections': 0,
-            'ransomware_indicators': 0,
-            'persistence_indicators': 0,
-            'yara_suspicious': 0,
             'duration': None,
             'last_error': None,
         })
 
     try:
         with scanning_lock:
-            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress)
+            critical_dirs = list(folder_watcher_state.get('monitored_paths', []))
+            if not critical_dirs:
+                critical_dirs = None
+            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress, critical_dirs=critical_dirs)
         with conditional_startup_lock:
             record_conditional_startup_run(scan_data, time.time() - start_time)
         logger.info("Conditional startup scan completed")
@@ -787,7 +784,7 @@ def _ml_model_status():
             os.path.exists(os.path.join(models_dir, 'bodmas_cnn_scaler.pkl'))
         ),
         'ember': os.path.exists(os.path.join(models_dir, 'ember_malware_model.txt')),
-        'synthetic': os.path.exists(os.path.join(models_dir, 'file_malware_classifier.pkl')),
+        'sklearn': os.path.exists(os.path.join(models_dir, 'file_malware_classifier.pkl')),
     }
 
 
@@ -1708,6 +1705,8 @@ def toggle_folder_watcher(action):
         if action not in ['start', 'stop']:
             return jsonify({'success': False, 'error': 'Invalid action'}), 400
         
+        discovered_subdirs = []
+        
         # Update folder watcher state    
         folder_watcher_state['active'] = (action == 'start')
         
@@ -2315,11 +2314,17 @@ def run_scheduled_scans():
         if not scanning_lock.acquire(blocking=False):
             time.sleep(1)
             continue
+        scan_files_count = 0
+        scan_quarantine_count = 0
+        scan_ml_hits = 0
+        scan_yara_hits = 0
+        scan_ransomware_hits = 0
+        scan_persistence_hits = 0
         try:
             # Run YARA scan on all files in monitored directories
             try:
                 from security.yara_scanner import scan_file_with_yara
-                from security.detector import ember_detector, detector
+                from security.detector import bodmas_cnn_detector, ember_detector, detector
             except ImportError:
                 logger.warning("YARA scanner or detector not available, skipping scheduled scan")
                 scan_file_with_yara = None
@@ -2357,6 +2362,14 @@ def run_scheduled_scans():
                                 continue
                             
                             yara_matches = scan_file_with_yara(file_path)
+                            scan_files_count += 1
+                            scan_yara_hits += len(yara_matches)
+                            for match in yara_matches:
+                                rule_name = getattr(match, 'rule', str(match)).lower()
+                                if 'ransomware' in rule_name:
+                                    scan_ransomware_hits += 1
+                                if 'persistence' in rule_name:
+                                    scan_persistence_hits += 1
                             cache_entry = {
                                 'yara_matches': [getattr(m, 'rule', str(m)) for m in yara_matches],
                                 'quarantined': False,
@@ -2366,33 +2379,52 @@ def run_scheduled_scans():
                             if yara_matches:
                                 logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
                                 
-                                # Get a second opinion from the trained classifier(s)
+                                # Get a second opinion from all trained AI/ML classifiers
                                 ml_score = None
-                                if ember_detector.available:
+                                ml_model = None
+                                if bodmas_cnn_detector.available:
+                                    try:
+                                        ml_score = bodmas_cnn_detector.score(file_path)
+                                        cache_entry['bodmas_cnn_score'] = ml_score
+                                        if ml_score is not None:
+                                            ml_model = 'bodmas_cnn'
+                                    except Exception:
+                                        pass
+                                if ml_score is None and ember_detector.available:
                                     ml_score = ember_detector.score(file_path)
                                     cache_entry['ember_score'] = ml_score
+                                    if ml_score is not None:
+                                        ml_model = 'ember'
                                 if ml_score is None and detector is not None:
                                     try:
                                         ml_score = detector.get_anomaly_score(file_path)
                                         cache_entry['legacy_ml_score'] = ml_score
+                                        if ml_score is not None:
+                                            ml_model = 'legacy'
                                     except Exception:
                                         print('Failed to compute legacy ML score')
                                 
-                                # Quarantine only when the ML model (EMBER or legacy)
+                                # Quarantine only when the ML model (BODMAS, EMBER or legacy)
                                 # agrees that the file is malicious.  Pure YARA matches
                                 # from broad rules are logged but not auto-quarantined
                                 # to avoid flooding the quarantine with false positives
                                 # (e.g. libcef.dll).
                                 should_quarantine = False
                                 if ml_score is not None:
-                                    if ember_detector.available and ml_score >= 0.60:
+                                    if ml_model == 'bodmas_cnn' and ml_score >= 0.60:
+                                        should_quarantine = True
+                                        cache_entry['quarantine_reason'] = 'bodmas_cnn'
+                                    elif ml_model == 'ember' and ml_score >= 0.60:
                                         should_quarantine = True
                                         cache_entry['quarantine_reason'] = 'ember'
-                                    elif not ember_detector.available and ml_score >= 0.5:
+                                    elif ml_model == 'legacy' and ml_score >= 0.5:
                                         should_quarantine = True
                                         cache_entry['quarantine_reason'] = 'legacy'
                                 
                                 if should_quarantine:
+                                    scan_quarantine_count += 1
+                                    if ml_score is not None:
+                                        scan_ml_hits += 1
                                     for match in yara_matches:
                                         logger.warning(f"Threat detected: {file_path} - Rule: {getattr(match, 'rule', match)}")
                                     
@@ -2416,6 +2448,16 @@ def run_scheduled_scans():
                 delete_quarantined_files_quick_start()
             except Exception as e:
                 logger.error(f"Error deleting quarantined files: {str(e)}")
+
+            # Update dashboard counters
+            with conditional_startup_lock:
+                conditional_startup_state['scanned_files'] = conditional_startup_state.get('scanned_files', 0) + scan_files_count
+                conditional_startup_state['quarantined_files'] = conditional_startup_state.get('quarantined_files', 0) + scan_quarantine_count
+                conditional_startup_state['ml_detections'] = conditional_startup_state.get('ml_detections', 0) + scan_ml_hits
+                conditional_startup_state['yara_suspicious'] = conditional_startup_state.get('yara_suspicious', 0) + scan_yara_hits
+                conditional_startup_state['ransomware_indicators'] = conditional_startup_state.get('ransomware_indicators', 0) + scan_ransomware_hits
+                conditional_startup_state['persistence_indicators'] = conditional_startup_state.get('persistence_indicators', 0) + scan_persistence_hits
+                conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
         
         except Exception as e:
             logger.error(f"Error in scheduled scan: {str(e)}")
@@ -2550,6 +2592,143 @@ def open_browser(port):
 class ServerInfo:
     def __init__(self):
         self.port = None
+
+# -- System Overload deep-remediation page --
+@app.route('/break-the-cycle')
+def break_the_cycle():
+    """Glitch-themed deep remediation dashboard."""
+    return render_template('break_the_cycle.html')
+
+@app.route('/break-the-cycle/engage', methods=['POST'])
+def break_the_cycle_engage():
+    """Break the Cycle + System Overload: clear quarantine, AI scan/quarantine, purge, kill, flush DNS, rescan."""
+    results = []
+    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+
+    # 1. Clear old quarantine so AI can fill it with fresh detections
+    try:
+        deleted = 0
+        if os.path.isdir(quarantine_dir):
+            for f in os.listdir(quarantine_dir):
+                fp = os.path.join(quarantine_dir, f)
+                if os.path.isfile(fp):
+                    try:
+                        os.remove(fp)
+                        deleted += 1
+                    except Exception:
+                        pass
+        results.append(f'Cleared {deleted} old quarantined files')
+    except Exception as e:
+        results.append(f'Quarantine cleanup error: {e}')
+
+    # 2. AI/ML scan of all fixed drives and quarantine high-risk files
+    ai_hits = 0
+    ai_quarantined = 0
+    ai_scanned = 0
+    try:
+        from security.detector import bodmas_cnn_detector, ember_detector, detector as sklearn_detector
+        all_drives = [p.mountpoint for p in psutil.disk_partitions() if 'fixed' in p.opts or p.fstype in ('NTFS', 'FAT32')]
+        if not all_drives:
+            all_drives = ['C:\\']
+        max_targets = min(100 * len(all_drives), 500)
+
+        ai_targets = []
+        start_time = time.time()
+        for root in all_drives:
+            for dirpath, dirs, files in os.walk(root):
+                # Avoid very deep/slow directories
+                dirs[:] = [d for d in dirs if d.lower() not in {'$recycle.bin', 'onedrive', 'windows.old', 'winsxs'}]
+                for f in files:
+                    if f.lower().endswith(('.exe', '.dll')):
+                        ai_targets.append(os.path.join(dirpath, f))
+                    if len(ai_targets) >= max_targets * 4 or (time.time() - start_time) > 30:
+                        break
+                if len(ai_targets) >= max_targets * 4 or (time.time() - start_time) > 30:
+                    break
+            if len(ai_targets) >= max_targets * 4 or (time.time() - start_time) > 30:
+                break
+
+        # Split target between newest and oldest PE files
+        try:
+            ai_targets.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+        except Exception:
+            pass
+        half = max_targets // 2
+        newest = ai_targets[:half]
+        oldest = ai_targets[-half:] if len(ai_targets) >= half else ai_targets[len(newest):]
+        ai_targets = list(dict.fromkeys(newest + oldest))
+
+        for fp in ai_targets:
+            ai_scanned += 1
+            for detector in (bodmas_cnn_detector, ember_detector, sklearn_detector):
+                try:
+                    if detector.is_malicious(fp):
+                        ai_hits += 1
+                        success, qmsg = safe_quarantine(fp, quarantine_dir, encrypt_file)
+                        if success:
+                            ai_quarantined += 1
+                        else:
+                            logger.warning(f'AI quarantine failed for {fp}: {qmsg}')
+                        break
+                except Exception:
+                    pass
+        results.append(f'AI/ML scanned {ai_scanned} files across {len(all_drives)} drive(s), {ai_hits} high-risk, {ai_quarantined} quarantined')
+        with conditional_startup_lock:
+            conditional_startup_state['scanned_files'] = conditional_startup_state.get('scanned_files', 0) + ai_scanned
+            conditional_startup_state['ml_detections'] = conditional_startup_state.get('ml_detections', 0) + ai_hits
+            conditional_startup_state['quarantined_files'] = conditional_startup_state.get('quarantined_files', 0) + ai_quarantined
+            conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        results.append(f'AI analysis error: {e}')
+
+    # 3. Purge known malware staging temp
+    temp_dir = os.environ.get('TEMP', os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp'))
+    staging_patterns = ['Defender_Quarantine*', 'tmp*', 'temp*.exe', 'payload*.tmp']
+    purged = 0
+    for pattern in staging_patterns:
+        for f in glob.glob(os.path.join(temp_dir, pattern)):
+            try:
+                if os.path.isfile(f) and os.path.getsize(f) < 100 * 1024 * 1024:
+                    os.remove(f)
+                    purged += 1
+            except Exception:
+                pass
+    results.append(f'Purged {purged} temp staging files')
+
+    try:
+        subprocess.run(['ipconfig', '/flushdns'], check=False, capture_output=True)
+        results.append('DNS cache flushed')
+    except Exception as e:
+        results.append(f'DNS flush error: {e}')
+
+    try:
+        suspicious_names = {'mimikatz', 'mimilib', 'procdump', 'ladon', 'cobaltstrike', 'meterpreter', 'reflectivedll', 'pwndump', 'empire', 'poshc2', 'sliver'}
+        killed = 0
+        for proc in psutil.process_iter(['pid', 'name']):
+            try:
+                name = (proc.info['name'] or '').lower().replace('.exe', '')
+                if name in suspicious_names:
+                    proc.terminate()
+                    killed += 1
+            except Exception:
+                pass
+        results.append(f'Terminated {killed} known malware processes')
+    except Exception as e:
+        results.append(f'Malware kill error: {e}')
+
+    try:
+        scan_response = run_startup()
+        if isinstance(scan_response, tuple):
+            scan_response, code = scan_response
+            body = scan_response.get_json() or {}
+            results.append('Deep rescan: ' + body.get('message', 'started'))
+        else:
+            body = scan_response.get_json() or {}
+            results.append('Deep rescan: ' + body.get('message', 'started'))
+    except Exception as e:
+        results.append(f'Deep rescan error: {e}')
+
+    return jsonify({'status': 'success', 'results': results})
 
 if __name__ == '__main__':
     if '--install-startup' in sys.argv:

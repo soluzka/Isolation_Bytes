@@ -15,11 +15,40 @@
             top: 0; left: 0; right: 0; bottom: 0;
             background: url("{{ url_for('static', filename='shield_bg.png') }}") no-repeat center fixed;
             background-size: 300px;
-            opacity: 0.12;
-            z-index: -1;
+            opacity: 0.40;
+            z-index: 9999;
+            pointer-events: none;
             pointer-events: none;
         }
         h2 { color: #2d5f9a; }
+        @keyframes dash-glitch {
+            0% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(0); }
+            20% { text-shadow: -3px 0 #ff0055, 3px 0 #00eaff; transform: translate(-2px, 1px); }
+            40% { text-shadow: 3px 0 #00eaff, -3px 0 #ff0055; transform: translate(2px, -1px); }
+            60% { text-shadow: -2px 0 #00eaff, 2px 0 #ff0055; transform: translate(-1px, 2px); }
+            80% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(1px, -2px); }
+            100% { text-shadow: -2px 0 #ff0055, 2px 0 #00eaff; transform: translate(0); }
+        }
+        .glitch-title { animation: dash-glitch 0.18s infinite; }
+        .scanlines {
+            position: fixed; top:0; left:0; right:0; bottom:0;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 3px, rgba(0,0,0,0.3) 3px, rgba(0,0,0,0.3) 4px);
+            background-size: 100% 5px; pointer-events: none; z-index: 1000; opacity: 1;
+            animation: scroll-scanlines 10s linear infinite;
+        }
+        @keyframes scroll-scanlines {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+        @keyframes btn-glitch {
+            0% { transform: translate(0); box-shadow: 2px 0 #ff0055, -2px 0 #00eaff; }
+            25% { transform: translate(-2px, 1px); box-shadow: -2px 0 #ff0055, 2px 0 #00eaff; }
+            50% { transform: translate(2px, -1px); box-shadow: 2px 0 #00eaff, -2px 0 #ff0055; }
+            75% { transform: translate(-1px, 2px); box-shadow: -2px 0 #00eaff, 2px 0 #ff0055; }
+            100% { transform: translate(0); box-shadow: 2px 0 #ff0055, -2px 0 #00eaff; }
+        }
+        button, input[type="submit"] { animation: btn-glitch 0.2s infinite; }
+
         nav a { margin-right: 1em; }
         .status { font-weight: bold; }
         .button-row form, .button-row .c2-group { display: inline; margin-right: 1em; }
@@ -129,7 +158,8 @@
 
 </head>
 <body>
-    <h2>Antivirus Web Interface</h2>
+    <div class="scanlines"></div>
+    <h2 class="glitch-title">Antivirus Web Interface</h2>
     <input type="hidden" id="network_monitor_running" value="{{ 'true' if network_monitor_running else 'false' }}">
     <p>Real-Time Protection: <span class="status" id="rtp_status">{{ 'ENABLED' if folder_watcher_status else 'DISABLED' }}</span></p>
     <p>Auto-Block: <span class="status" id="auto_block_status">{{ 'ENABLED' if auto_block_enabled else 'DISABLED' }}</span></p>
@@ -527,7 +557,7 @@ if (stopAutoUpdatesBtn) {
                 list.style.listStyle = 'none';
                 list.style.padding = '0';
                 list.style.margin = '0';
-                const names = {bodmas_cnn: 'BODMAS CNN', ember: 'EMBER', synthetic: 'Synthetic'};
+                const names = {bodmas_cnn: 'BODMAS CNN', ember: 'EMBER', sklearn: 'Scikit-Learn'};
                 Object.entries(mlModels).forEach(function (entry) {
                     const [key, loaded] = entry;
                     const li = document.createElement('li');
@@ -742,7 +772,7 @@ if (stopAutoUpdatesBtn) {
             // Update network monitor buttons
             const startNetworkBtn = document.getElementById('start_network_monitor_btn');
             const stopNetworkBtn = document.getElementById('stop_network_monitor_btn');
-            if (startNetworkBtn) startNetworkBtn.disabled = window.serviceStates.networkMonitorRunning;
+            if (startNetworkBtn) startNetworkBtn.disabled = false;
             if (stopNetworkBtn) stopNetworkBtn.disabled = !window.serviceStates.networkMonitorRunning;
 
             // Update folder watcher buttons
@@ -1590,6 +1620,7 @@ if (stopAutoUpdatesBtn) {
         <a href="/quarantine">Manage Quarantine</a>
         <a href="/logs">View Antivirus Logs</a>
         <a href="/safe_download">Safe Download</a>
+        <a href="/break-the-cycle" style="color:#c0392b;font-weight:bold;">BREAK THE CYCLE</a>
         <a href="/quarantine/list" style="display:inline-block;margin-top:1em;background:#16a085;color:#fff;padding:0.5em 1em;border-radius:5px;text-decoration:none;">List Quarantine</a>
     </nav>
     </div>
@@ -1635,7 +1666,11 @@ if (stopAutoUpdatesBtn) {
         function updateButtonStates(service, isRunning) {
             const startBtn = document.getElementById(`start_${service}_btn`);
             const stopBtn = document.getElementById(`stop_${service}_btn`);
-            if (startBtn) startBtn.disabled = isRunning;
+            if (service === 'network_monitor') {
+                if (startBtn) startBtn.disabled = false;
+            } else {
+                if (startBtn) startBtn.disabled = isRunning;
+            }
             if (stopBtn) stopBtn.disabled = !isRunning;
         }
 

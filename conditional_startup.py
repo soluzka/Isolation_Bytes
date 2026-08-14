@@ -66,10 +66,10 @@ def _resolve_critical_directories():
             program_data = 'C:\\ProgramData'
 
     dirs = [
-        os.path.join(system_root, 'System32'),
         os.path.join(system_root, 'Temp'),
         os.path.join(user_profile, 'Downloads'),
         os.path.join(user_profile, 'AppData\\Local\\Temp'),
+        os.path.join(user_profile, 'Desktop'),
         os.path.join(program_data, 'Microsoft\\Windows\\Start Menu\\Programs\\Startup')
     ]
     return [d for d in dirs if os.path.isdir(d)]
@@ -139,8 +139,8 @@ def routine_maintenance_and_system_recovery():
             yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
             yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)
             
-            # Scan critical system directories (auto-detect drive if env vars missing)
-            critical_dirs = _resolve_critical_directories()
+            # Scan critical system directories (or use provided override)
+            critical_dirs = critical_dirs if critical_dirs else _resolve_critical_directories()
             
             for scan_dir in critical_dirs:
                 if os.path.exists(scan_dir):
@@ -1656,7 +1656,7 @@ def _build_scanned_results(results, scanned_file_status):
     return scanned_results
 
 
-def run_conditional_startup_logic(open_browser=True, progress_callback=None):
+def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None):
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
 

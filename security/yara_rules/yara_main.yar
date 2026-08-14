@@ -4,11 +4,11 @@ rule AirGapAttackIndicators {
         severity = "high"
         
     strings:
-        $audio_api = "waveInOpen" wide ascii
-        $led_control = "SetLED" wide ascii
-        $temp_sensor = "GetTemperature" wide ascii
-        $fan_control = "SetFanSpeed" wide ascii
-        $screen_capture = "CreateDC" wide ascii
+        $audio_api = "waveInOpen" wide ascii fullword
+        $led_control = "SetLED" wide ascii fullword
+        $temp_sensor = "GetTemperature" wide ascii fullword
+        $fan_control = "SetFanSpeed" wide ascii fullword
+        $screen_capture = "CreateDC" wide ascii fullword
         $modulation = { 68 ?? ?? ?? ?? 6A ?? FF 15 }
         
     condition:
@@ -22,8 +22,8 @@ rule ShackAttackIndicators {
         
     strings:
         $freq_mod = { 0F 30 ?? ?? 0F 32 }
-        $voltage = "SetVoltage" wide ascii
-        $timing = "QueryPerformanceCounter" wide ascii
+        $voltage = "SetVoltage" wide ascii fullword
+        $timing = "QueryPerformanceCounter" wide ascii fullword
         $overclock = { 0F 30 89 ?? ?? ?? ?? }
         $hw_access = { 0F 3F ?? ?? }
         
@@ -40,7 +40,7 @@ rule AdvancedCodeReuseAttack {
         $rop_chain = { C3 ?? ?? ?? ?? C3 }
         $stack_pivot = { 94 ?? ?? ?? ?? 87 }
         $jop_gadget = { FF ?? ?? ?? ?? FF }
-        $ret2libc = "system" wide ascii
+        $ret2libc = "system" wide ascii fullword
         
     condition:
         2 of them and $ret2libc and filesize < 20KB
@@ -52,26 +52,10 @@ rule HardwareSecurityBypass {
         severity = "critical"
         
     strings:
-        $tpm_access = "Tbs.dll" wide ascii
+        $tpm_access = "Tbs.dll" wide ascii fullword
         $sgx_attack = { 0F 01 D7 ?? ?? }
         $me_bypass = { BA ?? ?? ?? ?? B8 ?? ?? ?? ?? EE }
         $secure_boot = { 48 83 EC ?? 48 8B 05 }
-        
-    condition:
-        all of them and filesize < 20KB
-}
-
-rule SideChannelAttackTools {
-    meta:
-        description = "Detects side channel attack tools and patterns"
-        severity = "high"
-        
-    strings:
-        $cache_flush = { 0F AE ?? }
-        $meltdown = { 0F 01 ?? ?? ?? }
-        $spectre = { 48 ?? ?? E8 ?? ?? }
-        $timing = "QueryPerformanceCounter" wide ascii
-        $rdtsc = { 0F 31 }
         
     condition:
         all of them and filesize < 20KB
@@ -85,8 +69,8 @@ rule VirtualizationEscape {
     strings:
         $hyperv_instr = { 0F 01 ?? ?? ?? }
         $vm_detect = { 0F C7 ?? }
-        $container_esc = "docker.sock" wide ascii
-        $namespace = "unshare" wide ascii
+        $container_esc = "docker.sock" wide ascii fullword
+        $namespace = "unshare" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -99,9 +83,9 @@ rule InjectionTechniques {
         
     strings:
         $process_hollow = {55 8B EC 83 EC 20 53 56 57}
-        $dll_inject = "LoadLibraryA" wide ascii
-        $thread_exec = "CreateRemoteThread" wide ascii
-        $mem_write = "WriteProcessMemory" wide ascii
+        $dll_inject = "LoadLibraryA" wide ascii fullword
+        $thread_exec = "CreateRemoteThread" wide ascii fullword
+        $mem_write = "WriteProcessMemory" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -116,7 +100,7 @@ rule FirmwareManipulation {
         $uefi_mod = { 55 AA ?? ?? }
         $bios_write = { BA F8 FF }
         $spi_flash = { B9 ?? ?? D4 BA }
-        $acpi_table = "RSDT" wide ascii
+        $acpi_table = "RSDT" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -128,10 +112,10 @@ rule AdvancedPersistence {
         severity = "high"
         
     strings:
-        $wmi_persist = "ActiveScriptEventConsumer" wide ascii
-        $service_persist = "ServiceDll" wide ascii
-        $registry_persist = "CurrentVersion\\Run" wide ascii
-        $startup_persist = "Startup" wide ascii
+        $wmi_persist = "ActiveScriptEventConsumer" wide ascii fullword
+        $service_persist = "ServiceDll" wide ascii fullword
+        $registry_persist = "CurrentVersion\\Run" wide ascii fullword
+        $startup_persist = "Startup" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -143,10 +127,10 @@ rule ProtocolManipulation {
         severity = "high"
         
     strings:
-        $ssl_strip = "SSLv2" wide ascii
+        $ssl_strip = "SSLv2" wide ascii fullword
         $protocol_mod = { 16 03 01 }
         $handshake_mod = { 14 03 03 }
-        $cipher_downgrade = "TLS_RSA_WITH_NULL" wide ascii
+        $cipher_downgrade = "TLS_RSA_WITH_NULL" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -160,7 +144,7 @@ rule AdvancedMemoryCorruption {
     strings:
         $heap_spray = { 90 90 90 90 }
         $stack_overflow = { 41 41 41 41 }
-        $use_after_free = "LocalFree" wide ascii
+        $use_after_free = "LocalFree" wide ascii fullword
         $double_free = { FF 15 ?? ?? ?? ?? FF 15 }
         $memory_write = { 89 ?? ?? ?? C7 45 }
         
@@ -237,7 +221,7 @@ rule HardwareManipulation {
         $msr_write = { 0F 30 }
         $pci_access = { EC ?? EE }
         $smm_entry = { 0F 01 DE }
-        $acpi_mod = "SSDT" wide ascii
+        $acpi_mod = "SSDT" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -252,7 +236,7 @@ rule BootkitTechniques {
         $mbr_write = { 33 C0 8E D0 BC }
         $vbr_mod = { EB ?? 90 }
         $boot_hijack = { 48 83 EC 28 E8 }
-        $uefi_runtime = "EFI_RUNTIME_SERVICES" wide ascii
+        $uefi_runtime = "EFI_RUNTIME_SERVICES" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -280,9 +264,9 @@ rule SupplyChainAttack {
         
     strings:
         $modified_signature = { 30 82 ?? ?? 30 82 }
-        $tampered_update = "UpdateExe" wide ascii
+        $tampered_update = "UpdateExe" wide ascii fullword
         $fake_cert = { 06 03 55 04 03 }
-        $malicious_dependency = "node_modules" wide ascii
+        $malicious_dependency = "node_modules" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -294,10 +278,10 @@ rule ProcessInjectionAdvanced {
         severity = "high"
         
     strings:
-        $atom_bombing = "GlobalAddAtomA" wide ascii
-        $process_doppel = "UpdateProcThreadAttribute" wide ascii
+        $atom_bombing = "GlobalAddAtomA" wide ascii fullword
+        $process_doppel = "UpdateProcThreadAttribute" wide ascii fullword
         $proc_hollow = { 50 51 52 53 56 57 }
-        $thread_hijack = "SetThreadContext" wide ascii
+        $thread_hijack = "SetThreadContext" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -312,7 +296,7 @@ rule FirmwareRootkit {
         $smi_handler = { 0F 01 DD }
         $flash_write = { BA F8 FF ?? ?? }
         $me_override = { B8 ?? ?? ?? ?? BA }
-        $acpi_hijack = "FACP" wide ascii
+        $acpi_hijack = "FACP" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -343,7 +327,7 @@ rule TrustedExecutionBypass {
         $sgx_enter = { 0F 01 D7 }
         $enclave_violation = { 0F AE E8 }
         $measurement = { 0F 37 }
-        $attestation = "sgx_get_report" wide ascii
+        $attestation = "sgx_get_report" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -355,9 +339,9 @@ rule AdvancedFirmwareAttack {
         severity = "critical"
         
     strings:
-        $uefi_table = "EFI_SYSTEM_TABLE" wide ascii
+        $uefi_table = "EFI_SYSTEM_TABLE" wide ascii fullword
         $smm_base = { 0F 01 DE }
-        $acpi_override = "DSDT" wide ascii
+        $acpi_override = "DSDT" wide ascii fullword
         $pci_config = { BA F8 }
         
     condition:
@@ -385,10 +369,10 @@ rule AISpoofingAttack {
         severity = "critical"
         
     strings:
-        $model_injection = "model.load_state_dict" wide ascii
+        $model_injection = "model.load_state_dict" wide ascii fullword
         $weight_tampering = { 89 45 ?? 8B 45 ?? F3 0F }
         $gradient_poison = { F3 0F 10 45 ?? F3 0F 11 }
-        $tensor_manipulation = "torch.tensor" wide ascii
+        $tensor_manipulation = "torch.tensor" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -400,10 +384,10 @@ rule EdgeComputingAttack {
         severity = "high"
         
     strings:
-        $edge_bypass = "edge.network.config" wide ascii
+        $edge_bypass = "edge.network.config" wide ascii fullword
         $node_tamper = { 48 8B 45 ?? 48 8D 15 }
         $mesh_exploit = { 48 89 E5 41 57 41 56 41 }
-        $gateway_manipulation = "gateway.settings" wide ascii
+        $gateway_manipulation = "gateway.settings" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -415,7 +399,7 @@ rule IoTBotnetC2 {
         severity = "critical"
         
     strings:
-        $mqtt_exploit = "mqtt.subscribe" wide ascii
+        $mqtt_exploit = "mqtt.subscribe" wide ascii fullword
         $coap_manipulation = { 44 01 ?? ?? B1 }
         $lorawan_inject = { 48 8D 0D ?? ?? ?? ?? }
         $zigbee_control = { A1 ?? ?? ?? ?? 85 C0 }
@@ -431,7 +415,7 @@ rule AdvancedSwarmAttack {
         
     strings:
         $swarm_sync = { 48 8B 45 ?? 48 89 45 ?? }
-        $mesh_coordination = "mesh.coordinate" wide ascii
+        $mesh_coordination = "mesh.coordinate" wide ascii fullword
         $node_recruitment = { 48 89 E5 41 57 41 56 }
         $distributed_exec = { 55 48 89 E5 41 57 41 }
         
@@ -448,7 +432,7 @@ rule BionicSecurityBypass {
         $neural_interface = { 48 8B 45 ?? 48 8D 15 }
         $sensory_override = { 0F AE E8 48 8B }
         $biometric_spoof = { 48 89 E5 41 57 41 }
-        $implant_manipulation = "neural.bridge" wide ascii
+        $implant_manipulation = "neural.bridge" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -461,7 +445,7 @@ rule QuantumResistanceAttack {
         
     strings:
         $lattice_break = { 48 89 E5 41 57 41 56 }
-        $post_quantum = "PQCgenKAT" wide ascii
+        $post_quantum = "PQCgenKAT" wide ascii fullword
         $superposition_forge = { 0F AE E8 48 8B }
         $quantum_oracle = { 48 8D 0D ?? ?? ?? ?? }
         

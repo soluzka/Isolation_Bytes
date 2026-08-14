@@ -1,58 +1,13 @@
-rule HeapSprayPattern {
-    meta:
-        description = "Detects heap spray attack patterns"
-        severity = "critical"
-        
-    strings:
-        $nop_sled = { 90 90 90 90 90 90 }
-        $spray_alloc = "VirtualAlloc" wide ascii
-        $heap_create = "HeapCreate" wide ascii
-        $large_alloc = { 68 00 00 10 00 }  // PUSH 0x100000
-        
-    condition:
-        all of them and filesize < 20KB
-}
-
-rule StackPivotDetection {
-    meta:
-        description = "Detects stack pivot techniques"
-        severity = "critical"
-        
-    strings:
-        $xchg_esp = { 94 }  // XCHG ESP,EAX
-        $mov_esp = { 8B ?? 24 }  // MOV ESP,[REG]
-        $lea_esp = { 8D ?? 24 }  // LEA ESP,[REG]
-        $add_esp = { 83 C4 }     // ADD ESP,imm8
-        
-    condition:
-        all of them and filesize < 20KB and filesize < 20KB
-}
-
 rule MemoryDisclosure {
     meta:
         description = "Detects memory disclosure attempts"
         severity = "high"
         
     strings:
-        $read_mem = "ReadProcessMemory" wide ascii
-        $virtual_query = "VirtualQueryEx" wide ascii
+        $read_mem = "ReadProcessMemory" wide ascii fullword
+        $virtual_query = "VirtualQueryEx" wide ascii fullword
         $mem_pattern = { 8B 45 ?? 8B 00 }
-        $heap_walk = "HeapWalk" wide ascii
-        
-    condition:
-        all of them and filesize < 20KB
-}
-
-rule UseAfterFreePattern {
-    meta:
-        description = "Detects use-after-free exploitation patterns"
-        severity = "critical"
-        
-    strings:
-        $double_free = { FF 15 ?? ?? ?? ?? FF 15 }
-        $heap_free = "HeapFree" wide ascii
-        $dangling_ref = { 8B 06 85 C0 }
-        $realloc_pattern = "HeapReAlloc" wide ascii
+        $heap_walk = "HeapWalk" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -64,28 +19,13 @@ rule KernelPoolOverflow {
         severity = "critical"
         
     strings:
-        $pool_tag = "kern" wide ascii
-        $pool_alloc = "ExAllocatePool" wide ascii
+        $pool_tag = "kern" wide ascii fullword
+        $pool_alloc = "ExAllocatePool" wide ascii fullword
         $pool_overflow = { F3 A5 }  // REP MOVSD
         $pool_spray = { B9 ?? ?? 00 00 F3 }  // MOV ECX, X; REP
         
     condition:
         all of them and filesize < 20KB
-}
-
-rule ReturnOrientedProgramming {
-    meta:
-        description = "Detects ROP chain construction"
-        severity = "critical"
-        
-    strings:
-        $gadget_chain = { C3 ?? ?? ?? ?? C3 }
-        $pop_ret = { 5? C3 }
-        $push_ret = { 68 ?? ?? ?? ?? C3 }
-        $move_esp = { 8B ?? 24 ?? ?? ?? ?? C3 }
-        
-    condition:
-        all of them and filesize < 20KB and filesize < 20KB
 }
 
 rule HeapFungibility {
@@ -112,7 +52,7 @@ rule StackCookieBypasses {
         $cookie_check = { 33 C5 89 45 FC }
         $cookie_override = { C7 45 FC }
         $frame_pointer = { 55 8B EC 81 EC }
-        $exception_handler = "SetUnhandledExceptionFilter" wide ascii
+        $exception_handler = "SetUnhandledExceptionFilter" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -139,10 +79,10 @@ rule MemoryMappingExploit {
         severity = "critical"
         
     strings:
-        $map_view = "MapViewOfFile" wide ascii
-        $create_section = "NtCreateSection" wide ascii
-        $physical_mem = "\\\\.\\PhysicalMemory" wide ascii
-        $mem_device = "\\\\.\\MemoryDevice" wide ascii
+        $map_view = "MapViewOfFile" wide ascii fullword
+        $create_section = "NtCreateSection" wide ascii fullword
+        $physical_mem = "\\\\.\\PhysicalMemory" wide ascii fullword
+        $mem_device = "\\\\.\\MemoryDevice" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -169,9 +109,9 @@ rule KernelMemoryDisclosure {
         severity = "critical"
         
     strings:
-        $kdebug_read = "DbgkReadVirtualMemory" wide ascii
+        $kdebug_read = "DbgkReadVirtualMemory" wide ascii fullword
         $kernel_read = { 0F 01 F8 8B 45 }
-        $mdl_mapping = "MmMapLockedPages" wide ascii
+        $mdl_mapping = "MmMapLockedPages" wide ascii fullword
         $probe_read = { 0F B6 ?? ?? ?? ?? ?? }
         
     condition:
@@ -184,10 +124,10 @@ rule ThreadContextManipulation {
         severity = "critical"
         
     strings:
-        $context_get = "GetThreadContext" wide ascii
-        $context_set = "SetThreadContext" wide ascii
-        $suspend_thread = "SuspendThread" wide ascii
-        $resume_thread = "ResumeThread" wide ascii
+        $context_get = "GetThreadContext" wide ascii fullword
+        $context_set = "SetThreadContext" wide ascii fullword
+        $suspend_thread = "SuspendThread" wide ascii fullword
+        $resume_thread = "ResumeThread" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
@@ -201,24 +141,11 @@ rule StackCanaryBypass {
     strings:
         $canary_read = { 64 A1 18 00 00 00 }
         $canary_override = { 89 45 FC 33 C5 }
-        $cookie_init = "__security_init_cookie" wide ascii
-        $fail_handler = "__security_check_fail" wide ascii
+        $cookie_init = "__security_init_cookie" wide ascii fullword
+        $fail_handler = "__security_check_fail" wide ascii fullword
         
     condition:
         all of them and filesize < 20KB
 }
 
-rule MemoryDebuggingAbuse {
-    meta:
-        description = "Detects memory debugging mechanism abuse"
-        severity = "high"
-        
-    strings:
-        $debug_heap = "PageHeap" wide ascii
-        $heap_validate = "HeapValidate" wide ascii
-        $debug_break = { CC CC CC CC }
-        $memory_bp = { 0F 0B }  // UD2 instruction
-        
-    condition:
-        all of them and filesize < 20KB
-}
+

@@ -82,18 +82,26 @@ class FolderWatcher:
         
         return directories
 
+    def _is_system_path(self, path):
+        """Skip core Windows system directories, unless the file is under 200MB."""
+        from security.detector import _large_system_file
+        return _large_system_file(path)
+
     def on_created(self, event):
         """Handle file creation events."""
         if not event.is_directory:
             file_path = event.src_path
             try:
-                # Check if file exists and is not empty
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                    self.logger.info(f"New file detected: {file_path}")
-                    
+                # Check if file exists and is not empty, and is not a core system path
+                if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                    return
+                if self._is_system_path(file_path):
+                    return
+                self.logger.info(f"New file detected: {file_path}")
+
                     # Perform YARA scan
                     from security.yara_scanner import scan_file_with_yara
-                    from security.detector import detector
+                    from security.detector import detector, bodmas_cnn_detector, ember_detector
                     
                     # Check with YARA rules
                     is_suspicious = scan_file_with_yara(file_path)
@@ -103,12 +111,17 @@ class FolderWatcher:
                     # Get file details
                     file_size = os.path.getsize(file_path)
                     
-                    # Get ML prediction
-                    prediction = detector.predict([file_path])
-                    anomaly_score = detector.get_anomaly_score(file_path)
+                    # Get ML predictions from all three models
+                    ml_hits = []
+                    if detector.is_malicious(file_path):
+                        ml_hits.append('sklearn')
+                    if bodmas_cnn_detector.is_malicious(file_path):
+                        ml_hits.append('bodmas_cnn')
+                    if ember_detector.is_malicious(file_path):
+                        ml_hits.append('ember')
                     
-                    if prediction[0] == -1:  # If ML predicts malicious
-                        self.logger.warning(f"Suspicious file detected: {file_path}")
+                    if ml_hits:  # If any ML model predicts malicious
+                        self.logger.warning(f"Suspicious file detected: {file_path} (models: {', '.join(ml_hits)})")
                         
                         # Create quarantine filename
                         quarantine_filename = os.path.basename(file_path) + '.enc'
@@ -151,10 +164,13 @@ class FolderWatcher:
         if not event.is_directory:
             file_path = event.src_path
             try:
-                # Check if file exists and is not empty
-                if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                    self.logger.info(f"File modified: {file_path}")
-                    # TODO: Add file scanning logic here
+                # Check if file exists and is not empty, and is not a core system path
+                if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+                    return
+                if self._is_system_path(file_path):
+                    return
+                self.logger.info(f"File modified: {file_path}")
+                # TODO: Add file scanning logic here
             except Exception as e:
                 self.logger.error(f"Error processing modified file {file_path}: {str(e)}")
 
