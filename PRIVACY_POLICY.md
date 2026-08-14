@@ -74,6 +74,18 @@ This product is not intended for use by children under 13. We do not knowingly c
 
 We may update this Privacy Policy from time to time. Changes will be posted with an updated effective date.
 
-## 10. Contact
+## 10. Data Retention
+
+All scan data, quarantine records, and logs remain on your device. The application does not transmit them to the developer, so the developer cannot delete, modify, or access them. You can delete any of this data at any time by removing the local files.
+
+## 11. Your Rights
+
+Because all data is local, you have full control over it. You can:
+
+- View, copy, or delete any local file in the quarantine or log directories.
+- Disable any feature that contacts external services.
+- Uninstall the application and remove all associated local data.
+
+## 12. Contact
 
 For questions or concerns about this Privacy Policy, please open an issue in the project repository or contact the project maintainer.

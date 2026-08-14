@@ -292,7 +292,7 @@ def routine_maintenance_and_system_recovery():
                             filepath = os.path.join(root, file)
                             time.sleep(0)  # yield so the Flask server stays responsive
                             try:
-                                scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
+                                scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
                                 if malware_found:
                                     recovery_results["signature_scans"].append({
                                         "file": filepath,
@@ -1253,7 +1253,7 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
 
     def _locked_scan_file_for_viruses(filepath):
         with scanner_lock:
-            return scan_utils.scan_file_for_viruses(filepath)
+            return scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
 
     try:
         process_monitor.scan_running_processes(
@@ -1513,7 +1513,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     its outcome into results/scanned_file_status."""
     try:
         with scanner_lock:
-            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
+            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
         with results_lock:
             output.write(f"[conditional_startup] {msg}\n")
             scanned_file_status[filepath] = {

@@ -109,10 +109,19 @@ else:
     dotenv_path = '.env'
 load_dotenv(dotenv_path)
 
-# Seed the web_auth password store from the .env ADMIN_PASSWORD
+# Seed the web_auth password store from .env.
+# Prefer ADMIN_PASSWORD_HASH (a bcrypt string). Fall back to ADMIN_PASSWORD
+# and hash it at startup for migration; otherwise use a default.
 try:
-    from security.web_auth import set_password, verify_password
-    set_password(os.environ.get('ADMIN_PASSWORD', 'admin123'))
+    from security.web_auth import set_password, set_password_hash, verify_password
+    admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
+    admin_password = os.environ.get('ADMIN_PASSWORD')
+    if admin_password_hash:
+        set_password_hash(admin_password_hash)
+    elif admin_password:
+        set_password(admin_password)
+    else:
+        set_password('admin123')
 except Exception:
     verify_password = None
 
@@ -120,8 +129,9 @@ import secrets
 
 ADMIN_USERNAME = os.environ.get('ADMIN_USERNAME', 'admin')
 
-# Simple in-memory rate limiter for login attempts per remote address.
+# Simple in-memory rate limiters for login and stop requests per remote address.
 _login_attempts = {}
+_stop_attempts = {}
 
 
 def _is_login_rate_limited(remote_addr):
@@ -137,11 +147,29 @@ def _is_login_rate_limited(remote_addr):
     return False
 
 
+def _is_stop_rate_limited(remote_addr):
+    now = time.time()
+    window = 60  # 1 minute
+    max_attempts = 5
+    attempts = _stop_attempts.get(remote_addr, [])
+    attempts = [t for t in attempts if now - t < window]
+    _stop_attempts[remote_addr] = attempts
+    if len(attempts) >= max_attempts:
+        return True
+    _stop_attempts[remote_addr].append(now)
+    return False
+
+
 def _warn_default_credentials():
     """Warn if the admin account is still using the default values."""
-    if os.environ.get('ADMIN_USERNAME', 'admin') == 'admin' and os.environ.get('ADMIN_PASSWORD', 'admin123') == 'admin123':
-        logger.warning('Admin credentials are still the defaults (admin / admin123). Set ADMIN_USERNAME and ADMIN_PASSWORD in .env for production.')
-        print('WARNING: Default admin credentials are in use. Set ADMIN_USERNAME and ADMIN_PASSWORD in .env before production use.')
+    admin_user = os.environ.get('ADMIN_USERNAME', 'admin')
+    default_passwords = ('admin123', 'change-me')
+    is_default = admin_user == 'admin'
+    if is_default and verify_password:
+        is_default = any(verify_password(p) for p in default_passwords)
+    if is_default:
+        logger.warning('Admin credentials are still the defaults. Set ADMIN_USERNAME and ADMIN_PASSWORD_HASH in .env for production.')
+        print('WARNING: Default admin credentials are in use. Set ADMIN_USERNAME and ADMIN_PASSWORD_HASH in .env before production use.')
 
 
 def _validate_production_config():
@@ -154,11 +182,16 @@ def _validate_production_config():
     if not os.environ.get('FERNET_KEY'):
         errors.append('FERNET_KEY must be set in .env when FLASK_ENV=production')
     admin_user = os.environ.get('ADMIN_USERNAME', 'admin')
-    admin_pass = os.environ.get('ADMIN_PASSWORD', 'admin123')
-    if admin_user == 'admin' or admin_pass == 'admin123' or not admin_pass:
-        errors.append('ADMIN_USERNAME and ADMIN_PASSWORD must be changed from the defaults when FLASK_ENV=production')
-    if admin_pass and len(admin_pass) < 12:
-        errors.append('ADMIN_PASSWORD must be at least 12 characters when FLASK_ENV=production')
+    if admin_user == 'admin':
+        errors.append('ADMIN_USERNAME must be changed from the default when FLASK_ENV=production')
+    if os.environ.get('ADMIN_PASSWORD'):
+        errors.append('ADMIN_PASSWORD must be removed from .env; use ADMIN_PASSWORD_HASH instead')
+    if not os.environ.get('ADMIN_PASSWORD_HASH'):
+        errors.append('ADMIN_PASSWORD_HASH must be set in .env when FLASK_ENV=production')
+    if verify_password and os.environ.get('ADMIN_PASSWORD_HASH'):
+        default_passwords = ('admin123', 'change-me')
+        if any(verify_password(p) for p in default_passwords):
+            errors.append('ADMIN_PASSWORD_HASH must be for a strong, non-default password when FLASK_ENV=production')
     if errors:
         for e in errors:
             logger.error(f'Production config error: {e}')
@@ -1008,6 +1041,9 @@ def run_startup():
 @app.route('/api/conditional_startup/stop', methods=['POST'])
 def stop_conditional_startup():
     """Signal the conditional startup scan to stop as soon as it can."""
+    remote_addr = request.remote_addr or 'unknown'
+    if _is_stop_rate_limited(remote_addr):
+        return jsonify({"status": "error", "message": "Stop requests are limited to 5 per minute"}), 429
     try:
         from conditional_startup import STOP_EVENT
         STOP_EVENT.set()

@@ -452,7 +452,7 @@ def load_malware_signatures():
         
     return signatures
 
-def calculate_file_hashes(filepath):
+def calculate_file_hashes(filepath, stop_event=None):
     """
     Calculate MD5, SHA1, SHA256, SHA512, TLSH and imphash for a file.
     Returns a tuple of (md5_hash, sha1_hash, sha256_hash, sha512_hash, tlsh_hash, imphash)
@@ -465,13 +465,25 @@ def calculate_file_hashes(filepath):
     sha512 = hashlib.sha512()
     
     try:
+        chunks = []
+        chunk_size = 1024 * 1024  # 1 MB
         with open(get_resource_path(os.path.join(filepath)), 'rb') as f:
-            data = f.read()
+            while True:
+                if stop_event and stop_event.is_set():
+                    raise InterruptedError("File hashing stopped by user")
+                chunk = f.read(chunk_size)
+                if not chunk:
+                    break
+                md5.update(chunk)
+                sha1.update(chunk)
+                sha256.update(chunk)
+                sha512.update(chunk)
+                chunks.append(chunk)
         
-        md5.update(data)
-        sha1.update(data)
-        sha256.update(data)
-        sha512.update(data)
+        data = b''.join(chunks)
+        
+        if stop_event and stop_event.is_set():
+            raise InterruptedError("File hashing stopped by user")
         
         # TLSH fuzzy hash (catches variants even if a few bytes differ)
         tlsh_hash = ''
@@ -482,6 +494,9 @@ def calculate_file_hashes(filepath):
                 tlsh_hash = ''
         except Exception:
             pass
+        
+        if stop_event and stop_event.is_set():
+            raise InterruptedError("File hashing stopped by user")
         
         # imphash for PE files (catches renamed/repacked binaries with same imports)
         imphash = ''
@@ -494,6 +509,8 @@ def calculate_file_hashes(filepath):
             logging.debug("PE imphash extraction failed: %s", exc)
         
         return md5.hexdigest(), sha1.hexdigest(), sha256.hexdigest(), sha512.hexdigest(), tlsh_hash, imphash
+    except InterruptedError:
+        raise
     except Exception as e:
         logging.error(f"Error calculating file hashes for {filepath}: {str(e)}")
         raise
@@ -516,7 +533,7 @@ def _tlsh_match(value, signatures):
     return None
 
 
-def scan_file_for_viruses(filepath):
+def scan_file_for_viruses(filepath, stop_event=None):
     """
     Scans a file for viruses using all available definitions.
     Always loads the latest signatures from the signatures file.
@@ -524,18 +541,29 @@ def scan_file_for_viruses(filepath):
     """
     if not os.path.exists(filepath) or not os.path.isfile(filepath):
         return False, False, f"File not found: {filepath}"
+
+    if stop_event and stop_event.is_set():
+        return False, False, "Scan stopped by user"
     
     try:
         # Load the latest signatures
         signatures = load_malware_signatures()
+
+        if stop_event and stop_event.is_set():
+            return False, False, "Scan stopped by user"
         
         # Calculate file hashes
-        md5_hash, sha1_hash, sha256_hash, sha512_hash, tlsh_hash, imphash = calculate_file_hashes(filepath)
+        md5_hash, sha1_hash, sha256_hash, sha512_hash, tlsh_hash, imphash = calculate_file_hashes(filepath, stop_event=stop_event)
+
+        if stop_event and stop_event.is_set():
+            return False, False, "Scan stopped by user"
         
         # Check against exact hash databases
         for hash_type, hash_value in [('md5', md5_hash), ('sha1', sha1_hash),
                                        ('sha256', sha256_hash), ('sha512', sha512_hash),
                                        ('imphash', imphash)]:
+            if stop_event and stop_event.is_set():
+                return False, False, "Scan stopped by user"
             if hash_value and hash_value in signatures[hash_type]:
                 signature_name = signatures[hash_type][hash_value]
                 return True, True, f"Malware detected: {signature_name} ({hash_type.upper()} match)"
@@ -557,6 +585,9 @@ def scan_file_for_viruses(filepath):
             pass
         
         return True, False, "No malware found in signature database"
+
+    except InterruptedError:
+        return False, False, "Scan stopped by user"
     
     except Exception as e:
         logging.error(f"Error scanning file {filepath}: {str(e)}")

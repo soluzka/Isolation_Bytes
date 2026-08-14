@@ -30,6 +30,13 @@ def set_password(password):
     data['password_hash'] = hashed.decode('utf-8')
     _save_auth_data(data)
 
+
+def set_password_hash(password_hash):
+    """Store a pre-generated bcrypt hash string directly."""
+    data = _load_auth_data()
+    data['password_hash'] = password_hash
+    _save_auth_data(data)
+
 def verify_password(password):
     data = _load_auth_data()
     hash_str = data.get('password_hash')

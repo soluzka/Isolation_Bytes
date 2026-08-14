@@ -473,6 +473,16 @@ python test_environment.py
 
 ---
 
+## Privacy & Data Handling
+
+See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for the full policy. Summary:
+
+- All scans, quarantine data, and logs stay on your local device.
+- No telemetry or analytics are sent to the developer by default.
+- Optional external lookups (MalwareBazaar, VirusTotal, ThreatFox, URLhaus, HTTPBL) only send hashes/IOCs, never full file contents.
+- Quarantined files are encrypted; session cookies are signed with `SECRET_KEY` from `.env`.
+- Admin credentials are stored as a bcrypt hash (`ADMIN_PASSWORD_HASH`), not plaintext.
+
 ## License
 
 This project is released under the [MIT License](LICENSE).
