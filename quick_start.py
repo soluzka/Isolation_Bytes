@@ -2323,7 +2323,7 @@ def run_scheduled_scans():
         try:
             # Run YARA scan on all files in monitored directories
             try:
-                from security.yara_scanner import scan_file_with_yara
+                from security.yara_scanner import scan_file_with_yara, get_highest_severity
                 from security.detector import bodmas_cnn_detector, ember_detector, detector
             except ImportError:
                 logger.warning("YARA scanner or detector not available, skipping scheduled scan")
@@ -2376,55 +2376,59 @@ def run_scheduled_scans():
                                 'reported': False,
                             }
                             
+                            # Get a second opinion from all trained AI/ML classifiers for every file
+                            ml_score = None
+                            ml_model = None
+                            if bodmas_cnn_detector.available:
+                                try:
+                                    ml_score = bodmas_cnn_detector.score(file_path)
+                                    cache_entry['bodmas_cnn_score'] = ml_score
+                                    if ml_score is not None:
+                                        ml_model = 'bodmas_cnn'
+                                except Exception:
+                                    pass
+                            if ml_score is None and ember_detector.available:
+                                ml_score = ember_detector.score(file_path)
+                                cache_entry['ember_score'] = ml_score
+                                if ml_score is not None:
+                                    ml_model = 'ember'
+                            if ml_score is None and detector is not None:
+                                try:
+                                    ml_score = detector.get_anomaly_score(file_path)
+                                    cache_entry['legacy_ml_score'] = ml_score
+                                    if ml_score is not None:
+                                        ml_model = 'legacy'
+                                except Exception:
+                                    print('Failed to compute legacy ML score')
+                            
+                            # Track any ML hit for dashboard stats
+                            ml_hit = False
+                            if ml_score is not None:
+                                if ml_model == 'bodmas_cnn' and ml_score >= 0.60:
+                                    ml_hit = True
+                                elif ml_model == 'ember' and ml_score >= 0.60:
+                                    ml_hit = True
+                                elif ml_model == 'legacy' and ml_score >= 0.5:
+                                    ml_hit = True
+                            if ml_hit:
+                                scan_ml_hits += 1
+
                             if yara_matches:
                                 logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
-                                
-                                # Get a second opinion from all trained AI/ML classifiers
-                                ml_score = None
-                                ml_model = None
-                                if bodmas_cnn_detector.available:
-                                    try:
-                                        ml_score = bodmas_cnn_detector.score(file_path)
-                                        cache_entry['bodmas_cnn_score'] = ml_score
-                                        if ml_score is not None:
-                                            ml_model = 'bodmas_cnn'
-                                    except Exception:
-                                        pass
-                                if ml_score is None and ember_detector.available:
-                                    ml_score = ember_detector.score(file_path)
-                                    cache_entry['ember_score'] = ml_score
-                                    if ml_score is not None:
-                                        ml_model = 'ember'
-                                if ml_score is None and detector is not None:
-                                    try:
-                                        ml_score = detector.get_anomaly_score(file_path)
-                                        cache_entry['legacy_ml_score'] = ml_score
-                                        if ml_score is not None:
-                                            ml_model = 'legacy'
-                                    except Exception:
-                                        print('Failed to compute legacy ML score')
-                                
-                                # Quarantine only when the ML model (BODMAS, EMBER or legacy)
-                                # agrees that the file is malicious.  Pure YARA matches
-                                # from broad rules are logged but not auto-quarantined
-                                # to avoid flooding the quarantine with false positives
-                                # (e.g. libcef.dll).
-                                should_quarantine = False
-                                if ml_score is not None:
-                                    if ml_model == 'bodmas_cnn' and ml_score >= 0.60:
-                                        should_quarantine = True
-                                        cache_entry['quarantine_reason'] = 'bodmas_cnn'
-                                    elif ml_model == 'ember' and ml_score >= 0.60:
-                                        should_quarantine = True
-                                        cache_entry['quarantine_reason'] = 'ember'
-                                    elif ml_model == 'legacy' and ml_score >= 0.5:
-                                        should_quarantine = True
-                                        cache_entry['quarantine_reason'] = 'legacy'
-                                
+
+                                # Quarantine if ML agrees OR the YARA rules are ransomware/persistence
+                                is_ransomware = any('ransomware' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
+                                is_persistence = any('persistence' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
+
+                                should_quarantine = ml_hit or is_ransomware or is_persistence
                                 if should_quarantine:
                                     scan_quarantine_count += 1
-                                    if ml_score is not None:
-                                        scan_ml_hits += 1
+                                    if ml_hit:
+                                        cache_entry['quarantine_reason'] = ml_model
+                                    elif is_ransomware:
+                                        cache_entry['quarantine_reason'] = 'ransomware_yara'
+                                    elif is_persistence:
+                                        cache_entry['quarantine_reason'] = 'persistence_yara'
                                     for match in yara_matches:
                                         logger.warning(f"Threat detected: {file_path} - Rule: {getattr(match, 'rule', match)}")
                                     
@@ -2664,6 +2668,22 @@ def break_the_cycle_engage():
                 try:
                     if detector.is_malicious(fp):
                         ai_hits += 1
+                        # Run YARA for ransomware/persistence confirmation
+                        try:
+                            from security.yara_scanner import scan_file_with_yara, get_highest_severity
+                            yara_matches = scan_file_with_yara(fp)
+                            if yara_matches:
+                                is_ransomware = any('ransomware' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
+                                is_persistence = any('persistence' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
+                                highest = get_highest_severity(yara_matches)
+                                if is_ransomware:
+                                    logger.warning(f'Ransomware YARA match on {fp}: {", ".join(getattr(m, "rule", str(m)) for m in yara_matches)}')
+                                if is_persistence:
+                                    logger.warning(f'Persistence YARA match on {fp}: {", ".join(getattr(m, "rule", str(m)) for m in yara_matches)}')
+                                if highest == 'critical':
+                                    logger.warning(f'Critical YARA match on {fp}: {highest}')
+                        except Exception:
+                            pass
                         success, qmsg = safe_quarantine(fp, quarantine_dir, encrypt_file)
                         if success:
                             ai_quarantined += 1

@@ -5,7 +5,7 @@ import sys
 import time
 import functools
 import warnings
-from yara import Error as YaraError
+from yara import Error as YaraError, TimeoutError as YaraTimeoutError
 
 def get_basedir():
     """Get the base directory of the project."""
@@ -148,7 +148,7 @@ DEFINITIVE_MALWARE_KEYWORDS = (
     'xmrig', 'agenttesla', 'redline', 'remcos', 'njrat', 'asyncrat', 'plugx',
     'fin7', 'turla', 'carbanak', 'cobaltkitty',
     # Additional families, tools, and common C2 frameworks
-    'lokibot', 'azorult', 'smokeloader', 'icedid', 'bokbot', 'vjw0rm',
+    'lokibot', 'azorult', 'smokeloader', 'icedid', 'bokbot', 'vjw0rm', 'persistence',
     'nanocore', 'netwire', 'formbook', 'luminositylink', 'revenge',
     'cryptowall', 'petya', 'notpetya', 'blackcat', 'alphv',
     'sliver', 'metasploit', 'mimikatz', 'bloodhound', 'cobaltstrike',
@@ -543,13 +543,13 @@ def scan_file_with_yara(filepath, timeout=5):
                     rule_highest = get_highest_severity(matches)
                     if _rank_of(rule_highest) >= _rank_of(YARA_LOG_MIN_SEVERITY):
                         logging.warning(f"{rule_highest.upper() if rule_highest else 'YARA'} match in {filepath}: {', '.join(rule_names)}")
+            except YaraTimeoutError:
+                timeouts += 1
+                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}), stopping this file")
+                break
             except YaraError as ye:
-                if 'timeout' in str(ye).lower():
-                    timeouts += 1
-                    logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index})")
-                else:
-                    errors += 1
-                    logging.error(f"YARA error scanning {filepath}: {str(ye)}")
+                errors += 1
+                logging.error(f"YARA error scanning {filepath}: {str(ye)}")
                 continue
             except Exception as e:
                 errors += 1

@@ -103,13 +103,11 @@ class FolderWatcher:
                     from security.yara_scanner import scan_file_with_yara
                     from security.detector import detector, bodmas_cnn_detector, ember_detector
                     
-                    # Check with YARA rules
-                    is_suspicious = scan_file_with_yara(file_path)
-                    if not is_suspicious:
-                        return
-                        
                     # Get file details
                     file_size = os.path.getsize(file_path)
+
+                    # Check with YARA rules
+                    is_suspicious = scan_file_with_yara(file_path)
                     
                     # Get ML predictions from all three models
                     ml_hits = []
