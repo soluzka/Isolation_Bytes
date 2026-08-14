@@ -576,6 +576,7 @@ if (stopAutoUpdatesBtn) {
             }
 
             function renderStatus(data) {
+                window.currentConditionalStartupData = data;
                 if (!data.last_run && !data.running && !data.started_at) {
                     statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
                     renderMlModels(data.ml_models);
@@ -608,7 +609,7 @@ if (stopAutoUpdatesBtn) {
                     html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;
                 }
                 html += `<div style="margin-top:10px;">
-                    <button onclick="quarantineYaraMatches()" style="background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine YARA ransomware/persistence</button>
+                    <button onclick="quarantineYaraMatches()" style="background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine/review ransomware &amp; persistence</button>
                     <span id="quarantineYaraMsg" style="margin-left:10px;"></span>
                 </div>`;
                 statusDiv.innerHTML = html;
@@ -616,16 +617,94 @@ if (stopAutoUpdatesBtn) {
             }
 
             window.quarantineYaraMatches = function () {
-                fetch('/quarantine/yara-matches', {method: 'POST'})
-                    .then(r => r.json())
+                const data = window.currentConditionalStartupData || {};
+                // If no YARA suspicious matches, there is nothing to quarantine on the
+                // YARA side. Show the review list immediately instead of timing out
+                // while the server is busy with the conditional startup scan.
+                if (!data.yara_suspicious) {
+                    reviewPersistenceRansomwareFindings('<span style="color:#27ae60;">YARA quarantined 0</span>');
+                    return;
+                }
+                messageDiv.innerHTML = '<span style="color:#b36200;">Running YARA quarantine...</span>';
+                fetch('/quarantine/yara-matches', {method: 'POST', credentials: 'include', headers: {'Accept': 'application/json'}, signal: AbortSignal.timeout(120000)})
+                    .then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        return r.json();
+                    })
                     .then(d => {
-                        const span = document.getElementById('quarantineYaraMsg');
-                        if (span) span.textContent = `Quarantined ${d.count}`;
+                        const failedInfo = d.failed && d.failed.length ? ` (failed: ${d.failed.length})` : '';
+                        const color = (d.count || !failedInfo) ? '#27ae60' : '#c0392b';
+                        let details = '';
+                        if (d.failed && d.failed.length) {
+                            const sample = d.failed.slice(0, 5).map(f => `<li>${f}</li>`).join('');
+                            const more = d.failed.length > 5 ? `<p style="color:#c0392b;font-size:0.85em;">...and ${d.failed.length - 5} more</p>` : '';
+                            details = `<ul style="color:#c0392b;font-size:0.85em;margin-top:6px;">${sample}</ul>${more}`;
+                        }
+                        const yaraHtml = `<span style="color:${color};">YARA quarantined ${d.count}${failedInfo}</span>${details}`;
+                        reviewPersistenceRansomwareFindings(yaraHtml);
                     })
                     .catch(e => {
-                        const span = document.getElementById('quarantineYaraMsg');
-                        if (span) span.textContent = 'Error: ' + e;
+                        messageDiv.innerHTML = `<span style="color:#c0392b;">Error: ${e.message || e}</span>`;
                     });
+            };
+
+            window.reviewPersistenceRansomwareFindings = function (prefixHtml) {
+                prefixHtml = prefixHtml ? `<div style="margin-bottom:10px;">${prefixHtml}</div>` : '';
+                const data = window.currentConditionalStartupData || {};
+                const findings = data.findings || [];
+                if (!findings.length) {
+                    messageDiv.innerHTML = prefixHtml + '<span style="color:#7f8c8d;">No persistence/ransomware findings available. Run the conditional startup scan first.</span>';
+                    return;
+                }
+                let rows = findings.map((f, i) => `
+                    <tr>
+                        <td><input type="checkbox" class="finding-cb" value="${f.path.replace(/"/g, '&quot;')}" checked></td>
+                        <td title="${f.path.replace(/"/g, '&quot;')}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.path}</td>
+                        <td>${f.source}</td>
+                        <td style="font-size:0.85em;">${f.reason}</td>
+                    </tr>`).join('');
+                messageDiv.innerHTML = prefixHtml + `
+                    <div style="margin-top:10px;">
+                        <h4 style="margin:0 0 8px 0;">Review persistence/ransomware file findings</h4>
+                        <p style="color:#c0392b;font-size:0.85em;margin:0 0 8px 0;">
+                            Uncheck anything you do NOT want quarantined. System files may be false positives.
+                        </p>
+                        <table style="width:100%;font-size:0.85em;border-collapse:collapse;table-layout:fixed;">
+                            <thead><tr><th style="width:30px;"></th><th style="width:45%;">Path</th><th style="width:80px;">Source</th><th>Reason</th></tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                        <button onclick="quarantineSelectedFindings()" style="margin-top:8px;background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine selected</button>
+                    </div>`;
+            };
+
+            window.quarantineSelectedFindings = function () {
+                const selected = Array.from(document.querySelectorAll('.finding-cb:checked')).map(cb => cb.value);
+                if (!selected.length) {
+                    messageDiv.innerHTML = '<span style="color:#c0392b;">No files selected.</span>';
+                    return;
+                }
+                messageDiv.innerHTML = '<span style="color:#b36200;">Quarantining selected files...</span>';
+                fetch('/quarantine/findings', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify({paths: selected}),
+                    signal: AbortSignal.timeout(120000)
+                })
+                .then(r => r.json())
+                .then(d => {
+                    const failedInfo = d.failed && d.failed.length ? ` (failed: ${d.failed.length})` : '';
+                    let details = '';
+                    if (d.failed && d.failed.length) {
+                        const sample = d.failed.slice(0, 5).map(f => `<li>${f}</li>`).join('');
+                        const more = d.failed.length > 5 ? `<p style="color:#c0392b;font-size:0.85em;">...and ${d.failed.length - 5} more</p>` : '';
+                        details = `<ul style="color:#c0392b;font-size:0.85em;margin-top:6px;">${sample}</ul>${more}`;
+                    }
+                    messageDiv.innerHTML = `<span style="color:#27ae60;">Quarantined ${d.count}${failedInfo}</span>${details}`;
+                })
+                .catch(e => {
+                    messageDiv.innerHTML = `<span style="color:#c0392b;">Error: ${e.message || e}</span>`;
+                });
             };
 
             function refreshStatus() {
@@ -668,7 +747,7 @@ if (stopAutoUpdatesBtn) {
             }
 
             refreshStatus();
-            setInterval(refreshStatus, 10000);
+            setInterval(refreshStatus, 5000);
         })();
     </script>
     <div class="card">

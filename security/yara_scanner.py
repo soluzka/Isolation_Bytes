@@ -448,7 +448,7 @@ def load_yara_rules():
             return [fallback_rule]
         return []
 
-def scan_file_with_yara(filepath, timeout=5):
+def scan_file_with_yara(filepath, timeout=2):
     """
     Scan a file using all available YARA rules. 
     Returns a list of match objects if suspicious, or an empty list if not suspicious.

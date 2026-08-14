@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session, make_response
 
 # Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
 # module is normally run directly with `python quick_start.py`, which (unlike
@@ -431,9 +431,25 @@ def decrypt_file(encrypted_path, output_path):
             except Exception:
                 decrypted_data = None
 
+        # FERNET_KEY environment format (used by quarantine_utils.quarantine_file)
+        if decrypted_data is None:
+            fernet_key = os.environ.get('FERNET_KEY')
+            if fernet_key:
+                try:
+                    fernet_key = fernet_key.encode() if isinstance(fernet_key, str) else fernet_key
+                    decrypted_data = Fernet(fernet_key).decrypt(file_data)
+                except Exception:
+                    decrypted_data = None
+
         # Legacy format: whole file encrypted with the deterministic machine key
         if decrypted_data is None:
-            decrypted_data = Fernet(get_encryption_key()).decrypt(file_data)
+            try:
+                decrypted_data = Fernet(get_encryption_key()).decrypt(file_data)
+            except Exception:
+                decrypted_data = None
+
+        if decrypted_data is None:
+            return False
 
         # Save the decrypted file
         with open(output_path, 'wb') as file:
@@ -447,6 +463,7 @@ def decrypt_file(encrypted_path, output_path):
 # -- Conditional startup state and routes --
 conditional_startup_state = {
     'running': False,
+    'findings': [],
     'started_at': None,    # When the current/most recent run started
     'last_updated': None,  # Timestamp of the most recent progress tick (while running)
     'last_run': None,      # When the most recent run *completed* (success or failure)
@@ -464,6 +481,9 @@ conditional_startup_state = {
 conditional_startup_lock = threading.Lock()
 scanning_lock = threading.Lock()
 conditional_startup_thread = None  # Background scan thread, used to detect dead scans
+latest_yara_suspicious = []  # Full list of YARA suspicious matches from the last conditional startup
+latest_ransomware_indicators = []  # Full list of ransomware heuristic findings from the last conditional startup
+latest_persistence_indicators = {}  # Full persistence findings from the last conditional startup
 
 # -- Continuous Scan All state --
 continuous_scan_state = {
@@ -487,6 +507,9 @@ def _perform_scan_all():
     total_directories_scanned = 0
     detected_threats = 0
     total_yara_matches = 0
+    persistence_matches = 0
+    ransomware_matches = 0
+    yara_suspicious = []
     quarantined_count = 0
 
     if not monitored_dirs:
@@ -538,6 +561,7 @@ def _perform_scan_all():
                     dirs[:] = [d for d in dirs if not should_exclude_path(os.path.join(root, d))]
 
                     for file in files:
+                        time.sleep(0)
                         file_path = os.path.join(root, file)
                         if should_exclude_path(file_path):
                             continue
@@ -571,6 +595,14 @@ def _perform_scan_all():
 
                             yara_matches = scan_file_with_yara(file_path)
                             rule_names = [getattr(m, 'rule', str(m)) for m in yara_matches]
+
+                            for rule in rule_names:
+                                if rule.lower().startswith('persistence'):
+                                    persistence_matches += 1
+                                if rule.lower().startswith('ransomware'):
+                                    ransomware_matches += 1
+                            if any(r.lower().startswith('persistence') or r.lower().startswith('ransomware') for r in rule_names):
+                                yara_suspicious.append({'file': file_path, 'rules': rule_names})
 
                             cache_entry = {
                                 'yara_matches': rule_names,
@@ -641,6 +673,19 @@ def _perform_scan_all():
                 logger.error(f'Error scanning directory {directory}: {scan_error}')
                 results.append(f'Error scanning {directory}: {str(scan_error)}')
 
+        # Make the latest YARA ransomware/persistence matches available to the
+        # quarantine button, and update the dashboard counters from this scan.
+        global latest_yara_suspicious
+        latest_yara_suspicious = yara_suspicious
+        conditional_startup_state['yara_suspicious'] = total_yara_matches
+        conditional_startup_state['persistence_indicators'] = persistence_matches
+        conditional_startup_state['ransomware_indicators'] = ransomware_matches
+
+        try:
+            scan_cache._save()
+        except Exception:
+            pass
+
         duration = time.time() - start_time
 
         return {
@@ -700,16 +745,21 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     last_internal = str(errors[-1]) if errors else None
     conditional_startup_state.update({
         'running': False,
-        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'last_run': time.strftime('%Y-%m:%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
         'errors': len(errors),
         'process_events': len(scan_data.get('process_events', [])),
-        'last_error': str(error) if error else last_internal
+        'last_error': str(error) if error else last_internal,
     })
+    try:
+        conditional_startup_state.setdefault('findings', _findings_for_review())
+    except Exception:
+        pass
 
 
 def run_conditional_startup_background():
     """Run the conditional startup scan once in a background thread."""
+    global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
     from conditional_startup import run_conditional_startup_logic
     start_time = time.time()
     _last_progress_report = 0.0
@@ -733,20 +783,36 @@ def run_conditional_startup_background():
             return
         _last_progress_report = now
         errors = partial_results.get('errors', [])
+        new_counts = {
+            'scanned_files': len(partial_results.get('scanned_files', [])),
+            'quarantined_files': len(partial_results.get('quarantined_files', [])),
+            'errors': len(errors),
+            'process_events': len(partial_results.get('process_events', [])),
+            'ml_detections': len(partial_results.get('ml_detections', [])),
+            'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
+            'persistence_indicators': _count_persistence_indicators(partial_results),
+            'yara_suspicious': len(partial_results.get('yara_suspicious', [])),
+        }
         with conditional_startup_lock:
-            _add_delta('scanned_files', len(partial_results.get('scanned_files', [])))
-            _add_delta('quarantined_files', len(partial_results.get('quarantined_files', [])))
-            _add_delta('errors', len(errors))
-            _add_delta('process_events', len(partial_results.get('process_events', [])))
-            _add_delta('ml_detections', len(partial_results.get('ml_detections', [])))
-            _add_delta('ransomware_indicators', len(partial_results.get('ransomware_indicators', [])))
-            _add_delta('persistence_indicators', _count_persistence_indicators(partial_results))
-            _add_delta('yara_suspicious', len(partial_results.get('yara_suspicious', [])))
+            for key, current in new_counts.items():
+                _add_delta(key, current)
             conditional_startup_state.update({
                 'running': True,
-                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'last_updated': time.strftime('%Y-%m:%d %H:%M:%S'),
                 'last_error': str(errors[-1]) if errors else None,
             })
+            # Expose the latest detail lists so the review UI works
+            # even while the scan is still in progress.
+            global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
+            latest_yara_suspicious = partial_results.get('yara_suspicious', [])
+            latest_ransomware_indicators = partial_results.get('ransomware_indicators', [])
+            latest_persistence_indicators = partial_results.get('persistence_indicators', {})
+            # Cache a flattened, reviewable list inside the state so the dashboard
+            # can render it immediately without an extra API round-trip.
+            try:
+                conditional_startup_state['findings'] = _findings_for_review()
+            except Exception:
+                conditional_startup_state['findings'] = []
 
     with conditional_startup_lock:
         conditional_startup_state.update({
@@ -765,6 +831,18 @@ def run_conditional_startup_background():
             scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress, critical_dirs=critical_dirs)
         with conditional_startup_lock:
             record_conditional_startup_run(scan_data, time.time() - start_time)
+            if isinstance(scan_data, dict):
+                latest_yara_suspicious = scan_data.get('yara_suspicious', [])
+                latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
+                latest_persistence_indicators = scan_data.get('persistence_indicators', {})
+            else:
+                latest_yara_suspicious = []
+                latest_ransomware_indicators = []
+                latest_persistence_indicators = {}
+        try:
+            scan_cache._save()
+        except Exception:
+            pass
         logger.info("Conditional startup scan completed")
     except BaseException as e:
         # BaseException so SystemExit raised by imported modules (e.g. missing
@@ -935,7 +1013,7 @@ def index():
         'safe_downloader': safe_downloader_status
     }
 
-    return render_template('index.html',
+    response = make_response(render_template('index.html',
                           network_monitor_running=network_monitor_running,
                           folder_watcher_status=folder_watcher_status,
                           auto_block_enabled=auto_block_enabled,
@@ -944,7 +1022,11 @@ def index():
                           c2_detector_low_count=c2_detector_low_count,
                           c2_detector_high_count=c2_detector_high_count,
                           scheduled_scan_enabled=scheduled_scan_enabled,
-                          status=status)
+                          status=status))
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 # -- YARA scanner page --
 @app.route('/yara-scanner')
@@ -2000,30 +2082,45 @@ def quarantine():
         for filename in os.listdir(quarantine_dir):
             file_path = os.path.join(quarantine_dir, filename)
             if os.path.isfile(file_path):
+                # Skip metadata sidecars; we only list the quarantined payloads here.
+                if filename.endswith('.json'):
+                    continue
+
                 # Check if this is an encrypted file
                 is_encrypted = filename.endswith('.enc')
-                
+
                 # Get file stats
                 file_stats = os.stat(file_path)
                 quarantine_time = datetime.fromtimestamp(file_stats.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
-                
+
                 # Extract original name (remove .enc extension if present)
                 original_name = filename
                 if is_encrypted:
                     original_name = os.path.splitext(filename)[0]  # Remove .enc extension
-                
+
+                # Read metadata sidecar if it exists (e.g. from app.py quarantine_suspicious_file)
+                original_path = ''
+                detection_info = {'matches': ['YARA Detection']}
+                json_path = file_path + '.json'
+                if os.path.exists(json_path):
+                    try:
+                        with open(json_path, 'r', encoding='utf-8') as jf:
+                            metadata = json.load(jf)
+                        original_path = metadata.get('original_path', '')
+                        detection_info = metadata.get('detection_info', detection_info)
+                    except Exception:
+                        pass
+
                 quarantined_files.append({
                     'filename': original_name,
                     'quarantine_path': file_path,
-                    'original_path': '', # This would be populated if we tracked original locations
+                    'original_path': original_path,
                     'quarantine_time': quarantine_time,
                     'timestamp': file_stats.st_mtime * 1000,  # Convert to milliseconds for JavaScript
                     'encrypted': is_encrypted,
                     'size': file_stats.st_size,
                     'details': 'Encrypted (.enc)' if is_encrypted else 'Not encrypted',
-                    'detection_info': {
-                        'matches': ['YARA Detection']
-                    }
+                    'detection_info': detection_info
                 })
         
         # Read last few lines of the log file for quarantine events
@@ -2046,8 +2143,12 @@ def quarantine():
                 'quarantine_dir': quarantine_dir
             })
         else:
-            # Return HTML view
-            return render_template('quarantine.html', quarantined_files=quarantined_files, quarantine_log=quarantine_log)
+            # Return HTML view with cache disabled so the browser always gets the latest JS
+            response = make_response(render_template('quarantine.html', quarantined_files=quarantined_files, quarantine_log=quarantine_log))
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
             
     except Exception as e:
         logger.error(f"Error listing quarantined files: {e}")
@@ -2058,7 +2159,11 @@ def quarantine():
                 'files': []
             })
         else:
-            return render_template('quarantine.html', quarantined_files=[], quarantine_log=f"Error listing quarantined files: {e}")
+            response = make_response(render_template('quarantine.html', quarantined_files=[], quarantine_log=f"Error listing quarantined files: {e}"))
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
 
 @app.route('/logs')
 def logs():
@@ -2100,31 +2205,153 @@ def quarantine_list():
 @app.route('/quarantine/yara-matches', methods=['POST'])
 def quarantine_yara_matches():
     """Quarantine cached files with ransomware/persistence YARA matches."""
+    global latest_yara_suspicious
     quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
     quarantined = []
     failed = []
-    for entry in scan_cache.all():
-        path = entry.get('path')
-        yara_matches = entry.get('yara_matches', [])
-        if not path or not yara_matches:
+    seen = set()
+
+    # Only act on the latest conditional startup's YARA suspicious matches.
+    # We intentionally do NOT loop through the whole scan_cache here, because
+    # the cache can contain thousands of historical entries and old rule-name
+    # substrings (e.g. a match rule containing 'persistence' as a substring)
+    # can lead to false-positive quarantines of legitimate Windows files.
+    for entry in list(latest_yara_suspicious):
+        path = entry.get('file')
+        rules = entry.get('rules', [])
+        if not path or not rules or path in seen:
             continue
-        is_ransomware = any('ransomware' in str(m).lower() for m in yara_matches)
-        is_persistence = any('persistence' in str(m).lower() for m in yara_matches)
+        # Require rule names that START with persistence/ransomware (prefix)
+        # and let safe_quarantine refuse protected system locations.
+        is_ransomware = any(str(m).lower().startswith('ransomware') for m in rules)
+        is_persistence = any(str(m).lower().startswith('persistence') for m in rules)
         if not (is_ransomware or is_persistence):
             continue
+        seen.add(path)
         try:
             if not os.path.exists(path):
                 continue
-            success, msg = safe_quarantine(path, quarantine_dir, encrypt_file, force=True)
+            success, msg = safe_quarantine(path, quarantine_dir, encrypt_file, force=False, max_size=1024*1024*1024)
             if success:
                 quarantined.append(path)
-                entry['quarantined'] = True
             else:
                 failed.append(f'{path}: {msg}')
         except Exception as e:
             failed.append(f'{path}: {e}')
-    scan_cache._save()
+
+    # The persistence_indicators and ransomware_indicators counters are
+    # report-only heuristics; do NOT quarantine them from this button, because
+    # the file paths they surface (e.g. registry commands, running processes)
+    # can be legitimate Windows components. Only YARA matches with
+    # ransomware/persistence rule names are actionable here.
     return jsonify({'quarantined': quarantined, 'failed': failed, 'count': len(quarantined)})
+
+
+def _findings_for_review():
+    """Flatten the latest persistence and ransomware indicators into a
+    reviewable list of (path, reason, source) entries."""
+    import shlex
+    findings = []
+    seen = set()
+
+    def _first_file_from_command(command):
+        if not command:
+            return None
+        try:
+            parts = shlex.split(command, posix=False)
+            if not parts:
+                return None
+            # First token may be the executable, or an unquoted path with spaces
+            candidate = parts[0].strip('"').strip("'")
+            if os.path.isfile(candidate):
+                return candidate
+            # Try to rejoin tokens to find an existing file
+            for i in range(1, len(parts)):
+                candidate = candidate + ' ' + parts[i]
+                if os.path.isfile(candidate):
+                    return candidate
+            return parts[0].strip('"').strip("'")
+        except Exception:
+            return command.split(None, 1)[0].strip('"').strip("'")
+
+    # Ransomware heuristic findings
+    for entry in latest_ransomware_indicators:
+        path = entry.get('file')
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        if not os.path.isfile(path):
+            continue
+        findings.append({
+            'path': path,
+            'reason': entry.get('reason', 'Static ransomware heuristic'),
+            'source': 'ransomware',
+            'category': 'ransomware_heuristic'
+        })
+
+    # Persistence findings
+    for category, items in latest_persistence_indicators.items():
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            path = item.get('exe') or item.get('path')
+            if not path:
+                path = _first_file_from_command(item.get('command', ''))
+            if not path or path in seen:
+                continue
+            seen.add(path)
+            if not os.path.isfile(path):
+                continue
+
+            reason = item.get('indicator', category)
+            extra = item.get('process') or item.get('value_name') or item.get('drive') or item.get('command', '')
+            if extra and extra != path:
+                reason = f'{reason}: {extra}'
+
+            findings.append({
+                'path': path,
+                'reason': reason,
+                'source': 'persistence',
+                'category': category
+            })
+
+    return findings
+
+
+@app.route('/api/persistence_ransomware_findings')
+def api_persistence_ransomware_findings():
+    """Return the latest persistence and ransomware file findings for review."""
+    return jsonify({'findings': _findings_for_review()})
+
+
+@app.route('/quarantine/findings', methods=['POST'])
+def quarantine_selected_findings():
+    """Quarantine files selected from the persistence/ransomware review list."""
+    data = request.get_json(silent=True) or {}
+    paths = data.get('paths', [])
+    if not paths:
+        return jsonify({'status': 'error', 'error': 'No paths selected'}), 400
+
+    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantined = []
+    failed = []
+    for path in paths:
+        if not path or not os.path.isfile(path):
+            failed.append(f'{path}: not found or not a file')
+            continue
+        try:
+            # Don't bypass protected-location checks on manual review, so
+            # accidentally-selected Windows components are refused.
+            success, msg = safe_quarantine(path, quarantine_dir, encrypt_file, force=False, max_size=1024*1024*1024)
+            if success:
+                quarantined.append(path)
+            else:
+                failed.append(f'{path}: {msg}')
+        except Exception as e:
+            failed.append(f'{path}: {e}')
+
+    return jsonify({'status': 'success', 'quarantined': quarantined, 'failed': failed, 'count': len(quarantined)})
+
 
 @app.route('/restore_file', methods=['POST'])
 def restore_file():
@@ -2139,15 +2366,14 @@ def restore_file():
         # Determine if the file is encrypted (has .enc extension)
         is_encrypted = file_path.endswith('.enc')
         
-        # If no destination specified, use the original location or a safe default location
+        # If no destination specified, restore to the Desktop with the original name
         if not destination:
+            desktop = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'Desktop')
+            base = os.path.basename(file_path)
             if is_encrypted:
                 # Remove .enc extension for the restored file
-                destination = os.path.splitext(file_path)[0]
-            else:
-                # For unencrypted files, restore to the Desktop
-                desktop = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'Desktop')
-                destination = os.path.join(desktop, os.path.basename(file_path))
+                base = os.path.splitext(base)[0]
+            destination = os.path.join(desktop, base)
         
         # Ensure the destination directory exists
         os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
@@ -2155,16 +2381,23 @@ def restore_file():
         # Process the file according to its encryption status
         if is_encrypted:
             # Decrypt the file
-            if decrypt_file(file_path, destination):
-                logger.info(f"Successfully decrypted and restored file from {file_path} to {destination}")
-                return jsonify({'success': True, 'restored_to': destination})
-            else:
+            if not decrypt_file(file_path, destination):
                 return jsonify({'success': False, 'error': 'Failed to decrypt file'})
+            logger.info(f"Successfully decrypted and restored file from {file_path} to {destination}")
         else:
             # Simply copy the file
             shutil.copy2(file_path, destination)
             logger.info(f"Successfully restored unencrypted file from {file_path} to {destination}")
-            return jsonify({'success': True, 'restored_to': destination})
+
+        # Remove the quarantine payload and sidecar after a successful restore
+        for p in (file_path, file_path + '.json'):
+            try:
+                if os.path.exists(p):
+                    os.remove(p)
+            except Exception as cleanup_exc:
+                logger.warning(f'Could not remove {p} after restore: {cleanup_exc}')
+
+        return jsonify({'success': True, 'restored_to': destination})
             
     except Exception as e:
         logger.error(f"Error restoring file: {e}")
@@ -2172,20 +2405,29 @@ def restore_file():
 
 @app.route('/quarantine/delete/<filename>', methods=['POST'])
 def delete_quarantined_file(filename):
-    """Delete a quarantined file"""
+    """Delete a quarantined file and its metadata sidecar"""
     try:
         # Path to the quarantine directory
         quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
         file_path = os.path.join(quarantine_dir, filename)
-        
-        # Check if file exists
+        sidecar_path = file_path + '.json'
+
+        # If the main file is gone, at least clean up any stale sidecar
         if not os.path.exists(file_path):
+            if os.path.exists(sidecar_path):
+                os.remove(sidecar_path)
+                return jsonify({'status': 'success', 'message': 'Stale sidecar removed'})
             return jsonify({'status': 'error', 'error': 'File not found'}), 404
-        
-        # Delete the file
+
+        # Delete the file, then its sidecar
         os.remove(file_path)
+        if os.path.exists(sidecar_path):
+            try:
+                os.remove(sidecar_path)
+            except Exception:
+                pass
         logger.info(f"Successfully deleted quarantined file: {file_path}")
-        
+
         return jsonify({'status': 'success', 'message': 'File deleted successfully'})
     except Exception as e:
         logger.error(f"Error deleting quarantined file: {e}")
@@ -2205,10 +2447,15 @@ def delete_all_quarantined_files():
         errors = 0
         for filename in os.listdir(quarantine_dir):
             file_path = os.path.join(quarantine_dir, filename)
+            # Skip metadata sidecars here; remove them alongside their payload
+            if filename.endswith('.json') or not os.path.isfile(file_path):
+                continue
             try:
-                if os.path.isfile(file_path):
-                    os.remove(file_path)
-                    deleted += 1
+                os.remove(file_path)
+                deleted += 1
+                sidecar_path = file_path + '.json'
+                if os.path.exists(sidecar_path):
+                    os.remove(sidecar_path)
             except Exception as e:
                 logger.error(f"Error deleting {file_path}: {e}")
                 errors += 1
@@ -2371,6 +2618,7 @@ def run_scheduled_scans():
                         continue
                     
                     for file in files:
+                        time.sleep(0)
                         file_path = os.path.join(root, file)
                         
                         # Skip excluded files

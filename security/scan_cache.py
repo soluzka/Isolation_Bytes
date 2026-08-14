@@ -124,11 +124,14 @@ class FileScanCache:
     def _save(self):
         try:
             os.makedirs(str(self.cache_path.parent), exist_ok=True)
+            # Snapshot the cache before serializing so concurrent updates
+            # don't trigger "dictionary changed size during iteration".
+            snapshot = dict(self._cache)
             # Write to a temp file first, then atomically replace the real one
             # so a crash mid-write never leaves a truncated scan_cache.json.
             tmp_path = self.cache_path.with_suffix('.json.tmp')
             with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(self._cache, f, indent=2)
+                json.dump(snapshot, f, indent=2)
             tmp_path.replace(self.cache_path)
         except Exception as e:
             logger.warning(f'Failed to save scan cache: {e}')
@@ -138,7 +141,7 @@ class FileScanCache:
         now = time.time()
         cutoff = now - max_age_days * 24 * 3600
         fresh = {}
-        for k, v in self._cache.items():
+        for k, v in list(self._cache.items()):
             if v.get('timestamp', 0) >= cutoff:
                 fresh[k] = v
         # If still too large, drop oldest first.
@@ -170,7 +173,7 @@ class FileScanCache:
         # Save and prune on every 100th insert to keep I/O reasonable.
         if len(self._cache) % 100 == 0:
             self._prune()
-        self._save()
+            self._save()
 
     def clear(self):
         """Clear the cache and delete the backing file."""
@@ -235,10 +238,32 @@ def safe_quarantine(file_path, quarantine_dir, encrypt_fn, max_size=100 * 1024 *
             os.remove(file_path)
             return True, f'Quarantined and removed: {file_path} -> {quarantine_path}'
         except (OSError, IOError) as e:
-            return False, (
-                f'Encrypted copy saved, but failed to remove original '
-                f'{file_path}: {e}'
-            )
+            try:
+                from quarantine_utils import force_unlock_windows
+                force_unlock_windows(file_path)
+                os.remove(file_path)
+                return True, f'Quarantined and removed (after unlock): {file_path} -> {quarantine_path}'
+            except (OSError, IOError) as e2:
+                # For forced quarantines the encrypted copy is the important part;
+                # report success so the caller can proceed, but note the original
+                # is still on disk (usually because the file is locked/in use).
+                if force:
+                    return True, f'Quarantined (encrypted copy saved; original not removed): {file_path}: {e2}'
+                # Non-forced quarantine: don't leave a half-done .enc copy around
+                # for what was probably a false positive; just report failure.
+                try:
+                    os.remove(quarantine_path)
+                except Exception:
+                    pass
+                return False, f'Quarantine failed for {file_path}: {e2}'
+            except Exception:
+                if force:
+                    return True, f'Quarantined (encrypted copy saved; original not removed): {file_path}: unlock helper unavailable'
+                try:
+                    os.remove(quarantine_path)
+                except Exception:
+                    pass
+                return False, f'Quarantine failed for {file_path}: unlock helper unavailable'
 
     except Exception as e:
         return False, f'Unexpected quarantine error for {file_path}: {e}'

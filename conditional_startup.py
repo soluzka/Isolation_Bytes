@@ -146,7 +146,9 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
+                            time.sleep(0)  # yield so the Flask server stays responsive
                             try:
                                 yara_result = yara_scanner.scan_file_with_yara(filepath)
                                 if yara_result:
@@ -178,9 +180,11 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             if os.path.splitext(file)[1].lower() not in ml_extensions:
                                 continue
                             filepath = os.path.join(root, file)
+                            time.sleep(0)  # yield so the Flask server stays responsive
                             try:
                                 # Prefer the EMBER-trained classifier (real malware/
                                 # benign data) when available; otherwise fall back to
@@ -233,7 +237,9 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
+                            time.sleep(0)  # yield so the Flask server stays responsive
                             try:
                                 # Heuristic checks
                                 file_size = os.path.getsize(filepath)
@@ -279,7 +285,9 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
+                            time.sleep(0)  # yield so the Flask server stays responsive
                             try:
                                 scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath)
                                 if malware_found:
@@ -486,6 +494,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(game_dir):
                     for root, dirs, files in os.walk(game_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
                             file_ext = os.path.splitext(filepath)[1].lower()
                             file_lower = file.lower()
@@ -569,6 +578,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
                             file_ext = os.path.splitext(filepath)[1].lower()
                             file_lower = file.lower()
@@ -640,6 +650,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
                             file_lower = file.lower()
                             
@@ -673,6 +684,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
                             file_ext = os.path.splitext(filepath)[1].lower()
                             
@@ -719,6 +731,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(scan_dir):
                     for root, dirs, files in os.walk(scan_dir):
                         for file in files:
+                            time.sleep(0)
                             filepath = os.path.join(root, file)
                             file_lower = file.lower()
                             
@@ -788,6 +801,7 @@ def routine_maintenance_and_system_recovery():
                     try:
                         for root, dirs, files in os.walk(browser_dir):
                             for file in files:
+                                time.sleep(0)
                                 filepath = os.path.join(root, file)
                                 file_lower = file.lower()
                                 
@@ -895,6 +909,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(game_dir):
                     for root, dirs, files in os.walk(game_dir):
                         for file in files:
+                            time.sleep(0)
                             if file.endswith(('.exe', '.dll')):
                                 filepath = os.path.join(root, file)
                                 try:
@@ -935,6 +950,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(game_dir):
                     for root, dirs, files in os.walk(game_dir):
                         for file in files:
+                            time.sleep(0)
                             if file.endswith('.exe'):
                                 filepath = os.path.join(root, file)
                                 try:
@@ -967,6 +983,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(game_dir):
                     for root, dirs, files in os.walk(game_dir):
                         for file in files:
+                            time.sleep(0)
                             if file.endswith(('.exe', '.dll')):
                                 filepath = os.path.join(root, file)
                                 try:
@@ -1040,6 +1057,7 @@ def routine_maintenance_and_system_recovery():
                 if os.path.exists(game_dir):
                     for root, dirs, files in os.walk(game_dir):
                         for file in files:
+                            time.sleep(0)
                             if file.endswith('.exe'):
                                 filepath = os.path.join(root, file)
                                 try:
@@ -1079,6 +1097,7 @@ def routine_maintenance_and_system_recovery():
                         try:
                             for root, dirs, files in os.walk(temp_dir):
                                 for file in files:
+                                    time.sleep(0)
                                     filepath = os.path.join(root, file)
                                     try:
                                         os.remove(filepath)
@@ -1534,18 +1553,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
             with results_lock:
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
 
-        if callable(progress_callback):
-            try:
-                progress_callback(results)
-            except Exception as e:
-                output.write(f"[WARNING] progress_callback raised during YARA update: {e}\n")
-
         _run_ml_and_ransomware_checks(filepath, results, output)
-        if callable(progress_callback):
-            try:
-                progress_callback(results)
-            except Exception as e:
-                output.write(f"[WARNING] progress_callback raised during ML/ransomware check: {e}\n")
 
         # Escalate high-severity YARA matches to critical when ML also flags the file.
         if yara_result:
