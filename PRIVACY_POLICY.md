@@ -1,10 +1,10 @@
 # Antivirus Server — Privacy Policy
 
-Last updated: 2026-08-11
+Last updated: 2026-08-14
 
 ## 1. Information We Collect
 
-Antivirus Server is a local-first security application. It operates primarily on your device and does not send your files, file contents, or personal data to our servers.
+Antivirus Server is a local-first security application. It operates primarily on your device and does not send your files, file contents, or personal data to our servers. The application does not send usage telemetry or analytics to the developer by default.
 
 The application may collect or process the following types of data locally on your device:
 
@@ -41,7 +41,9 @@ These services receive only the minimum data necessary for the lookup or update 
 
 - File scan results, quarantine data, logs, and runtime state are stored locally on your device.
 - Quarantined files are stored in a dedicated, access-controlled directory.
+- Quarantined payloads are encrypted before storage. Metadata sidecars are JSON and do not contain the encryption key.
 - Cryptographic keys for quarantine/restore operations are generated and stored on your device.
+- Dashboard session cookies are signed using the `SECRET_KEY` from your `.env` file.
 - The application does not maintain an account or collect personally identifiable information (PII) such as email addresses, phone numbers, or postal addresses.
 
 ## 5. Your Choices
