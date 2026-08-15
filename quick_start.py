@@ -102,9 +102,16 @@ def _request_admin_elevation():
 
 _request_admin_elevation()
 # Load the bundled .env from the executable directory when frozen, otherwise
-# load from the current working directory (source checkout).
+# load from the current working directory (source checkout). When frozen, copy
+# the bundled .env to the writable user app data folder on first run and load
+# from there so the user can edit it after install.
 if getattr(sys, 'frozen', False):
-    dotenv_path = os.path.join(os.path.dirname(sys.executable), '.env')
+    bundled_dotenv = os.path.join(os.path.dirname(sys.executable), '.env')
+    app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server')
+    os.makedirs(app_data_dir, exist_ok=True)
+    dotenv_path = os.path.join(app_data_dir, '.env')
+    if not os.path.exists(dotenv_path) and os.path.exists(bundled_dotenv):
+        shutil.copy2(bundled_dotenv, dotenv_path)
 else:
     dotenv_path = '.env'
 load_dotenv(dotenv_path)
