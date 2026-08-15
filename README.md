@@ -144,10 +144,11 @@ python build_config.py
 `build_config.py`:
 
 - Builds `dist\antivirus_server\antivirus_server.exe` as an onedir bundle.
-- Builds `dist\ssdeep_runner.exe` as a one-file bundle.
+- Builds `dist\ssdeep_runner.exe` as a one-file bundle, then moves it into `dist\antivirus_server\`.
 - Bundles the `models\`, `security\`, `templates\`, `static\`, and related runtime directories.
 - Uses `--noconfirm` so existing build and dist folders are replaced without prompting.
-- Requests UAC elevation through the manifest (`--uac-admin`), so the executable launches as Administrator.
+- Builds the MSIX application as `asInvoker` because Windows does not support elevated MSIX app activation.
+- Builds `ssdeep_runner.exe` with `--uac-admin` so the standalone helper can run as Administrator.
 
 ### Packaged Application Layout
 
@@ -156,6 +157,7 @@ After a successful build, `dist\antivirus_server\` contains:
 ```
 dist\antivirus_server\
   antivirus_server.exe          # Main entry point
+  ssdeep_runner.exe              # Elevated standalone fuzzy-hash helper
   *.dll, _internal\              # Python runtime and extensions
   security\                      # YARA rules, scanners, and related modules
   models\                        # EMBER and other machine-learning resources
@@ -166,7 +168,7 @@ dist\antivirus_server\
   ...                             # Additional bundled data files
 ```
 
-`dist\ssdeep_runner.exe` is built as a sibling file for fuzzy-hash scanning.
+`dist\antivirus_server\ssdeep_runner.exe` is the installed helper location after running `python build_config.py`. It is a standalone elevated executable and can be launched directly from that folder or by an administrator shortcut.
 
 ### Creating the MSIX Store Package
 
@@ -395,18 +397,18 @@ Build the standalone ssdeep runner with:
 python tools\build_runner_exe.py
 ```
 
-The output is placed at `dist\ssdeep_runner.exe`.
+When built through `python build_config.py`, the runner is moved to `dist\antivirus_server\ssdeep_runner.exe`. Running `tools\build_runner_exe.py` by itself leaves it at `dist\ssdeep_runner.exe`.
 
-Run a directory scan:
+Run a directory scan from the repository root:
 
 ```powershell
-dist\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --dir security\yara_rules --threshold 60
+dist\antivirus_server\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --dir security\yara_rules --threshold 60
 ```
 
 Scan a single file:
 
 ```powershell
-dist\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --target "path\to\file.exe"
+dist\antivirus_server\ssdeep_runner.exe --rules security\yara_rules\yara_rules.yar --target "path\to\file.exe"
 ```
 
 The `--rules` argument is required. Use `--threshold` to set the ssdeep match cutoff.
