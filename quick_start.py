@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from werkzeug.utils import secure_filename
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session, make_response, flash
+from data_analysis import load_trusted_hashes
 
 # Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
 # module is normally run directly with `python quick_start.py`, which (unlike
@@ -1261,8 +1262,29 @@ def _require_csrf():
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
+    register_error = None
+    register_message = None
     if request.method == 'POST':
         remote_addr = request.remote_addr or 'unknown'
+        action = request.form.get('action', '').strip()
+
+        if action == 'register':
+            password = request.form.get('password', '')
+            confirm = request.form.get('confirm_password', '')
+            if not password:
+                register_error = 'Password is required'
+            elif password != confirm:
+                register_error = 'Passwords do not match'
+            elif not set_password:
+                register_error = 'Registration is not available'
+            else:
+                try:
+                    set_password(password)
+                    register_message = 'Password set. You can now log in as admin.'
+                except Exception as e:
+                    register_error = str(e)
+            return render_template('login.html', error=error, register_error=register_error, register_message=register_message)
+
         if _is_login_rate_limited(remote_addr):
             return render_template('login.html', error='Too many login attempts. Please wait 5 minutes.'), 429
 
@@ -1284,30 +1306,15 @@ def login():
             next_page = request.form.get('next') or request.args.get('next') or url_for('index')
             return redirect(next_page)
         error = 'Invalid username or password'
-    return render_template('login.html', error=error)
+    return render_template('login.html', error=error, register_error=register_error, register_message=register_message)
 
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    """Set the admin password. This replaces the single stored password."""
-    error = None
-    message = None
+    """Set admin password is now handled on /login. Redirect there."""
     if request.method == 'POST':
-        password = request.form.get('password', '')
-        confirm = request.form.get('confirm_password', '')
-        if not password:
-            error = 'Password is required'
-        elif password != confirm:
-            error = 'Passwords do not match'
-        elif not set_password:
-            error = 'Registration is not available'
-        else:
-            try:
-                set_password(password)
-                message = 'Password set. You can now log in as admin.'
-            except Exception as e:
-                error = str(e)
-    return render_template('login.html', register_error=error, register_message=message)
+        return login()
+    return redirect(url_for('login'))
 
 
 @app.route('/logout')

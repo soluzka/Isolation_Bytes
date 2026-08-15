@@ -114,7 +114,8 @@
             {% if register_message %}
             <div class="message">{{ register_message }}</div>
             {% endif %}
-            <form method="POST" action="{{ url_for('register') }}">
+            <form method="POST" action="{{ url_for('login') }}">
+                <input type="hidden" name="action" value="register">
                 <div class="form-group">
                     <label for="reg_password">New Password</label>
                     <input type="password" class="form-control" id="reg_password" name="password" required>
