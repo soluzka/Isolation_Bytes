@@ -454,15 +454,3 @@ if os.path.exists(build_msix_ps1):
         print(f"Warning: MSIX build failed: {e}")
 else:
     print("Warning: build_msix.ps1 not found; skipping MSIX build.")
-
-# Build a one-file MSIX installer EXE if the packaged files exist.
-installer_builder = os.path.join(base_dir, 'tools', 'build_installer_exe.py')
-if os.path.exists(installer_builder):
-    try:
-        print("Building one-file installer EXE...")
-        subprocess.check_call([sys.executable, installer_builder])
-        print("One-file installer build completed.")
-    except Exception as e:
-        print(f"Warning: one-file installer build failed: {e}")
-else:
-    print("Warning: tools\\build_installer_exe.py not found; skipping installer build.")

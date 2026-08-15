@@ -338,3 +338,15 @@ if (-not $NoCertManagement -and -not $SkipTest) {
     Write-Host "Install the test launcher with:"
     Write-Host "  Add-AppxPackage -Path '$TestMsix'"
 }
+
+# Build the one-file installer EXE that bundles the cert and MSIX.
+$InstallerBuilder = Join-Path $Root 'tools' 'build_installer_exe.py'
+if (Test-Path $InstallerBuilder) {
+    Write-Host "Building one-file installer EXE..."
+    python $InstallerBuilder
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "One-file installer build failed."
+    }
+} else {
+    Write-Warning "tools\build_installer_exe.py not found; skipping one-file installer build."
+}
