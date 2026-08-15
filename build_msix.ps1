@@ -251,6 +251,10 @@ if (-not $SkipStore) {
 
     # Build the Store package (soluzka cert) for Partner Center.
     $StoreMsix = Join-Path $Dist 'AntivirusServer_Store.msix'
+    # Build outside OneDrive, then copy the completed package into dist. This
+    # prevents MakeAppx from encountering transient sync/path errors while it
+    # creates and overwrites the package.
+    $StoreMsixBuild = Join-Path $env:TEMP 'AntivirusServer_Store.msix'
     $StoreManifest = Join-Path $StageRoot 'AppxManifest.xml'
     New-AppxManifest -Path $StoreManifest `
         -PackageName 'soluzka.AntivirusServer' `
@@ -260,21 +264,24 @@ if (-not $SkipStore) {
         -Version $Version
 
     Write-Host 'Packing Store MSIX...'
-    & $MakeAppx pack /d $StageRoot /p $StoreMsix /nv /o
+    if (Test-Path $StoreMsixBuild) { Remove-Item -Force $StoreMsixBuild }
+    & $MakeAppx pack /d $StageRoot /p $StoreMsixBuild /nv /o
     if ($LASTEXITCODE -ne 0) { throw "makeappx failed for Store package" }
 
     Write-Host 'Signing Store MSIX (placeholder for Partner Center)...'
-    & $SignTool sign /f $StorePfx /p 'password' /fd sha256 $StoreMsix
+    & $SignTool sign /f $StorePfx /p 'password' /fd sha256 $StoreMsixBuild
     if ($LASTEXITCODE -ne 0) { throw "signtool failed for Store package" }
 
     Write-Host 'Verifying Store MSIX signature...'
-    & $SignTool verify /pa $StoreMsix
+    & $SignTool verify /pa $StoreMsixBuild
     if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for Store package" }
+    Copy-Item -Path $StoreMsixBuild -Destination $StoreMsix -Force
 }
 
 if (-not $SkipTest) {
     # Build the Test Launcher package (soluzka_test cert) for local install.
     $TestMsix = Join-Path $Dist 'AntivirusServer_Test_Launcher.msix'
+    $TestMsixBuild = Join-Path $env:TEMP 'AntivirusServer_Test_Launcher.msix'
     $TestManifest = Join-Path $StageRoot 'AppxManifest.xml'
     New-AppxManifest -Path $TestManifest `
         -PackageName 'soluzka.AntivirusServer.Test' `
@@ -284,12 +291,14 @@ if (-not $SkipTest) {
         -Version $Version
 
     Write-Host 'Packing Test Launcher MSIX...'
-    & $MakeAppx pack /d $StageRoot /p $TestMsix /nv /o
+    if (Test-Path $TestMsixBuild) { Remove-Item -Force $TestMsixBuild }
+    & $MakeAppx pack /d $StageRoot /p $TestMsixBuild /nv /o
     if ($LASTEXITCODE -ne 0) { throw "makeappx failed for Test Launcher package" }
 
     Write-Host 'Signing Test Launcher MSIX...'
-    & $SignTool sign /f $TestPfx /p 'Test1234!' /fd sha256 $TestMsix
+    & $SignTool sign /f $TestPfx /p 'Test1234!' /fd sha256 $TestMsixBuild
     if ($LASTEXITCODE -ne 0) { throw "signtool failed for Test Launcher package" }
+    Copy-Item -Path $TestMsixBuild -Destination $TestMsix -Force
 }
 
 Write-Host "Done. MSIX files are in:"
