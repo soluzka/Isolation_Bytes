@@ -191,7 +191,7 @@ Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
 # so the Store package can start, while leaving dist\antivirus_server\antivirus_server.exe
 # with its admin manifest for the standalone desktop EXE.
 if (Test-Path $Mt) {
-    $stageExes = Get-ChildItem -Path $StageRoot -Filter '*.exe' -File
+    $stageExes = Get-ChildItem -Path $StageRoot -Filter '*.exe' -File -Recurse
     foreach ($exe in $stageExes) {
         # mt.exe will merge any <base>.exe.manifest file found next to the EXE,
         # so remove side-by-side manifests first to avoid "level" mismatches.
@@ -358,15 +358,38 @@ pause
     Write-Host "  $(Join-Path $Dist 'soluzka.cer')"
 }
 
-# Copy the standalone EXE to the desktop for easy access.
+# Hide the standalone onedir in AppData\Local and create a desktop shortcut.
+# This keeps the desktop clean while still allowing direct launch of the EXE.
 $Desktop = [Environment]::GetFolderPath('Desktop')
+$LocalAppDir = Join-Path $env:LOCALAPPDATA 'antivirus_server'
 $ExeSource = Join-Path $Onedir 'antivirus_server.exe'
-$DesktopExe = Join-Path $Desktop 'antivirus_server.exe'
+$InstalledExe = Join-Path $LocalAppDir 'antivirus_server.exe'
+$DesktopExe = $InstalledExe
 if (Test-Path $ExeSource) {
-    Copy-Item -Path $ExeSource -Destination $DesktopExe -Force
-    Write-Host "Copied standalone EXE to desktop: $DesktopExe"
+    if (Test-Path $LocalAppDir) {
+        Remove-Item -Recurse -Force $LocalAppDir
+    }
+    Copy-Item -Path $Onedir -Destination $LocalAppDir -Recurse -Force
+    $InternalDir = Join-Path $LocalAppDir '_internal'
+    if (Test-Path $InternalDir) {
+        $item = Get-Item $InternalDir -Force
+        $item.Attributes = $item.Attributes -bor [System.IO.FileAttributes]::Hidden
+        Get-ChildItem -Path $InternalDir -Recurse -Force | ForEach-Object {
+            $_.Attributes = $_.Attributes -bor [System.IO.FileAttributes]::Hidden
+        }
+        Write-Host "Set _internal and all contents to Hidden: $InternalDir"
+    }
+    $Wsh = New-Object -ComObject WScript.Shell
+    $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server (standalone).lnk'))
+    $Shortcut.TargetPath = $InstalledExe
+    $Shortcut.IconLocation = "$InstalledExe,0"
+    $Shortcut.WorkingDirectory = $LocalAppDir
+    $Shortcut.Description = 'Antivirus Server (standalone)'
+    $Shortcut.Save()
+    Write-Host "Copied standalone onedir to: $LocalAppDir"
+    Write-Host "Created desktop shortcut: Antivirus Server (standalone).lnk"
 } else {
-    Write-Warning "antivirus_server.exe not found at $ExeSource; nothing copied to desktop."
+    Write-Warning "antivirus_server.exe not found at $ExeSource; nothing copied."
 }
 
 # Install the Store package if running as Administrator; otherwise print instructions.
@@ -375,10 +398,12 @@ if (-not $SkipStore) {
         Write-Host "Installing Store MSIX..."
         Get-Process -Name 'antivirus_server' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         Get-AppxPackage -Name 'soluzka.AntivirusServer' | Remove-AppxPackage -ErrorAction SilentlyContinue
-        Add-AppxPackage -Path $StoreMsix -ForceApplicationShutdown -ErrorAction Stop
+        Add-AppxPackage -Path $StoreMsix -ForceApplicationShutdown -ForceUpdateFromAnyVersion -ErrorAction Stop
         Write-Host "Installed $StoreMsix"
         # Launch the installed app by AUMID.
-        $Aumid = 'soluzka.AntivirusServer!App'
+        $InstalledPkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'
+        $Aumid = $InstalledPkg.PackageFamilyName + '!App'
+        Write-Host "AUMID: $Aumid"
         try {
             Start-Process "explorer.exe" "shell:AppsFolder\$Aumid"
             Write-Host "Launched Antivirus Server."

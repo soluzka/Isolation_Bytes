@@ -52,25 +52,31 @@ def main():
         )
 
         _run_powershell(
-            "Add-AppxPackage -Path '{}'".format(work_msix),
+            "Get-AppxPackage -Name 'soluzka.AntivirusServer' | Remove-AppxPackage -ErrorAction SilentlyContinue; "
+            "Add-AppxPackage -Path '{}' -ForceApplicationShutdown -ForceUpdateFromAnyVersion".format(work_msix),
             "Installing Antivirus Server"
         )
 
         desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
         shortcut_path = os.path.join(desktop, 'Antivirus Server.lnk')
-        aumid = 'soluzka.AntivirusServer!App'
         _run_powershell(
+            "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
+            "if (-not $pkg) {{ throw 'Package not found after install' }}; "
+            "$aumid = $pkg.PackageFamilyName + '!App'; "
             "$Wsh = New-Object -ComObject WScript.Shell; "
             "$S = $Wsh.CreateShortcut('{}'); "
             "$S.TargetPath = '{}\\explorer.exe'; "
-            "$S.Arguments = 'shell:AppsFolder\\{}'; "
+            "$S.Arguments = 'shell:AppsFolder\\' + $aumid; "
             "$S.Description = 'Antivirus Server'; "
-            "$S.Save()".format(shortcut_path, os.environ.get('SystemRoot', 'C:\\Windows'), aumid),
+            "$S.Save()".format(shortcut_path, os.environ.get('SystemRoot', 'C:\\Windows')),
             "Creating desktop shortcut"
         )
 
         _run_powershell(
-            "Start-Process 'explorer.exe' 'shell:AppsFolder\\{}'".format(aumid),
+            "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
+            "if (-not $pkg) {{ throw 'Package not found after install' }}; "
+            "$aumid = $pkg.PackageFamilyName + '!App'; "
+            "Start-Process 'explorer.exe' \"shell:AppsFolder\\$aumid\"",
             "Launching Antivirus Server"
         )
 

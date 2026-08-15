@@ -140,7 +140,6 @@ icon_path = os.path.join(base_dir, 'static', 'favicon.ico')
 pyinstaller_args = [
     f'--name={app_name}',
     '--onedir',
-    '--contents-directory=.',
     '--clean',
     '--noconfirm',
     '--log-level=DEBUG',
@@ -360,12 +359,16 @@ def _cleanup_dir(path):
                 break
     print(f"Warning: {path} is still present; PyInstaller may fail to overwrite it.")
 
-# Remove stale build output directories so PyInstaller can create fresh ones.
-# This avoids the WinError 5 'Access is denied' failures when locked files remain.
+# Remove stale build output directories and .spec files so PyInstaller creates
+# a fresh onedir build instead of reusing a stale onefile .spec.
 if '--clean' in pyinstaller_args:
     pyinstaller_args.remove('--clean')
 for stale in [os.path.join(base_dir, 'build', app_name), os.path.join(base_dir, 'dist', app_name)]:
     _cleanup_dir(stale)
+for stale_spec in [os.path.join(base_dir, 'antivirus_server.spec'), os.path.join(base_dir, 'Install_AntivirusServer.spec')]:
+    if os.path.exists(stale_spec):
+        os.remove(stale_spec)
+        print(f"Removed stale spec file: {stale_spec}")
 
 # Run PyInstaller
 try:
@@ -403,9 +406,10 @@ if os.path.exists(runner_script):
         # depending on the source-tree layout.
         runner_src = os.path.join(base_dir, 'dist', 'ssdeep_runner.exe')
         onedir_root = os.path.join(base_dir, 'dist', app_name)
-        runner_dst = os.path.join(onedir_root, 'ssdeep_runner.exe')
+        internal_dir = os.path.join(onedir_root, '_internal')
+        runner_dst = os.path.join(internal_dir, 'ssdeep_runner.exe')
         if os.path.exists(runner_src) and os.path.isdir(onedir_root):
-            os.makedirs(onedir_root, exist_ok=True)
+            os.makedirs(internal_dir, exist_ok=True)
             shutil.move(runner_src, runner_dst)
             print(f"Moved ssdeep_runner.exe to {runner_dst}")
     except Exception as e:
