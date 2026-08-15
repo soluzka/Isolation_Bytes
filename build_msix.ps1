@@ -1,7 +1,8 @@
-# # Build the AntivirusServer Store and Test Launcher MSIX packages from the
+# Build the AntivirusServer Store and Test Launcher MSIX packages from the
 # PyInstaller onedir at dist\antivirus_server, then sign them.
-# The Store package is signed with soluzka.pfx for upload to Microsoft Partner
-# Center. The store cert is NOT trusted on this machine, so it will not install.
+# The Store package is signed with soluzka.pfx (Publisher: Soluzka) for upload
+# to Microsoft Partner Center. Partner Center will re-sign it with the official
+# Store cert.
 # The Test Launcher package is signed with soluzka_test.pfx and that cert is
 # trusted, so it will install and launch locally.
 # Run this from the repo root (same directory as build_config.py) as Administrator.
@@ -34,39 +35,45 @@ if (-not (Test-Path $MakeAppx) -or -not (Test-Path $SignTool)) {
     throw "Windows SDK 10.0.22621.0 tools not found at $Sdk"
 }
 
-$TestPfx = Join-Path $Root 'soluzka_test.pfx'
 $StorePfx = Join-Path $Root 'soluzka.pfx'
 
-if (-not (Test-Path $TestPfx)) { throw "soluzka_test.pfx not found at $TestPfx" }
 if (-not (Test-Path $StorePfx)) { throw "soluzka.pfx not found at $StorePfx" }
+
+$TestPfx = Join-Path $Root 'soluzka_test.pfx'
+if (-not $SkipTest -and -not (Test-Path $TestPfx)) { throw "soluzka_test.pfx not found at $TestPfx" }
 
 function Read-PfxSubject($Pfx, [SecureString]$Password) {
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $Password)
     return $cert
 }
 
-$TestPassword = ConvertTo-SecureString -String 'Test1234!' -AsPlainText -Force
 $StorePassword = ConvertTo-SecureString -String 'password' -AsPlainText -Force
-
-$TestCert = Read-PfxSubject $TestPfx $TestPassword
 $StoreCert = Read-PfxSubject $StorePfx $StorePassword
+
+if (-not $SkipTest) {
+    $TestPassword = ConvertTo-SecureString -String 'Test1234!' -AsPlainText -Force
+    $TestCert = Read-PfxSubject $TestPfx $TestPassword
+}
 
 function Export-PublicCer($Cert, $OutPath) {
     $bytes = $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert)
     [System.IO.File]::WriteAllBytes($OutPath, $bytes)
 }
 
-$TestCer = Join-Path $Root 'soluzka_test.cer'
 $StoreCer = Join-Path $Root 'soluzka.cer'
-Export-PublicCer $TestCert $TestCer
 Export-PublicCer $StoreCert $StoreCer
+
+if (-not $SkipTest) {
+    $TestCer = Join-Path $Root 'soluzka_test.cer'
+    Export-PublicCer $TestCert $TestCer
+}
 
 if (-not $NoCertManagement) {
     Write-Host 'Managing certificate trust...'
 
-    # Trust both certificates in the machine stores so both packages can be
-    # installed and launched locally for testing. Partner Center will re-sign
-    # the Store package with the Store certificate when it is published.
+    # Trust the store certificate in the machine stores so the package is
+    # installable/launchable locally for testing. Partner Center will re-sign
+    # the Store package with the official Store certificate when it is published.
     $stores = @(
         'Cert:\CurrentUser\Root',
         'Cert:\CurrentUser\TrustedPeople',
@@ -75,7 +82,9 @@ if (-not $NoCertManagement) {
     )
 
     # Remove any stale duplicates first.
-    foreach ($cert in @($StoreCert, $TestCert)) {
+    $certs = @($StoreCert)
+    if (-not $SkipTest) { $certs += $TestCert }
+    foreach ($cert in $certs) {
         foreach ($store in $stores) {
             try {
                 Get-ChildItem $store | Where-Object { $_.Subject -eq $cert.Subject -or $_.Thumbprint -eq $cert.Thumbprint } | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -85,19 +94,21 @@ if (-not $NoCertManagement) {
         }
     }
 
-    # Store cert (soluzka) - makes the Store MSIX installable/launchable locally.
+    # Store cert (soluzka) - makes the Store MSIX installable/launchable locally for testing.
     Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
     Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
     Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
     Import-Certificate -FilePath $StoreCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
     Write-Host '  soluzka (store) cert added to trust stores.'
 
-    # Test cert (soluzka_test) - makes the Test Launcher MSIX installable/launchable locally.
-    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
-    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
-    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-    Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
-    Write-Host '  soluzka_test (test) cert added to trust stores.'
+    if (-not $SkipTest) {
+        # Test cert (soluzka_test) - makes the Test Launcher MSIX installable/launchable locally.
+        Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
+        Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+        Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+        Import-Certificate -FilePath $TestCer -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+        Write-Host '  soluzka_test (test) cert added to trust stores.'
+    }
 }
 
 # Re-run PyInstaller build unless skipped, so the EXE is fresh.
@@ -132,17 +143,17 @@ $logo = Join-Path $Assets 'Logo.png'
 $bmp.Save($logo, [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
 
-function New-AppxManifest($Path, $PackageName, $Publisher, $DisplayName) {
+function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName, $DisplayName, $Version) {
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
          IgnorableNamespaces="uap rescap">
-  <Identity Name="$PackageName" Publisher="$Publisher" Version="1.0.0.0" ProcessorArchitecture="x64" />
+  <Identity Name="$PackageName" Publisher="$Publisher" Version="$Version" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>$DisplayName</DisplayName>
-    <PublisherDisplayName>soluzka</PublisherDisplayName>
+    <PublisherDisplayName>$PublisherDisplayName</PublisherDisplayName>
     <Logo>Assets\Logo.png</Logo>
   </Properties>
   <Dependencies>
@@ -165,13 +176,20 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $DisplayName) {
 }
 
 if (-not $SkipStore) {
+    $now = Get-Date
+    $days = ($now - [DateTime]::new(2024, 1, 1)).Days
+    $minutes = $now.Hour * 60 + $now.Minute
+    $Version = "1.0.$days.$minutes"
+
     # Build the Store package (soluzka cert) for Partner Center.
     $StoreMsix = Join-Path $Dist 'AntivirusServer_Store.msix'
     $StoreManifest = Join-Path $StageRoot 'AppxManifest.xml'
     New-AppxManifest -Path $StoreManifest `
         -PackageName 'soluzka.AntivirusServer' `
         -Publisher 'CN=soluzka' `
-        -DisplayName 'Antivirus Server'
+        -PublisherDisplayName 'soluzka' `
+        -DisplayName 'Antivirus Server' `
+        -Version $Version
 
     Write-Host 'Packing Store MSIX...'
     & $MakeAppx pack /d $StageRoot /p $StoreMsix /nv /o
@@ -189,7 +207,9 @@ if (-not $SkipTest) {
     New-AppxManifest -Path $TestManifest `
         -PackageName 'soluzka.AntivirusServer.Test' `
         -Publisher $TestCert.Subject `
-        -DisplayName 'Antivirus Server Test Launcher'
+        -PublisherDisplayName 'soluzka test' `
+        -DisplayName 'Antivirus Server Test Launcher' `
+        -Version $Version
 
     Write-Host 'Packing Test Launcher MSIX...'
     & $MakeAppx pack /d $StageRoot /p $TestMsix /nv /o

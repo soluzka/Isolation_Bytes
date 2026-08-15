@@ -408,7 +408,7 @@ else:
 build_msix_ps1 = os.path.join(base_dir, 'build_msix.ps1')
 if os.path.exists(build_msix_ps1):
     try:
-        skip_test = '--no-test' in sys.argv
+        skip_test = True  # Test launcher is no longer built.
         is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
         if is_admin:
             print("Building MSIX packages and managing certificate trust...")
