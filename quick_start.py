@@ -109,19 +109,20 @@ else:
     dotenv_path = '.env'
 load_dotenv(dotenv_path)
 
-# Seed the web_auth password store from .env.
+# Seed the web_auth password store from .env only if no local password exists.
 # Prefer ADMIN_PASSWORD_HASH (a bcrypt string). Fall back to ADMIN_PASSWORD
 # and hash it at startup for migration; otherwise use a default.
 try:
-    from security.web_auth import set_password, set_password_hash, verify_password
-    admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
-    admin_password = os.environ.get('ADMIN_PASSWORD')
-    if admin_password_hash:
-        set_password_hash(admin_password_hash)
-    elif admin_password:
-        set_password(admin_password)
-    else:
-        set_password('admin123')
+    from security.web_auth import set_password, set_password_hash, verify_password, has_auth_data
+    if not has_auth_data():
+        admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
+        admin_password = os.environ.get('ADMIN_PASSWORD')
+        if admin_password_hash:
+            set_password_hash(admin_password_hash)
+        elif admin_password:
+            set_password(admin_password)
+        else:
+            set_password('admin123')
 except Exception:
     verify_password = None
 

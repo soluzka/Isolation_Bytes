@@ -1,27 +1,28 @@
-from utils.paths import get_resource_path
-import os
-
-from flask import session, redirect, url_for, request, render_template_string
-import functools
 import os
 import json
 import bcrypt
 import pyotp
+import functools
 from flask import session, redirect, url_for, request, render_template_string, flash
 
-auth_file = os.path.join(os.path.dirname(__file__), 'auth_data.json')
+def _auth_data_path():
+    app_data = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'AntivirusServer')
+    os.makedirs(app_data, exist_ok=True)
+    return os.path.join(app_data, 'auth_data.json')
+
+auth_file = _auth_data_path()
 
 # --- Password/TOTP Management ---
 def _load_auth_data():
     if not os.path.exists(auth_file):
-        with open(get_resource_path(os.path.join(auth_file)), 'w') as f:
+        with open(auth_file, 'w') as f:
             json.dump({}, f)
         return {}
-    with open(get_resource_path(os.path.join(auth_file)), 'r') as f:
+    with open(auth_file, 'r') as f:
         return json.load(f)
 
 def _save_auth_data(data):
-    with open(get_resource_path(os.path.join(auth_file)), 'w') as f:
+    with open(auth_file, 'w') as f:
         json.dump(data, f)
 
 def set_password(password):
@@ -36,6 +37,10 @@ def set_password_hash(password_hash):
     data = _load_auth_data()
     data['password_hash'] = password_hash
     _save_auth_data(data)
+
+def has_auth_data():
+    return bool(_load_auth_data().get('password_hash'))
+
 
 def verify_password(password):
     data = _load_auth_data()
