@@ -78,8 +78,6 @@ def main():
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
 
-    input("\nPress Enter to exit.")
-
 
 if __name__ == '__main__':
     main()

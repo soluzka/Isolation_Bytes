@@ -25,6 +25,7 @@ parser.add_argument('--store-cert', dest='store_cert', default=None, help='Path 
 parser.add_argument('--store-cert-password', dest='store_cert_password', default=None, help='Password for the Partner Center .pfx')
 parser.add_argument('--store-publisher', dest='store_publisher', default='CN=soluzka', help='Publisher CN for the MSIX manifest')
 parser.add_argument('--help', '-h', action='help', help='Show this help message and exit')
+parser.add_argument('extra', nargs='*', help='Extra positional arguments are ignored')
 build_args, _ = parser.parse_known_args()
 
 # Folders to include

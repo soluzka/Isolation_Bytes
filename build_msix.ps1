@@ -6,6 +6,7 @@
 # The Test Launcher package is signed with soluzka_test.pfx and that cert is
 # trusted, so it will install and launch locally.
 # Run this from the repo root (same directory as build_config.py) as Administrator.
+[CmdletBinding()]
 param(
     [switch]$SkipBuild,
     [switch]$SkipStore,
@@ -16,7 +17,9 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$StoreCertPassword,
     [Parameter(Mandatory=$false)]
-    [string]$StorePublisher = 'CN=soluzka'
+    [string]$StorePublisher = 'CN=soluzka',
+    [Parameter(ValueFromRemainingArguments=$true)]
+    [string[]]$RemainingArguments
 )
 
 $ErrorActionPreference = 'Stop'
@@ -341,6 +344,7 @@ if (-not $NoCertManagement -and -not $SkipTest) {
 
 # Build the one-file installer EXE that bundles the cert and MSIX.
 $InstallerBuilder = Join-Path $Root 'tools' 'build_installer_exe.py'
+$OneFileInstaller = Join-Path $Dist 'Install_AntivirusServer.exe'
 if (Test-Path $InstallerBuilder) {
     Write-Host "Building one-file installer EXE..."
     python $InstallerBuilder
@@ -349,4 +353,19 @@ if (Test-Path $InstallerBuilder) {
     }
 } else {
     Write-Warning "tools\build_installer_exe.py not found; skipping one-file installer build."
+}
+
+# Also run the one-file installer on the build machine so the package is
+# installed through the same path an end user would use.
+if ($isAdmin -and (Test-Path $OneFileInstaller)) {
+    Write-Host "Running one-file installer on build machine..."
+    Start-Process -FilePath $OneFileInstaller -Wait
+    Write-Host "One-file installer completed."
+}
+
+# Copy the one-file installer EXE to the desktop so it is easy to find and distribute.
+if (Test-Path $OneFileInstaller) {
+    $DesktopInstaller = Join-Path $Desktop 'Install_AntivirusServer.exe'
+    Copy-Item -Path $OneFileInstaller -Destination $DesktopInstaller -Force
+    Write-Host "Copied one-file installer EXE to desktop: $DesktopInstaller"
 }

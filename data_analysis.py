@@ -53,6 +53,44 @@ def analyze_data(data):
     if isinstance(data, str):
         data = data.encode('latin-1')  # Convert to bytes using latin-1 encoding
 
+    # Compute entropy and character frequency from the actual data
+    # and save updated plots to static/. Limit plotting to the first
+    # 4 KB so large files do not slow down scans.
+    sample = data[:4096]
+    frequency = Counter(sample)
+    total = len(sample) if sample else 1
+    entropy = -sum((freq / total) * math.log2(freq / total) for freq in frequency.values() if freq > 0)
+    print(f'Computed entropy: {entropy:.4f} for {len(sample)} bytes')
+
+    try:
+        os.makedirs('static', exist_ok=True)
+        import warnings
+        warnings.filterwarnings("ignore", category=UserWarning, message="Starting a Matplotlib GUI outside of the main thread will likely fail.")
+        warnings.filterwarnings("ignore", category=FutureWarning, message="Passing `palette` without assigning `hue` is deprecated")
+
+        freq_df = pd.DataFrame(list(frequency.items()), columns=['Byte', 'Count'])
+        freq_df = freq_df.sort_values('Count', ascending=False).head(30)
+        plt.figure(figsize=(12, 6))
+        sns.barplot(x='Byte', y='Count', data=freq_df, hue='Byte', palette='viridis', legend=False)
+        plt.title('Top 30 Character Frequencies')
+        plt.xlabel('Byte Value')
+        plt.ylabel('Count')
+        plt.tight_layout()
+        plt.savefig('static/char_freq.png')
+        plt.close()
+
+        plt.figure(figsize=(8, 4))
+        sns.set_style('whitegrid')
+        plt.plot([entropy], marker='o')
+        plt.title('Entropy Visualization')
+        plt.xlabel('Segment')
+        plt.ylabel('Entropy')
+        plt.grid()
+        plt.savefig('static/entropy.png')
+        plt.close()
+    except Exception as e:
+        print(f'Could not save analysis plots: {e}')
+
     return Fernet.generate_key()
 
 
