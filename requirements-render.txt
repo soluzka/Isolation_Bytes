@@ -46,7 +46,7 @@ python-dotenv>=1.2.2
 
 # These Windows-specific packages won't be used on Render (Linux) but included for completeness
 # pywin32 and wmi are Windows-only and will be skipped on Linux
-pywin32-ctypes>=0.2.0
+pywin32-ctypes>=0.2.3
 
 # Werkzeug for secure_filename
 Werkzeug>=3.1.6

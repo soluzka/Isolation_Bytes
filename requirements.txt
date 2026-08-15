@@ -48,7 +48,7 @@ python-dotenv>=1.2.2
 # pip install pywin32==306 --no-deps --only-binary=:all: --force-reinstall
 # OR Install manually from: https://github.com/mhammond/pywin32/releases
 pywin32==306; platform_system=="Windows"
-pywin32-ctypes>=0.2.0
+pywin32-ctypes>=0.2.3
 wmi>=1.5.1; platform_system=="Windows"
 
 # Werkzeug for secure_filename (if used directly)
