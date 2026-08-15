@@ -122,5 +122,5 @@ setuptools==78.1.1
 # NOTE: EMBER2018 dataset is not a pip package. Download it from
 # https://github.com/endgameinc/ember and extract to data/ember2018/ember2018
 # before running train_ember_classifier.py.
-lief>=0.17.2
+lief>=1.0.0
 lightgbm>=4.7.0
