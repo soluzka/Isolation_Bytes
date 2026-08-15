@@ -15,7 +15,7 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$StoreCertFile,
     [Parameter(Mandatory=$false)]
-    [string]$StoreCertPassword,
+    [SecureString]$StoreCertPassword,
     [Parameter(Mandatory=$false)]
     [string]$StorePublisher = 'CN=soluzka',
     [Parameter(ValueFromRemainingArguments=$true, Position=0)]
@@ -40,7 +40,15 @@ if (-not $NoCertManagement -and -not $isAdmin) {
     if ($SkipStore) { $reArgs += '-SkipStore' }
     if ($SkipTest) { $reArgs += '-SkipTest' }
     if ($StoreCertFile) { $reArgs += '-StoreCertFile', $StoreCertFile }
-    if ($StoreCertPassword) { $reArgs += '-StoreCertPassword', $StoreCertPassword }
+    if ($StoreCertPassword) {
+        # UAC re-elevation requires a plain string for the command line; extract and zero the BSTR immediately.
+        $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($StoreCertPassword)
+        try {
+            $reArgs += '-StoreCertPassword', [Runtime.InteropServices.Marshal]::PtrToStringAuto($bstr)
+        } finally {
+            [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+        }
+    }
     if ($StorePublisher -ne 'CN=soluzka') { $reArgs += '-StorePublisher', $StorePublisher }
 
     Write-Host 'Requesting Administrator privileges via UAC...'
@@ -66,7 +74,6 @@ $Onedir = Join-Path $Dist 'antivirus_server'
 $Sdk = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
 $MakeAppx = Join-Path $Sdk 'makeappx.exe'
 $SignTool = Join-Path $Sdk 'signtool.exe'
-$Mt = Join-Path $Sdk 'mt.exe'
 
 if (-not (Test-Path $Onedir)) {
     throw "dist\antivirus_server not found. Run 'python build_config.py' first."
@@ -101,7 +108,7 @@ function Read-PfxSubject($Pfx, [SecureString]$Password) {
 }
 
 if ($StoreCertPassword) {
-    $StorePassword = ConvertTo-SecureString -String $StoreCertPassword -AsPlainText -Force
+    $StorePassword = $StoreCertPassword
 } else {
     $StorePassword = ConvertTo-SecureString -String 'password' -AsPlainText -Force
 }
@@ -186,45 +193,10 @@ New-Item -ItemType Directory -Path $StageRoot | Out-Null
 Write-Host 'Staging dist\antivirus_server ...'
 Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
 
-# MSIX packaged full-trust apps cannot launch an EXE that requests
-# requireAdministrator. Strip the UAC admin manifest from the staged copies
-# so the Store package can start, while leaving dist\antivirus_server\antivirus_server.exe
-# with its admin manifest for the standalone desktop EXE.
-if (Test-Path $Mt) {
-    $stageExes = Get-ChildItem -Path $StageRoot -Filter 'antivirus_server.exe' -File
-    foreach ($exe in $stageExes) {
-        # mt.exe will merge any <base>.exe.manifest file found next to the EXE,
-        # so remove side-by-side manifests first to avoid "level" mismatches.
-        $sideBySide = "$($exe.FullName).manifest"
-        if (Test-Path $sideBySide) { Remove-Item -Path $sideBySide -Force }
-
-        $StageManifest = Join-Path $StageRoot "$($exe.BaseName).manifest"
-        $StageManifestTmp = "$StageManifest.tmp"
-
-        & $Mt -nologo -inputresource:"$($exe.FullName);#1" -out:$StageManifestTmp
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $StageManifestTmp)) { throw "mt.exe failed to extract manifest from $($exe.FullName)" }
-
-        $manifest = Get-Content -Path $StageManifestTmp -Raw
-        if ($manifest -notmatch 'requireAdministrator' -and $manifest -notmatch 'level\s*=\s*"highestAvailable"') {
-            Remove-Item -Path $StageManifestTmp -ErrorAction SilentlyContinue
-            continue
-        }
-        # Force every requested execution level to asInvoker so they all match.
-        $manifest = $manifest -replace 'level\s*=\s*"requireAdministrator"', 'level="asInvoker"'
-        $manifest = $manifest -replace 'level\s*=\s*"highestAvailable"', 'level="asInvoker"'
-        $manifest = $manifest -replace 'uiAccess\s*=\s*"true"', 'uiAccess="false"'
-        $manifest | Set-Content -Path $StageManifest -Encoding utf8 -NoNewline
-
-        # Output the manifest resource from scratch so mt does not try to merge.
-        & $Mt -nologo -manifest $StageManifest -outputresource:"$($exe.FullName);#1"
-        if ($LASTEXITCODE -ne 0) { throw "mt.exe failed to update manifest for $($exe.FullName)" }
-
-        Remove-Item -Path $StageManifest, $StageManifestTmp -ErrorAction SilentlyContinue
-        Write-Host "  Set manifest to asInvoker for: $($exe.Name)"
-    }
-} else {
-    Write-Warning 'mt.exe not found in SDK; staged EXEs still have admin manifests. The MSIX may fail to launch.'
-}
+# The EXE is built with --uac-admin, so the embedded manifest requires
+# elevation when launched directly or through an MSIX shortcut. Do not rewrite
+# the embedded PyInstaller executable manifest after packaging.
+Write-Host "Using EXE as-is (requireAdministrator) for MSIX packaging."
 
 # Create a simple placeholder 256x256 PNG logo.
 $Assets = Join-Path $StageRoot 'Assets'
@@ -331,8 +303,13 @@ if (-not $SkipStore) {
     $InstallPs1 = Join-Path $Dist 'Install_AntivirusServer.ps1'
     @"
 # Trust the package certificate and install the MSIX.
-# Run this PowerShell as Administrator on the target machine.
+# Elevate automatically when launched directly rather than from the EXE installer.
 `$ErrorActionPreference = 'Stop'
+`$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not `$isAdmin) {
+    `$proc = Start-Process powershell.exe -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', `$PSCommandPath)
+    exit `$proc.ExitCode
+}
 `$package = Join-Path `$PSScriptRoot 'AntivirusServer_Store.msix'
 `$cert = Join-Path `$PSScriptRoot 'soluzka.cer'
 
@@ -348,7 +325,7 @@ Write-Host 'Antivirus Server installed. Start it from the Start menu or desktop 
     $InstallBat = Join-Path $Dist 'Install_AntivirusServer.bat'
     @"
 @echo off
-powershell -ExecutionPolicy Bypass -File "%~dp0Install_AntivirusServer.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "Start-Process powershell.exe -Verb RunAs -ArgumentList '-NoProfile -ExecutionPolicy Bypass -File \"%~dp0Install_AntivirusServer.ps1\"'"
 pause
 "@ | Out-File -FilePath $InstallBat -Encoding ascii
 
@@ -356,6 +333,50 @@ pause
     Write-Host "  $InstallBat"
     Write-Host "  $InstallPs1"
     Write-Host "  $(Join-Path $Dist 'soluzka.cer')"
+}
+
+$script:ShortcutRunAsLoaded = $false
+function Set-ShortcutRunAs($Path) {
+    if (-not $script:ShortcutRunAsLoaded) {
+        Add-Type -TypeDefinition @"
+            using System;
+            using System.Runtime.InteropServices;
+
+            [ComImport, Guid("00021401-0000-0000-C000-000000000046")]
+            public class ShellLink { }
+
+            [ComImport, Guid("45E2B4AE-B1C3-11D0-B92F-00A0C90312E1"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            public interface IShellLinkDataList {
+                void GetFlags(out uint dwFlags);
+                void SetFlags(uint dwFlags);
+                void AddDataBlock(IntPtr pDataBlock);
+                void CopyDataBlock(uint dwSig, out IntPtr ppDataBlock);
+                void RemoveDataBlock(uint dwSig);
+            }
+
+            [ComImport, Guid("0000010B-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+            public interface IPersistFile {
+                void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+                void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, [MarshalAs(UnmanagedType.Bool)] bool fRemember);
+            }
+
+            public class ShortcutRunAs {
+                public const uint SLDF_RUNAS_USER = 0x00002000;
+                public static void Set(string path) {
+                    var sl = new ShellLink();
+                    var pf = (IPersistFile)sl;
+                    pf.Load(path, 2);
+                    var dl = (IShellLinkDataList)sl;
+                    uint flags;
+                    dl.GetFlags(out flags);
+                    dl.SetFlags(flags | SLDF_RUNAS_USER);
+                    pf.Save(path, true);
+                }
+            }
+"@
+        $script:ShortcutRunAsLoaded = $true
+    }
+    [ShortcutRunAs]::Set($Path)
 }
 
 # Hide the standalone onedir in AppData\Local and create a desktop shortcut.
@@ -392,10 +413,12 @@ if (Test-Path $ExeSource) {
     $Wsh = New-Object -ComObject WScript.Shell
     $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server (standalone).lnk'))
     $Shortcut.TargetPath = $InstalledExe
+    $Shortcut.Arguments = ''
     $Shortcut.IconLocation = "$InstalledExe,0"
     $Shortcut.WorkingDirectory = $LocalAppDir
     $Shortcut.Description = 'Antivirus Server (standalone)'
     $Shortcut.Save()
+    Set-ShortcutRunAs $Shortcut.FullName
     Write-Host "Copied standalone onedir to: $LocalAppDir"
     Write-Host "Created desktop shortcut: Antivirus Server (standalone).lnk"
 } else {
@@ -421,16 +444,17 @@ if (-not $SkipStore) {
             Write-Warning "Could not auto-launch the app: $_"
         }
 
-        # Create a desktop shortcut to the installed Store app.
+        # Create a desktop shortcut that launches the installed MSIX EXE as admin.
         $Wsh = New-Object -ComObject WScript.Shell
         $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server.lnk'))
-        $Shortcut.TargetPath = "$env:SystemRoot\explorer.exe"
-        $Shortcut.Arguments = "shell:AppsFolder\$Aumid"
+        $Shortcut.TargetPath = 'powershell.exe'
+        $Shortcut.Arguments = '-WindowStyle Hidden -Command { $pkg = Get-AppxPackage -Name ''soluzka.AntivirusServer''; if ($pkg) { $exe = Join-Path $pkg.InstallLocation ''antivirus_server.exe''; Start-Process -FilePath "$exe" -Verb RunAs } }'
         if (Test-Path $DesktopExe) {
             $Shortcut.IconLocation = "$DesktopExe,0"
         }
         $Shortcut.Description = 'Antivirus Server'
         $Shortcut.Save()
+        Set-ShortcutRunAs $Shortcut.FullName
         Write-Host "Desktop shortcut created: Antivirus Server.lnk"
     } else {
         Write-Host "Install the Store MSIX (run as Administrator) with:"

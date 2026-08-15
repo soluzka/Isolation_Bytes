@@ -2,9 +2,11 @@
 import os
 import sys
 import time
+import struct
 import shutil
 import tempfile
 import subprocess
+import base64
 
 
 def _resource(name):
@@ -19,11 +21,28 @@ def _resource(name):
 def _run_powershell(cmd, description):
     print(f"{description}...")
     try:
-        subprocess.check_call(['powershell.exe', '-ExecutionPolicy', 'Bypass', '-Command', cmd], shell=False)
+        encoded = base64.b64encode(cmd.encode('utf-16le')).decode('ascii')
+        subprocess.check_call(['powershell.exe', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded], shell=False)
         print(f"  OK")
     except Exception as e:
         print(f"  FAILED: {e}")
         raise
+
+
+def _set_shortcut_runas(path):
+    """Set the SLDF_RUNAS_USER (0x2000) flag on a .lnk file."""
+    try:
+        with open(path, 'r+b') as f:
+            header = struct.unpack('<I', f.read(4))[0]
+            if header != 0x4C:
+                return
+            f.seek(0x14)
+            flags = struct.unpack('<I', f.read(4))[0]
+            flags |= 0x2000
+            f.seek(0x14)
+            f.write(struct.pack('<I', flags))
+    except Exception:
+        pass
 
 
 def main():
@@ -62,21 +81,45 @@ def main():
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
             "if (-not $pkg) {{ throw 'Package not found after install' }}; "
-            "$aumid = $pkg.PackageFamilyName + '!App'; "
+            "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
             "$Wsh = New-Object -ComObject WScript.Shell; "
             "$S = $Wsh.CreateShortcut('{}'); "
-            "$S.TargetPath = '{}\\explorer.exe'; "
-            "$S.Arguments = 'shell:AppsFolder\\' + $aumid; "
+            "$S.TargetPath = 'powershell.exe'; "
+            "$S.Arguments = '-WindowStyle Hidden -Command {{ $pkg = Get-AppxPackage -Name ''soluzka.AntivirusServer''; if ($pkg) {{ $exe = Join-Path $pkg.InstallLocation ''antivirus_server.exe''; Start-Process -FilePath \"$exe\" -Verb RunAs }} }}'; "
+            "$S.IconLocation = \"$exe,0\"; "
             "$S.Description = 'Antivirus Server'; "
-            "$S.Save()".format(shortcut_path, os.environ.get('SystemRoot', 'C:\\Windows')),
+            "$S.Save()".format(shortcut_path),
             "Creating desktop shortcut"
         )
+        _set_shortcut_runas(shortcut_path)
+
+        # Create the conditional startup and YARA scanner shortcuts.
+        for name, arg, desc in [
+            ('Start Conditional Antivirus.lnk', '', 'Start Conditional Antivirus'),
+            ('Start YARA Scanner.lnk', '--open-yara', 'Start YARA Scanner'),
+        ]:
+            sc_path = os.path.join(desktop, name)
+            _run_powershell(
+                "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
+                "if (-not $pkg) {{ throw 'Package not found after install' }}; "
+                "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
+                "$Wsh = New-Object -ComObject WScript.Shell; "
+                "$S = $Wsh.CreateShortcut('{}'); "
+                "$S.TargetPath = $exe; "
+                "$S.Arguments = '{}'; "
+                "$S.WorkingDirectory = $pkg.InstallLocation; "
+                "$S.IconLocation = \"$exe,0\"; "
+                "$S.Description = '{}'; "
+                "$S.Save()".format(sc_path, arg, desc),
+                "Creating {} shortcut".format(desc)
+            )
+            _set_shortcut_runas(sc_path)
 
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
             "if (-not $pkg) {{ throw 'Package not found after install' }}; "
-            "$aumid = $pkg.PackageFamilyName + '!App'; "
-            "Start-Process 'explorer.exe' \"shell:AppsFolder\\$aumid\"",
+            "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
+            "Start-Process -FilePath \"$exe\" -Verb RunAs",
             "Launching Antivirus Server"
         )
 

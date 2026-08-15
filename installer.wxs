@@ -8,10 +8,10 @@
            UpgradeCode="B3A0C0F1-2E5D-4F3E-9A1B-2C3D4E5F6A7C">
     <Package InstallerVersion="200"
              Compressed="yes"
-             InstallScope="perUser"
+             InstallScope="perMachine"
              Platform="x64"
              Description="Antivirus Server"
-             InstallPrivileges="limited" />
+             InstallPrivileges="elevated" />
     <MediaTemplate EmbedCab="yes" />
 
     <Directory Id="TARGETDIR" Name="SourceDir">

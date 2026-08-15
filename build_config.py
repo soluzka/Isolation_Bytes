@@ -147,7 +147,8 @@ pyinstaller_args = [
     f'--icon={icon_path}',
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
-    '--console'  # Keep console for debugging
+    '--console',  # Keep console for debugging
+    '--uac-admin'  # Require elevation for every packaged executable launch
 ]
 
 # Add Redis configuration
@@ -160,9 +161,8 @@ if redis_available:
     pyinstaller_args.append('--hidden-import=redis.utils')
     logging.info("Redis configured for EXE build")
 
-# Add hidden imports
-pyinstaller_args.append('--uac-admin')
-print('Admin mode enabled: --uac-admin added for local admin build')
+# Require UAC elevation for the EXE in standalone installs and MSIX packages.
+# The generated shortcuts also carry the shell RunAs flag for an explicit prompt.
 
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 
@@ -370,24 +370,12 @@ for stale_spec in [os.path.join(base_dir, 'antivirus_server.spec'), os.path.join
         os.remove(stale_spec)
         print(f"Removed stale spec file: {stale_spec}")
 
-# Run PyInstaller to generate the .spec, then force noarchive=True so the
-# PYZ/modules are written as separate files in _internal instead of embedded
-# in antivirus_server.exe. This keeps the EXE small and lets mt.exe safely
-# change its manifest for the MSIX without corrupting the embedded archive.
+# Run PyInstaller
 try:
     print("Starting EXE build...")
     print("Redis status:", "Available" if redis_available else "Not Available")
     PyInstaller.__main__.run(pyinstaller_args)
-    print("Initial build completed. Patching .spec to use noarchive=True...")
-    spec_file = os.path.join(base_dir, 'antivirus_server.spec')
-    if os.path.exists(spec_file):
-        spec_text = open(spec_file, 'r', encoding='utf-8').read()
-        spec_text = spec_text.replace('noarchive=False,', 'noarchive=True,')
-        open(spec_file, 'w', encoding='utf-8').write(spec_text)
-        print(f"Patched {spec_file}")
-        print("Rebuilding with noarchive=True...")
-        PyInstaller.__main__.run([spec_file, '--noconfirm', '--clean'])
-        print("Build completed successfully!")
+    print("Build completed successfully!")
 except Exception as e:
     print(f"Error during build: {e}")
     sys.exit(1)
@@ -442,7 +430,8 @@ if os.path.exists(build_msix_ps1):
             'powershell.exe',
             '-ExecutionPolicy', 'Bypass',
             '-File', build_msix_ps1,
-            '-SkipBuild'
+            '-SkipBuild',
+            '-NoCertManagement'
         ]
         if skip_test:
             args.append('-SkipTest')
@@ -467,6 +456,15 @@ if os.path.exists(build_msix_ps1):
             if os.path.exists(src):
                 shutil.copy2(src, dst)
                 print(f"Copied installer to desktop: {dst}")
+
+            # Create the other desktop shortcuts with the admin flag.
+            for script in ['create_conditional_shortcut.py', 'create_yara_scanner_shortcut.py']:
+                shortcut_script = os.path.join(base_dir, script)
+                if os.path.exists(shortcut_script):
+                    print(f"Creating shortcut from {script}...")
+                    subprocess.check_call([sys.executable, shortcut_script])
+                else:
+                    print(f"Warning: {script} not found; skipping.")
         else:
             print("Warning: tools/build_installer_exe.py not found; skipping one-file installer.")
     except Exception as e:
