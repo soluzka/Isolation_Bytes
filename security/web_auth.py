@@ -26,25 +26,59 @@ def _save_auth_data(data):
         json.dump(data, f)
 
 def set_password(password):
+    """Legacy single-admin setter. Creates a default 'admin' user."""
     data = _load_auth_data()
     hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
-    data['password_hash'] = hashed.decode('utf-8')
+    users = data.setdefault('users', {})
+    users['admin'] = hashed.decode('utf-8')
+    data['password_hash'] = users['admin']
     _save_auth_data(data)
 
 
 def set_password_hash(password_hash):
     """Store a pre-generated bcrypt hash string directly."""
     data = _load_auth_data()
+    users = data.setdefault('users', {})
+    users['admin'] = password_hash
     data['password_hash'] = password_hash
     _save_auth_data(data)
 
 def has_auth_data():
-    return bool(_load_auth_data().get('password_hash'))
+    return bool(_load_auth_data().get('users'))
 
 
 def verify_password(password):
     data = _load_auth_data()
     hash_str = data.get('password_hash')
+    if not hash_str:
+        return False
+    return bcrypt.checkpw(password.encode(), hash_str.encode('utf-8'))
+
+
+def _hash_password(password):
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode('utf-8')
+
+
+def register_user(username, password):
+    """Register a new user. Returns (success, message)."""
+    if not username or not password:
+        return False, 'Username and password are required'
+    if not username.isalnum():
+        return False, 'Username must be alphanumeric'
+    data = _load_auth_data()
+    users = data.setdefault('users', {})
+    if username in users:
+        return False, 'Username already exists'
+    users[username] = _hash_password(password)
+    _save_auth_data(data)
+    return True, 'User created'
+
+
+def verify_user(username, password):
+    """Verify a username/password against the user database."""
+    data = _load_auth_data()
+    users = data.get('users', {})
+    hash_str = users.get(username)
     if not hash_str:
         return False
     return bcrypt.checkpw(password.encode(), hash_str.encode('utf-8'))

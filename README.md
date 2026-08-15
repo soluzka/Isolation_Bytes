@@ -483,6 +483,24 @@ See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for the full policy. Summary:
 - Quarantined files are encrypted; session cookies are signed with `SECRET_KEY` from `.env`.
 - Admin credentials are stored as a bcrypt hash (`ADMIN_PASSWORD_HASH`), not plaintext.
 
+## Admin Password Hash
+
+`ADMIN_PASSWORD_HASH` in `.env` must be a bcrypt hash, not the plaintext password. Do not use online hash generators for real or production passwords, because you would be sending the password to a third-party server.
+
+Generate the hash locally with Python:
+
+```powershell
+python -c "import bcrypt; print(bcrypt.hashpw('your-password'.encode(), bcrypt.gensalt()).decode())"
+```
+
+Then set it in `.env`:
+
+```dotenv
+ADMIN_PASSWORD_HASH=$2b$12$...
+```
+
+For the pre-packaged build, the default login is `admin` / `soluzka` unless you replace the hash before building.
+
 ## License
 
 This project is released under the [MIT License](LICENSE).

@@ -120,7 +120,7 @@ load_dotenv(dotenv_path)
 # Prefer ADMIN_PASSWORD_HASH (a bcrypt string). Fall back to ADMIN_PASSWORD
 # and hash it at startup for migration.
 try:
-    from security.web_auth import set_password, set_password_hash, verify_password, has_auth_data
+    from security.web_auth import set_password, set_password_hash, verify_password, verify_user, register_user, has_auth_data
     if not has_auth_data():
         admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
         admin_password = os.environ.get('ADMIN_PASSWORD')
@@ -130,6 +130,8 @@ try:
             set_password(admin_password)
 except Exception:
     verify_password = None
+    verify_user = None
+    register_user = None
 
 import secrets
 
@@ -1134,15 +1136,27 @@ def login():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
 
-        if verify_password:
+        password_ok = False
+        if verify_user:
             try:
-                password_ok = verify_password(password)
+                password_ok = verify_user(username, password)
             except Exception:
-                password_ok = (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+                if verify_password:
+                    try:
+                        password_ok = (username == ADMIN_USERNAME) and verify_password(password)
+                    except Exception:
+                        password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+                else:
+                    password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+        elif verify_password:
+            try:
+                password_ok = (username == ADMIN_USERNAME) and verify_password(password)
+            except Exception:
+                password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
         else:
-            password_ok = (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
+            password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
 
-        if username == ADMIN_USERNAME and password_ok:
+        if password_ok:
             _login_attempts.pop(remote_addr, None)
             session['logged_in'] = True
             session['csrf_token'] = secrets.token_urlsafe(32)
@@ -1150,6 +1164,32 @@ def login():
             return redirect(next_page)
         error = 'Invalid username or password'
     return render_template('login.html', error=error)
+
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    error = None
+    message = None
+    if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+        if not username or not password:
+            error = 'Username and password are required'
+        elif password != confirm:
+            error = 'Passwords do not match'
+        elif not register_user:
+            error = 'Registration is not available'
+        else:
+            try:
+                success, msg = register_user(username, password)
+                if success:
+                    message = 'Account created. You can now log in.'
+                else:
+                    error = msg
+            except Exception as e:
+                error = str(e)
+    return render_template('register.html', error=error, message=message)
 
 
 @app.route('/logout')
