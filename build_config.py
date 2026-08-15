@@ -416,6 +416,32 @@ if os.path.exists(runner_script):
 else:
     print("Warning: ssdeep_runner.py not found; skipping ssdeep_runner build.")
 
+# Build an unpacked administrator helper for the traditional installers.
+# This helper is intentionally kept outside MSIX activation paths.
+helper_script = os.path.join(base_dir, 'antivirus_admin_helper.py')
+if os.path.exists(helper_script):
+    try:
+        print("Building AntivirusServer_AdminHelper.exe...")
+        helper_args = [
+            '--name=AntivirusServer_AdminHelper',
+            '--onefile',
+            '--uac-admin',
+            '--noconfirm',
+            '--log-level=INFO',
+            f'--icon={icon_path}',
+            helper_script,
+        ]
+        PyInstaller.__main__.run(helper_args)
+        helper_src = os.path.join(base_dir, 'dist', 'AntivirusServer_AdminHelper.exe')
+        helper_dst = os.path.join(base_dir, 'dist', app_name, 'AntivirusServer_AdminHelper.exe')
+        if os.path.exists(helper_src) and os.path.isdir(os.path.dirname(helper_dst)):
+            shutil.move(helper_src, helper_dst)
+            print(f"Moved AntivirusServer_AdminHelper.exe to {helper_dst}")
+    except Exception as e:
+        print(f"Warning: administrator helper build failed: {e}")
+else:
+    print("Warning: antivirus_admin_helper.py not found; skipping administrator helper build.")
+
 # Build the MSIX packages from the onedir that was just produced.
 # build_msix.ps1 will prompt for UAC elevation if it needs to manage certs,
 # install, and launch the app. Use build_msix.ps1 -NoCertManagement if you

@@ -96,8 +96,8 @@ def main():
 
         # Create the conditional startup and YARA scanner shortcuts.
         for name, arg, desc in [
-            ('Start Conditional Antivirus.lnk', '', 'Start Conditional Antivirus'),
-            ('Start YARA Scanner.lnk', '--open-yara', 'Start YARA Scanner'),
+            ('Start Conditional Antivirus (MSIX).lnk', '', 'Start Conditional Antivirus (MSIX)'),
+            ('Start YARA Scanner (MSIX).lnk', '--open-yara', 'Start YARA Scanner (MSIX)'),
         ]:
             sc_path = os.path.join(desktop, name)
             _run_powershell(

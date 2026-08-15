@@ -193,6 +193,13 @@ New-Item -ItemType Directory -Path $StageRoot | Out-Null
 Write-Host 'Staging dist\antivirus_server ...'
 Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
 
+# Keep administrator-only unpacked helpers out of the MSIX. They are installed
+# by the traditional MSI/Inno installers and cannot be elevated from a package.
+$MsixAdminHelper = Join-Path $StageRoot 'AntivirusServer_AdminHelper.exe'
+if (Test-Path $MsixAdminHelper) { Remove-Item -Force $MsixAdminHelper }
+$MsixSsdeepRunner = Join-Path $StageRoot '_internal\ssdeep_runner.exe'
+if (Test-Path $MsixSsdeepRunner) { Remove-Item -Force $MsixSsdeepRunner }
+
 # The EXE is intentionally built as asInvoker for MSIX compatibility. Windows
 # does not support requireAdministrator for packaged full-trust applications.
 # Do not rewrite the embedded PyInstaller executable manifest after packaging.

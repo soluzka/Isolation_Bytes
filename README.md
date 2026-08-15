@@ -145,6 +145,7 @@ python build_config.py
 
 - Builds `dist\antivirus_server\antivirus_server.exe` as an onedir bundle.
 - Builds `dist\ssdeep_runner.exe` as a one-file bundle, then moves it into `dist\antivirus_server\_internal\`.
+- Builds `AntivirusServer_AdminHelper.exe` with UAC elevation and places it in `dist\antivirus_server\` for traditional installers.
 - Bundles the `models\`, `security\`, `templates\`, `static\`, and related runtime directories.
 - Uses `--noconfirm` so existing build and dist folders are replaced without prompting.
 - Builds the MSIX application as `asInvoker` because Windows does not support elevated MSIX app activation.
@@ -157,6 +158,7 @@ After a successful build, `dist\antivirus_server\` contains:
 ```
 dist\antivirus_server\
   antivirus_server.exe          # Main entry point
+  AntivirusServer_AdminHelper.exe # External UAC launcher for traditional installers
   _internal\ssdeep_runner.exe   # Elevated standalone fuzzy-hash helper
   _internal\                    # Python runtime and extensions
   security\                      # YARA rules, scanners, and related modules
@@ -169,6 +171,8 @@ dist\antivirus_server\
 ```
 
 `dist\antivirus_server\_internal\ssdeep_runner.exe` is the installed helper location after running `python build_config.py`. It is a standalone elevated executable packaged with the onedir runtime. The runner resolves its project rules from the parent `dist\antivirus_server\security\yara_rules\` folder.
+
+`AntivirusServer_AdminHelper.exe` is installed beside `antivirus_server.exe` by the traditional Inno Setup and WiX installers. The administrator YARA and Conditional Antivirus shortcuts target this unpacked helper, which starts the unpacked application with the requested arguments. MSIX shortcuts remain normal AUMID shortcuts because Windows does not support elevated MSIX activation.
 
 ### Creating the MSIX Store Package
 

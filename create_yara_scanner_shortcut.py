@@ -29,6 +29,8 @@ def _set_shortcut_runas(path):
 is_frozen = getattr(sys, 'frozen', False)
 base_dir = os.path.dirname(sys.executable) if is_frozen else os.path.dirname(__file__)
 exe_candidates = [
+    os.path.abspath(os.path.join(base_dir, 'AntivirusServer_AdminHelper.exe')),
+    os.path.abspath(os.path.join(base_dir, 'dist', 'antivirus_server', 'AntivirusServer_AdminHelper.exe')),
     os.path.abspath(os.path.join(base_dir, 'antivirus_server.exe')),
     os.path.abspath(os.path.join(base_dir, 'dist', 'antivirus_server', 'antivirus_server.exe')),
     os.path.abspath(os.path.join(base_dir, 'dist', 'antivirus_server.exe')),
