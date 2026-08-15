@@ -22,6 +22,9 @@ param(
     [array]$RemainingArguments
 )
 
+# Always run from the script's own directory so relative paths work.
+Set-Location -Path (Split-Path -Parent $MyInvocation.MyCommand.Definition)
+
 $ErrorActionPreference = 'Stop'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
