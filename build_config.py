@@ -280,6 +280,7 @@ DATA_FILES = [
     'blacklist_fallback.txt',
     'blocked_ips.json',
     'c2_ports.json',
+    'iocs.json',
     'malicious_domains.json',
     'malicious_ips.log',
     'network_segments.json',

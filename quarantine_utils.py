@@ -4,6 +4,8 @@ import logging
 import shutil
 import tempfile
 import hashlib
+import json
+import time
 
 ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
@@ -111,29 +113,155 @@ def _add_local_signatures(data, filepath):
     except Exception as e:
         logging.error(f"Failed to add local quarantine signatures: {e}")
 
-def quarantine_file(filepath):
-    import shutil
-    from cryptography.fernet import Fernet
+def _send_alert(reason, original_path, sha256):
+    """Send a webhook alert if ALERT_WEBHOOK_URL is configured."""
+    import requests
+    webhook = os.environ.get('ALERT_WEBHOOK_URL', '').strip()
+    if not webhook:
+        return
+    try:
+        requests.post(webhook, json={
+            'text': f'Antivirus alert: quarantined {original_path}',
+            'reason': reason,
+            'sha256': sha256,
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
+        }, timeout=10)
+    except Exception:
+        pass
+
+
+def _log_quarantine(original_path, quarantine_path, data, reason=''):
+    """Append quarantine metadata to the quarantine log."""
+    log_path = os.path.join(QUARANTINE_FOLDER, 'quarantine_log.json')
+    entry = {
+        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'original_path': original_path,
+        'quarantine_path': quarantine_path,
+        'sha256': hashlib.sha256(data).hexdigest(),
+        'size': len(data),
+        'reason': reason or 'unknown'
+    }
+    try:
+        logs = []
+        if os.path.exists(log_path):
+            with open(log_path, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+        if not isinstance(logs, list):
+            logs = []
+        logs.append(entry)
+        with open(log_path, 'w', encoding='utf-8') as f:
+            json.dump(logs, f, indent=2)
+    except Exception as e:
+        logging.error(f'Failed to write quarantine log: {e}')
+
+
+def list_quarantine_files():
+    """Return a list of quarantine .enc files with metadata from the log."""
+    try:
+        files = [f for f in os.listdir(QUARANTINE_FOLDER) if f.endswith('.enc')]
+    except Exception:
+        return []
+    log_path = os.path.join(QUARANTINE_FOLDER, 'quarantine_log.json')
+    log_entries = []
+    try:
+        if os.path.exists(log_path):
+            with open(log_path, 'r', encoding='utf-8') as lf:
+                log_entries = json.load(lf)
+            if not isinstance(log_entries, list):
+                log_entries = []
+    except Exception:
+        pass
+    items = []
+    for f in files:
+        full = os.path.join(QUARANTINE_FOLDER, f)
+        mtime = os.path.getmtime(full)
+        entry = next((e for e in log_entries if e.get('quarantine_path', '').endswith(f)), {})
+        items.append({
+            'filename': f,
+            'path': full,
+            'original_path': entry.get('original_path', 'unknown'),
+            'reason': entry.get('reason', 'unknown'),
+            'timestamp': entry.get('timestamp', time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))),
+            'sha256': entry.get('sha256', ''),
+            'size': entry.get('size', os.path.getsize(full))
+        })
+    return items
+
+
+def restore_quarantine_file(filename, destination=None):
+    """Decrypt a quarantine .enc file and write it back to the original or a destination."""
     FERNET_KEY = os.environ.get('FERNET_KEY')
     if FERNET_KEY is not None and isinstance(FERNET_KEY, str):
         FERNET_KEY = FERNET_KEY.encode()
+    if not FERNET_KEY or len(FERNET_KEY) != 44:
+        return False, 'FERNET_KEY not configured'
+    source = os.path.join(QUARANTINE_FOLDER, filename)
+    if not os.path.exists(source):
+        return False, 'File not found'
+    if destination is None:
+        log_path = os.path.join(QUARANTINE_FOLDER, 'quarantine_log.json')
+        original = None
+        try:
+            if os.path.exists(log_path):
+                with open(log_path, 'r', encoding='utf-8') as f:
+                    logs = json.load(f)
+                for entry in logs:
+                    if entry.get('quarantine_path', '').endswith(filename):
+                        original = entry.get('original_path')
+                        break
+        except Exception:
+            pass
+        if not original:
+            return False, 'Cannot determine original path'
+        destination = original + '.restored'
+    try:
+        with open(source, 'rb') as f:
+            encrypted = f.read()
+        fernet = Fernet(FERNET_KEY)
+        data = fernet.decrypt(encrypted)
+        os.makedirs(os.path.dirname(destination) or '.', exist_ok=True)
+        with open(destination, 'wb') as f:
+            f.write(data)
+        return True, destination
+    except Exception as e:
+        return False, str(e)
+
+
+def delete_quarantine_file(filename):
+    """Delete a quarantine .enc file and its log entry."""
+    source = os.path.join(QUARANTINE_FOLDER, filename)
+    if not os.path.exists(source):
+        return False, 'File not found'
+    try:
+        os.remove(source)
+        log_path = os.path.join(QUARANTINE_FOLDER, 'quarantine_log.json')
+        if os.path.exists(log_path):
+            with open(log_path, 'r', encoding='utf-8') as f:
+                logs = json.load(f)
+            logs = [e for e in logs if not e.get('quarantine_path', '').endswith(filename)]
+            with open(log_path, 'w', encoding='utf-8') as f:
+                json.dump(logs, f, indent=2)
+        return True, 'Deleted'
+    except Exception as e:
+        return False, str(e)
+
+
+def quarantine_file(filepath, reason=''):
+    import shutil
+    from cryptography.fernet import Fernet
+    FERNET_KEY = os.environ.get('FERNET_KEY')
     if FERNET_KEY is not None and isinstance(FERNET_KEY, str):
         FERNET_KEY = FERNET_KEY.encode()
     failed_quarantine_folder = os.path.join(basedir, 'failed_quarantine')
     os.makedirs(failed_quarantine_folder, exist_ok=True)
     if not FERNET_KEY or len(FERNET_KEY) != 44:
         logging.error(f"FERNET_KEY environment variable must be set to a valid 44-character Fernet key. Quarantine failed for {filepath}.")
-        # Move file to failed_quarantine
+        # Move file to failed_quarantine, but never silently delete when encryption is not possible.
         try:
             shutil.move(filepath, os.path.join(failed_quarantine_folder, os.path.basename(filepath)))
             logging.warning(f"Moved {filepath} to failed_quarantine due to missing/invalid key.")
         except Exception as move_exc:
-            logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Attempting forced delete.")
-            try:
-                os.remove(filepath)
-                logging.warning(f"Force deleted {filepath} after failed quarantine.")
-            except Exception as del_exc:
-                logging.error(f"Failed to force delete {filepath}: {del_exc}")
+            logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Original file left in place.")
         return
     secure_key = SecureBuffer(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
     fernet = Fernet(secure_key.get_bytes())
@@ -148,13 +276,14 @@ def quarantine_file(filepath):
             ef.write(encrypted_data)
         del ef
         logging.warning(f"Quarantined (encrypted): {filepath}")
+        _log_quarantine(filepath, dest, data, reason)
+        _send_alert(reason, filepath, hashlib.sha256(data).hexdigest())
         _add_local_signatures(data, filepath)
         try:
             from security.virus_total import check_and_update
             check_and_update(filepath)
         except Exception:
             pass
-        secure_key.zero_and_unlock()
         secure_key.zero_and_unlock()
         if os.path.exists(filepath):
             try:
@@ -174,9 +303,4 @@ def quarantine_file(filepath):
             shutil.move(filepath, os.path.join(failed_quarantine_folder, os.path.basename(filepath)))
             logging.warning(f"Moved {filepath} to failed_quarantine due to encryption error.")
         except Exception as move_exc:
-            logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Attempting forced delete.")
-            try:
-                os.remove(filepath)
-                logging.warning(f"Force deleted {filepath} after failed quarantine.")
-            except Exception as del_exc:
-                logging.error(f"Failed to force delete {filepath}: {del_exc}")
+            logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Original file left in place.")

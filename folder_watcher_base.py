@@ -99,60 +99,60 @@ class FolderWatcher:
                     return
                 self.logger.info(f"New file detected: {file_path}")
 
-                    # Perform YARA scan
-                    from security.yara_scanner import scan_file_with_yara
-                    from security.detector import detector, bodmas_cnn_detector, ember_detector
-                    
-                    # Get file details
-                    file_size = os.path.getsize(file_path)
+                # Perform YARA scan
+                from security.yara_scanner import scan_file_with_yara
+                from security.detector import detector, bodmas_cnn_detector, ember_detector
+                
+                # Get file details
+                file_size = os.path.getsize(file_path)
 
-                    # Check with YARA rules
-                    is_suspicious = scan_file_with_yara(file_path)
+                # Check with YARA scan
+                yara_hits = scan_file_with_yara(file_path)
+
+                # Get ML predictions from all three models
+                ml_hits = []
+                if detector.is_malicious(file_path):
+                    ml_hits.append('sklearn')
+                if bodmas_cnn_detector.is_malicious(file_path):
+                    ml_hits.append('bodmas_cnn')
+                if ember_detector.is_malicious(file_path):
+                    ml_hits.append('ember')
+                
+                if yara_hits or ml_hits:  # If YARA or any ML model predicts malicious
+                    self.logger.warning(f"Suspicious file detected: {file_path} (yara: {len(yara_hits)}, models: {', '.join(ml_hits)})")
                     
-                    # Get ML predictions from all three models
-                    ml_hits = []
-                    if detector.is_malicious(file_path):
-                        ml_hits.append('sklearn')
-                    if bodmas_cnn_detector.is_malicious(file_path):
-                        ml_hits.append('bodmas_cnn')
-                    if ember_detector.is_malicious(file_path):
-                        ml_hits.append('ember')
+                    # Create quarantine filename
+                    quarantine_filename = os.path.basename(file_path) + '.enc'
+                    quarantine_path = os.path.join('quarantine', quarantine_filename)
                     
-                    if ml_hits:  # If any ML model predicts malicious
-                        self.logger.warning(f"Suspicious file detected: {file_path} (models: {', '.join(ml_hits)})")
+                    # Encrypt and move file to quarantine
+                    key = os.environ.get('FERNET_KEY')
+                    if not key:
+                        self.logger.error("Encryption key not found")
+                        return
                         
-                        # Create quarantine filename
-                        quarantine_filename = os.path.basename(file_path) + '.enc'
-                        quarantine_path = os.path.join('quarantine', quarantine_filename)
+                    # Read file content
+                    with open(file_path, 'rb') as f:
+                        file_content = f.read()
                         
-                        # Encrypt and move file to quarantine
-                        key = os.environ.get('FERNET_KEY')
-                        if not key:
-                            self.logger.error("Encryption key not found")
-                            return
-                            
-                        # Read file content
-                        with open(file_path, 'rb') as f:
-                            file_content = f.read()
-                            
-                        # Encrypt content
-                        from cryptography.fernet import Fernet
-                        fernet = Fernet(key)
-                        encrypted_content = fernet.encrypt(file_content)
+                    # Encrypt content
+                    from cryptography.fernet import Fernet
+                    fernet = Fernet(key)
+                    encrypted_content = fernet.encrypt(file_content)
+                    
+                    # Write to quarantine
+                    os.makedirs('quarantine', exist_ok=True)
+                    with open(quarantine_path, 'wb') as f:
+                        f.write(encrypted_content)
+                    
+                    # Try to delete original file
+                    try:
+                        os.remove(file_path)
+                    except Exception as e:
+                        self.logger.error(f"Could not delete original file: {str(e)}")
                         
-                        # Write to quarantine
-                        os.makedirs('quarantine', exist_ok=True)
-                        with open(quarantine_path, 'wb') as f:
-                            f.write(encrypted_content)
-                        
-                        # Try to delete original file
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            self.logger.error(f"Could not delete original file: {str(e)}")
-                            
-                        # Log the action
-                        self.logger.info(f"File {file_path} quarantined as suspicious")
+                    # Log the action
+                    self.logger.info(f"File {file_path} quarantined as suspicious")
                         
             except Exception as e:
                 self.logger.error(f"Error processing new file {file_path}: {str(e)}")

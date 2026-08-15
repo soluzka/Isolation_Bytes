@@ -27,6 +27,7 @@
     </script>
     <meta charset="UTF-8">
     <title>Conditional Startup Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
     <link rel="stylesheet" href="{{ url_for('static', filename='network_monitor.css') }}">
@@ -61,7 +62,7 @@
     </style>
 </head>
 <body>
-<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <h2>Conditional Startup Output</h2>
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}

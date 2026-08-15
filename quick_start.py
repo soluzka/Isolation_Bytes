@@ -23,7 +23,7 @@ from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session, make_response
+from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session, make_response, flash
 
 # Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
 # module is normally run directly with `python quick_start.py`, which (unlike
@@ -54,11 +54,15 @@ if getattr(sys, 'frozen', False):
     os.environ['ANTIVIRUS_RUNTIME_DIR'] = runtime_dir
     os.chdir(runtime_dir)
 
+    # Load trusted hashes once for the session
+    global TRUSTED_HASHES
+    TRUSTED_HASHES = load_trusted_hashes()
+
     # Copy bundled signature seeds to the runtime directory when it is outside
     # the onedir (e.g., a read-only/AppData fallback). When runtime == onedir,
     # the bundled files are already in place.
     if runtime_dir != onedir:
-        for seed in ('malware_signatures.txt', 'malware_signatures.json'):
+        for seed in ('malware_signatures.txt', 'malware_signatures.json', 'iocs.json'):
             src = os.path.join(onedir, seed)
             dst = os.path.join(runtime_dir, seed)
             if os.path.exists(src) and not os.path.exists(dst):
@@ -224,13 +228,95 @@ def _is_safe_quarantine_path(path, base_dir=None):
     except (ValueError, OSError):
         return False
 
+
+def _custom_scan_target(target_path, max_files=100):
+    """YARA-scan a single file or a directory up to max_files."""
+    if not os.path.exists(target_path):
+        return {'error': 'Path not found'}
+    from security.yara_scanner import scan_file_with_yara
+    results = []
+    if os.path.isfile(target_path):
+        try:
+            matches = scan_file_with_yara(target_path)
+            if matches:
+                results.append({'path': target_path, 'matches': [getattr(m, 'rule', str(m)) for m in matches]})
+        except Exception as e:
+            return {'error': str(e)}
+        return {'scanned': 1, 'results': results}
+    scanned = 0
+    for root, dirs, files in os.walk(target_path):
+        for f in files:
+            if scanned >= max_files:
+                break
+            p = os.path.join(root, f)
+            if should_exclude_path(p):
+                continue
+            try:
+                matches = scan_file_with_yara(p)
+                if matches:
+                    results.append({'path': p, 'matches': [getattr(m, 'rule', str(m)) for m in matches]})
+            except Exception:
+                pass
+            scanned += 1
+    return {'scanned': scanned, 'results': results}
+
+
+def _hash_sha256(file_path):
+    """Return the SHA-256 hash of a file without loading it all at once."""
+    import hashlib
+    h = hashlib.sha256()
+    try:
+        with open(file_path, 'rb') as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                h.update(chunk)
+        return h.hexdigest()
+    except Exception:
+        return None
+
+
+def _append_malware_signature(file_path, label, sha256=None):
+    """Add a quarantined/high-confidence file's SHA-256 to the local malware signature DB."""
+    if not sha256:
+        sha256 = _hash_sha256(file_path)
+    if not sha256:
+        return
+    runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__)))
+    sig_path = os.path.join(runtime_dir, 'malware_signatures.txt')
+    try:
+        if os.path.exists(sig_path):
+            with open(sig_path, 'r', encoding='utf-8') as f:
+                if sha256 in f.read():
+                    return
+        with open(sig_path, 'a', encoding='utf-8') as f:
+            f.write(f'{label}:sha256:{sha256}\n')
+            logger.info(f'Added {label} signature: {sha256}')
+    except Exception as e:
+        logger.warning(f'Failed to append malware signature: {e}')
+
+
 # Import DNS server functionality
 from dns_server import start_dns_server
 # Fernet key provider for quarantine encryption and graph helpers
-from data_analysis import analyze_data, compute_file_entropy, generate_threat_graph
+from data_analysis import (
+    analyze_data, compute_file_entropy, generate_threat_graph, detect_file_signature,
+    yara_risk_score, packed_encoder_score, exploit_score, network_ioc_score,
+    yara_mitre_tags, _load_iocs, missing_critical_patches, load_trusted_hashes,
+    scan_startup_and_tasks, is_kill_switch_active, enable_kill_switch, disable_kill_switch,
+    multi_engine_hash_lookup, read_recent_security_summary, scan_email_attachments,
+    email_attachment_score, startup_risk_score, event_risk_score, hash_lookup_risk_score,
+    extra_file_risk_score, scan_archive_file, scan_pdf_file, scan_shortcut_file, scan_macro_document,
+    scan_powershell_script_block, _read_one_event_log, scan_running_processes, process_risk_score,
+    create_canary_files, check_canary_files, scan_network_connections, network_beacon_score,
+    scan_windows_services, service_risk_score, is_startup_enabled, toggle_startup_with_windows,
+    update_ioc_feeds
+)
 
 # Persistent scan cache and safe quarantine helper
 from security.scan_cache import FileScanCache, safe_quarantine
+from quarantine_utils import quarantine_file, list_quarantine_files, restore_quarantine_file, delete_quarantine_file
 # Self-protection / watchdog helpers (imported so they are bundled)
 import security.self_protect
 
@@ -268,6 +354,9 @@ def _ensure_single_instance():
 # Persistent scan cache: avoid rescanning unchanged files on every background
 # pass and gives the operator a hash -> verdict record.
 scan_cache = FileScanCache('data/scan_cache.json')
+
+# Trust hashes are loaded once after the runtime directory is set.
+TRUSTED_HASHES = set()
 
 # Allow running the ssdeep runner as a one-off via command line:
 #   python quick_start.py --ssdeep-run --rules <rules> --dir <dir>
@@ -704,6 +793,42 @@ def _perform_scan_all():
                                     results.append('YARA match: ' + file_path + ' - Rules: ' + ', '.join(cached_matches))
                                 continue
 
+                            file_ext = os.path.splitext(file_path)[1].lower()
+
+                            # Skip files whose SHA-256 is in the trusted hashes list.
+                            if _hash_sha256(file_path) in TRUSTED_HASHES:
+                                continue
+
+                            # Quick email attachment scan for .eml and .msg files.
+                            if file_ext in ('.eml', '.msg'):
+                                email_scan = scan_email_attachments(file_path)
+                                em_score = email_attachment_score(file_path)
+                                if em_score >= 25:
+                                    detected_threats += 1
+                                    results.append(f'Suspicious email attachment (score {em_score}): {file_path} - ' + ', '.join(email_scan.get('suspicious', [])))
+                                if em_score >= 50:
+                                    try:
+                                        quarantine_file(file_path, reason='suspicious email attachment')
+                                        quarantined_count += 1
+                                        results.append(f'Quarantined suspicious email: {file_path}')
+                                        continue
+                                    except Exception as qe:
+                                        logger.warning(f'Failed to quarantine email {file_path}: {qe}')
+
+                            # Extra file-type scans for archives, PDFs, shortcuts and macros.
+                            extra_score = extra_file_risk_score(file_path)
+                            if extra_score >= 25:
+                                detected_threats += 1
+                                results.append(f'Suspicious file content (score {extra_score}): {file_path}')
+                            if extra_score >= 60:
+                                try:
+                                    quarantine_file(file_path, reason='suspicious file content / archive / macro / PDF / shortcut')
+                                    quarantined_count += 1
+                                    results.append(f'Quarantined suspicious file: {file_path}')
+                                    continue
+                                except Exception as qe:
+                                    logger.warning(f'Failed to quarantine file {file_path}: {qe}')
+
                             yara_matches = scan_file_with_yara(file_path)
                             rule_names = [getattr(m, 'rule', str(m)) for m in yara_matches]
 
@@ -715,8 +840,10 @@ def _perform_scan_all():
                             if any(r.lower().startswith('persistence') or r.lower().startswith('ransomware') for r in rule_names):
                                 yara_suspicious.append({'file': file_path, 'rules': rule_names})
 
+                            yara_score = yara_risk_score(rule_names)
                             cache_entry = {
                                 'yara_matches': rule_names,
+                                'yara_score': yara_score,
                                 'quarantined': False,
                                 'reported': False
                             }
@@ -743,6 +870,10 @@ def _perform_scan_all():
                                     should_quarantine = True
                                     cache_entry['quarantine_reason'] = 'legacy'
 
+                            if yara_score >= 35:
+                                should_quarantine = True
+                                cache_entry['quarantine_reason'] = 'yara_high'
+
                             if yara_matches:
                                 total_yara_matches += len(yara_matches)
 
@@ -750,6 +881,7 @@ def _perform_scan_all():
                                 detected_threats += 1
 
                                 if should_quarantine:
+                                    sha256_hash = _hash_sha256(file_path)
                                     success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file)
                                     cache_entry['quarantined'] = success
                                     if success:
@@ -759,6 +891,7 @@ def _perform_scan_all():
                                         else:
                                             results.append(f'QUARANTINED (ember): {file_path} - ML score {ml_score:.4f}')
                                         logger.warning(f'Quarantined high-risk file: {file_path}')
+                                        _append_malware_signature(file_path, cache_entry.get('quarantine_reason', 'quarantine'), sha256_hash)
                                     else:
                                         if yara_matches:
                                             results.append('YARA match (quarantine failed: ' + message + '): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
@@ -1190,21 +1323,38 @@ def threat_graph():
         return redirect(url_for('login'))
     try:
         entries = []
+        iocs = _load_iocs()
         for result in scan_cache.all():
             path = result.get('path', '')
             if not path or not os.path.exists(path):
                 continue
             entropy = compute_file_entropy(path)
             ml = result.get('ember_score') or result.get('legacy_ml_score') or 0.0
-            yara = len(result.get('yara_matches', []))
-            # Combine entropy (0-8), ml (0-1), and yara hits into a 0-100 risk score.
-            risk = min(100.0, (entropy / 8.0) * 25.0 + ml * 50.0 + yara * 25.0)
+            yara_rules = result.get('yara_matches', [])
+            yara_count = len(yara_rules)
+            yara_score = yara_risk_score(yara_rules)
+            file_type = detect_file_signature(path)
+            packed = packed_encoder_score(path)
+            exploit = exploit_score(path)
+            ioc = network_ioc_score(path, iocs=iocs)
+            mitre = yara_mitre_tags(yara_rules)
+            # Combine entropy, ml, yara, packer, exploit and IOC scores into 0-100 risk.
+            risk = (entropy / 8.0) * 25.0 + ml * 50.0 + yara_score + packed + exploit + ioc
+            if file_type.startswith('Suspicious:'):
+                risk += 35.0
+            risk = min(100.0, risk)
             entries.append({
                 'label': os.path.basename(path)[:24],
                 'risk': risk,
                 'entropy': entropy,
                 'ml': ml,
-                'yara': yara
+                'yara_count': yara_count,
+                'yara_score': yara_score,
+                'packed': packed,
+                'exploit': exploit,
+                'ioc': ioc,
+                'mitre': mitre,
+                'file_type': file_type
             })
         # Sort by risk, highest first, and keep top 20 to keep the chart readable.
         entries.sort(key=lambda x: x['risk'], reverse=True)
@@ -1217,6 +1367,321 @@ def threat_graph():
     except Exception as e:
         logger.warning(f'Failed to render threat graph: {e}')
         return render_template('graph.html', entries=[], graph_url=None)
+
+
+@app.route('/patches')
+def patches():
+    """Show missing critical Windows patches for known CVEs."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        missing = missing_critical_patches()
+    except Exception as e:
+        logger.warning(f'Failed to check patches: {e}')
+        missing = []
+    return render_template('patches.html', missing=missing)
+
+
+@app.route('/startup')
+def startup():
+    """Show startup items, scheduled tasks and persistence locations."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        items = scan_startup_and_tasks()
+    except Exception as e:
+        logger.warning(f'Failed to scan startup items: {e}')
+        items = []
+    return render_template('startup.html', items=items, startup_risk_score=startup_risk_score)
+
+
+@app.route('/kill-switch', methods=['GET', 'POST'])
+def kill_switch():
+    """Enable or disable an outbound network kill switch via Windows Firewall."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    message = None
+    error = None
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'enable':
+            success, msg = enable_kill_switch()
+            if success:
+                message = msg
+            else:
+                error = 'Failed to enable: ' + msg
+        elif action == 'disable':
+            success, msg = disable_kill_switch()
+            if success:
+                message = msg
+            else:
+                error = 'Failed to disable: ' + msg
+    active = is_kill_switch_active()
+    return render_template('kill_switch.html', active=active, message=message, error=error)
+
+
+@app.route('/hash-lookup', methods=['GET', 'POST'])
+def hash_lookup():
+    """Look up a file hash across multiple threat-intelligence sources."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    results = []
+    query = ''
+    error = None
+    if request.method == 'POST':
+        query = request.form.get('hash', '').strip().lower()
+        if query and len(query) == 64:
+            results = multi_engine_hash_lookup(query)
+        else:
+            error = 'Enter a valid SHA-256 hash (64 hex characters).'
+    risk_score = hash_lookup_risk_score(results)
+    return render_template('hash_lookup.html', query=query, results=results, error=error, risk_score=risk_score)
+
+
+@app.route('/events')
+def events():
+    """Show a summary of recent Windows security event log entries."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        summary = read_recent_security_summary(50)
+    except Exception as e:
+        logger.warning(f'Failed to read event logs: {e}')
+        summary = {'security': [], 'powershell': [], 'defender': [], 'sysmon': []}
+    return render_template('events.html', summary=summary, event_risk_score=event_risk_score)
+
+
+@app.route('/scripts')
+def scripts():
+    """Show recent PowerShell/AMSI script blocks with scoring and base64 decoding."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        raw_events = _read_one_event_log('Microsoft-Windows-PowerShell/Operational', count=100, event_ids={4103, 4104, 4105})
+    except Exception as e:
+        logger.warning(f'Failed to read PowerShell events: {e}')
+        raw_events = []
+    items = []
+    for ev in raw_events:
+        if ev.get('error'):
+            continue
+        scan = scan_powershell_script_block(ev)
+        if scan.get('score', 0) >= 10:
+            items.append({
+                'time': ev.get('time', ''),
+                'id': ev.get('id', ''),
+                'score': scan.get('score', 0),
+                'indicators': scan.get('indicators', []),
+                'decoded': scan.get('decoded_blocks', []),
+                'message': ev.get('message', [])
+            })
+    items.sort(key=lambda x: x['score'], reverse=True)
+    return render_template('scripts.html', items=items)
+
+
+@app.route('/scan-report')
+def scan_report():
+    """Return a JSON report of the latest scan and quarantine activity."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    latest = continuous_scan_state.get('last_result', {}) if continuous_scan_state else {}
+    quarantine_log = []
+    try:
+        log_path = os.path.join(tempfile.gettempdir(), 'Defender_Quarantine', 'quarantine_log.json')
+        if os.path.exists(log_path):
+            with open(log_path, 'r', encoding='utf-8') as f:
+                quarantine_log = json.load(f)
+    except Exception as e:
+        logger.warning(f'Failed to load quarantine log: {e}')
+    report = {
+        'generated': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'latest_scan': latest,
+        'quarantine_log': quarantine_log
+    }
+    response = jsonify(report)
+    response.headers['Content-Disposition'] = 'attachment; filename=scan_report.json'
+    return response
+
+
+@app.route('/quarantine-manage', methods=['GET', 'POST'])
+def quarantine_manage():
+    """List, restore and delete quarantined files."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    message = None
+    error = None
+    if request.method == 'POST':
+        action = request.form.get('action')
+        filename = request.form.get('filename', '').strip()
+        if action == 'restore' and filename:
+            success, msg = restore_quarantine_file(filename)
+            if success:
+                message = f'Restored to: {msg}'
+            else:
+                error = f'Restore failed: {msg}'
+        elif action == 'delete' and filename:
+            success, msg = delete_quarantine_file(filename)
+            if success:
+                message = msg
+            else:
+                error = f'Delete failed: {msg}'
+    try:
+        files = list_quarantine_files()
+    except Exception as e:
+        logger.warning(f'Failed to list quarantine files: {e}')
+        files = []
+    return render_template('quarantine_manage.html', files=files, message=message, error=error)
+
+
+@app.route('/startup-with-windows', methods=['GET', 'POST'])
+def startup_with_windows():
+    """Toggle the app starting with Windows for the current user."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    message = None
+    if request.method == 'POST':
+        action = request.form.get('action')
+        enable = action == 'enable'
+        if toggle_startup_with_windows(enable):
+            message = 'Startup with Windows ' + ('enabled' if enable else 'disabled') + '.'
+        else:
+            message = 'Failed to change startup setting.'
+    active = is_startup_enabled()
+    return render_template('startup_with_windows.html', active=active, message=message)
+
+
+@app.route('/update-iocs', methods=['POST'])
+def update_iocs():
+    """Refresh IOCs from URLhaus and ThreatFox."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        update_ioc_feeds()
+        return jsonify({'status': 'ok', 'message': 'IOC feeds updated'})
+    except Exception as e:
+        logger.warning(f'IOC update error: {e}')
+        return jsonify({'status': 'error', 'message': str(e)})
+
+
+@app.route('/settings')
+def settings():
+    """Show current configuration without exposing secrets."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__)))
+    env_path = os.path.join(runtime_dir, '.env')
+    cfg = {}
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if '=' in line and not line.strip().startswith('#'):
+                        k, v = line.strip().split('=', 1)
+                        if k.strip() in {'FERNET_KEY', 'VT_API_KEY', 'ADMIN_PASSWORD_HASH', 'SECRET_KEY'}:
+                            v = '*' * min(len(v), 8)
+                        cfg[k.strip()] = v.strip()
+    except Exception:
+        pass
+    trust_count = 0
+    try:
+        with open(os.path.join(runtime_dir, 'trusted_hashes.json'), 'r', encoding='utf-8') as f:
+            td = json.load(f)
+            if isinstance(td, list):
+                trust_count = len(td)
+            elif isinstance(td, dict):
+                trust_count = len(td.get('sha256', []))
+    except Exception:
+        pass
+    ioc_counts = {}
+    try:
+        with open(os.path.join(runtime_dir, 'iocs.json'), 'r', encoding='utf-8') as f:
+            iocs = json.load(f)
+            for k, v in iocs.items():
+                ioc_counts[k] = len(v)
+    except Exception:
+        pass
+    return render_template('settings.html', config=cfg, trusted_count=trust_count, ioc_counts=ioc_counts)
+
+
+@app.route('/custom-scan', methods=['GET', 'POST'])
+def custom_scan():
+    """Allow the operator to scan a single file or directory on demand."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    result = None
+    target = ''
+    max_files = 100
+    if request.method == 'POST':
+        target = request.form.get('target_path', '').strip()
+        try:
+            max_files = max(1, min(5000, int(request.form.get('max_files', 100))))
+        except Exception:
+            max_files = 100
+        if target:
+            result = _custom_scan_target(target, max_files=max_files)
+    return render_template('custom_scan.html', target=target, max_files=max_files, result=result)
+
+
+@app.route('/processes')
+def processes():
+    """Show running processes with risk scoring for injection / suspicious command lines."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        procs = scan_running_processes()
+    except Exception as e:
+        logger.warning(f'Failed to scan running processes: {e}')
+        procs = []
+    return render_template('processes.html', processes=procs, process_risk_score=process_risk_score)
+
+
+@app.route('/canary', methods=['GET', 'POST'])
+def canary():
+    """Create and check ransomware canary files."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    message = None
+    status = []
+    if request.method == 'POST':
+        action = request.form.get('action')
+        if action == 'create':
+            try:
+                create_canary_files()
+                message = 'Canary files created or refreshed.'
+            except Exception as e:
+                message = f'Failed to create canary files: {e}'
+    try:
+        status = check_canary_files()
+    except Exception as e:
+        logger.warning(f'Failed to check canary files: {e}')
+    return render_template('canary.html', status=status, message=message)
+
+
+@app.route('/services')
+def services():
+    """Show Windows services with risk scoring."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        svcs = scan_windows_services()
+    except Exception as e:
+        logger.warning(f'Failed to scan services: {e}')
+        svcs = []
+    return render_template('services.html', services=svcs, service_risk_score=service_risk_score)
+
+
+@app.route('/network')
+def network():
+    """Show network connections with beaconing / DGA / IOC scoring."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        conns = scan_network_connections()
+    except Exception as e:
+        logger.warning(f'Failed to scan network connections: {e}')
+        conns = []
+    iocs = _load_iocs()
+    return render_template('network.html', connections=conns, network_beacon_score=lambda c: network_beacon_score(c, iocs))
 
 
 # -- Main index page --
@@ -2862,7 +3327,11 @@ def run_scheduled_scans():
                             
                             if not scan_file_with_yara:
                                 continue
-                            
+
+                            # Skip files whose SHA-256 is in the trusted hashes list.
+                            if _hash_sha256(file_path) in TRUSTED_HASHES:
+                                continue
+
                             yara_matches = scan_file_with_yara(file_path)
                             scan_files_count += 1
                             scan_yara_hits += len(yara_matches)
@@ -2872,8 +3341,11 @@ def run_scheduled_scans():
                                     scan_ransomware_hits += 1
                                 if 'persistence' in rule_name:
                                     scan_persistence_hits += 1
+                            rule_names = [getattr(m, 'rule', str(m)) for m in yara_matches]
+                            yara_score = yara_risk_score(rule_names)
                             cache_entry = {
-                                'yara_matches': [getattr(m, 'rule', str(m)) for m in yara_matches],
+                                'yara_matches': rule_names,
+                                'yara_score': yara_score,
                                 'quarantined': False,
                                 'reported': False,
                             }
@@ -2918,15 +3390,17 @@ def run_scheduled_scans():
                             if yara_matches:
                                 logger.info(f"YARA scan completed with {len(yara_matches)} matches for {file_path}")
 
-                                # Quarantine if ML agrees OR the YARA rules are ransomware/persistence
+                                # Quarantine if ML agrees OR the YARA severity score is critical
                                 is_ransomware = any('ransomware' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
                                 is_persistence = any('persistence' in getattr(m, 'rule', str(m)).lower() for m in yara_matches)
 
-                                should_quarantine = ml_hit or is_ransomware or is_persistence
+                                should_quarantine = ml_hit or yara_score >= 35
                                 if should_quarantine:
                                     scan_quarantine_count += 1
                                     if ml_hit:
                                         cache_entry['quarantine_reason'] = ml_model
+                                    elif yara_score >= 35:
+                                        cache_entry['quarantine_reason'] = 'yara_high'
                                     elif is_ransomware:
                                         cache_entry['quarantine_reason'] = 'ransomware_yara'
                                     elif is_persistence:
@@ -2934,10 +3408,13 @@ def run_scheduled_scans():
                                     for match in yara_matches:
                                         logger.warning(f"Threat detected: {file_path} - Rule: {getattr(match, 'rule', match)}")
 
-                                    force = is_ransomware or is_persistence
+                                    force = is_ransomware or is_persistence or yara_score >= 35
+                                    sha256_hash = _hash_sha256(file_path)
                                     success, message = safe_quarantine(file_path, quarantine_dir, encrypt_file, force=force)
                                     logger.warning(message)
                                     cache_entry['quarantined'] = success
+                                    if success:
+                                        _append_malware_signature(file_path, cache_entry.get('quarantine_reason', 'quarantine'), sha256_hash)
                                 else:
                                     cache_entry['reported'] = True
                                     for match in yara_matches:

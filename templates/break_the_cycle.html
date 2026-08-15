@@ -27,6 +27,7 @@
     </script>
     <meta charset="UTF-8">
     <title>System Overload</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <style>
         @keyframes glitch {
@@ -80,7 +81,7 @@
     </style>
 </head>
 <body>
-<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <canvas id="matrix"></canvas>
     <div class="scanlines"></div>
     <div class="grid"></div>

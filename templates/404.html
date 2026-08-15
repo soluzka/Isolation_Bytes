@@ -27,6 +27,7 @@
     </script>
     <meta charset="UTF-8">
     <title>404 Not Found</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
     <style>
         body { font-family: Arial, sans-serif; background: #f8f9fa; text-align: center; margin-top: 5em; }
@@ -35,7 +36,7 @@
     </style>
 </head>
 <body>
-<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <h1>404 - Page Not Found</h1>
     <p>The page you requested does not exist.</p>
     <a href="/">Return to Home</a>

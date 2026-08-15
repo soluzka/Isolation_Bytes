@@ -31,7 +31,7 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <h2>Delete All Local Temp Files</h2>
     <form method="POST" action="/delete_temp_files">
         <button type="submit" class="danger">Delete All Temp Files</button>
