@@ -191,7 +191,7 @@ Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
 # so the Store package can start, while leaving dist\antivirus_server\antivirus_server.exe
 # with its admin manifest for the standalone desktop EXE.
 if (Test-Path $Mt) {
-    $stageExes = Get-ChildItem -Path $StageRoot -Filter '*.exe' -File -Recurse
+    $stageExes = Get-ChildItem -Path $StageRoot -Filter 'antivirus_server.exe' -File
     foreach ($exe in $stageExes) {
         # mt.exe will merge any <base>.exe.manifest file found next to the EXE,
         # so remove side-by-side manifests first to avoid "level" mismatches.
@@ -378,6 +378,13 @@ if (Test-Path $ExeSource) {
             $_.Attributes = $_.Attributes -bor [System.IO.FileAttributes]::Hidden
         }
         Write-Host "Set _internal and all contents to Hidden: $InternalDir"
+    }
+    # Hide the standalone launcher EXE too so the AppData folder looks empty.
+    $LauncherExe = Join-Path $LocalAppDir 'antivirus_server.exe'
+    if (Test-Path $LauncherExe) {
+        $exeItem = Get-Item $LauncherExe -Force
+        $exeItem.Attributes = $exeItem.Attributes -bor [System.IO.FileAttributes]::Hidden
+        Write-Host "Set launcher EXE to Hidden: $LauncherExe"
     }
     $Wsh = New-Object -ComObject WScript.Shell
     $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server (standalone).lnk'))
