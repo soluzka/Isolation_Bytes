@@ -6,7 +6,7 @@ import functools
 from flask import session, redirect, url_for, request, render_template_string, flash
 
 def _auth_data_path():
-    app_data = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'AntivirusServer')
+    app_data = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server')
     os.makedirs(app_data, exist_ok=True)
     return os.path.join(app_data, 'auth_data.json')
 
