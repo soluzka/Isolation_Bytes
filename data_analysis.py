@@ -334,6 +334,63 @@ def search_for_pattern(data, pattern):
     else:
         print(f'Pattern {pattern} not found in data.')
 
+def compute_entropy(data):
+    """Compute Shannon entropy for a bytes-like object."""
+    if not data:
+        return 0.0
+    from collections import Counter
+    total = len(data)
+    counts = Counter(data)
+    entropy = 0.0
+    for count in counts.values():
+        p = count / total
+        if p > 0:
+            entropy -= p * math.log2(p)
+    return entropy
+
+
+def compute_file_entropy(file_path, sample_bytes=1024 * 1024):
+    """Read up to sample_bytes from a file and return its entropy."""
+    if not os.path.exists(file_path):
+        return 0.0
+    try:
+        with open(file_path, 'rb') as f:
+            data = f.read(sample_bytes)
+        return compute_entropy(data)
+    except Exception:
+        return 0.0
+
+
+def generate_threat_graph(entries, output_path):
+    """Generate a bar chart of the top risky file hashes/entries.
+
+    entries: list of dicts with 'label', 'risk' and optional 'entropy'/'ml'.
+    output_path: where to save the PNG.
+    """
+    if not entries:
+        return False
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        labels = [e['label'][:16] for e in entries]
+        risks = [e['risk'] for e in entries]
+        plt.figure(figsize=(10, 5))
+        plt.bar(labels, risks, color='crimson')
+        plt.title('Top Files by Risk Score')
+        plt.xlabel('File Hash / Path')
+        plt.ylabel('Risk Score')
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        os.makedirs(os.path.dirname(output_path) or '.', exist_ok=True)
+        plt.savefig(output_path)
+        plt.close()
+        return True
+    except Exception as e:
+        print(f'Failed to generate threat graph: {e}')
+        return False
+
+
 if __name__ == "__main__":
     # Call the analyze_data function
     analyze_data(data)

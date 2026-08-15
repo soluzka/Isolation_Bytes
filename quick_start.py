@@ -226,8 +226,8 @@ def _is_safe_quarantine_path(path, base_dir=None):
 
 # Import DNS server functionality
 from dns_server import start_dns_server
-# Fernet key provider for quarantine encryption
-from data_analysis import analyze_data
+# Fernet key provider for quarantine encryption and graph helpers
+from data_analysis import analyze_data, compute_file_entropy, generate_threat_graph
 
 # Persistent scan cache and safe quarantine helper
 from security.scan_cache import FileScanCache, safe_quarantine
@@ -1181,6 +1181,42 @@ def register():
 def logout():
     session.pop('logged_in', None)
     return redirect(url_for('login'))
+
+
+@app.route('/graph')
+def threat_graph():
+    """Show a threat-score graph for cached scan results."""
+    if not session.get('logged_in'):
+        return redirect(url_for('login'))
+    try:
+        entries = []
+        for result in scan_cache.all():
+            path = result.get('path', '')
+            if not path or not os.path.exists(path):
+                continue
+            entropy = compute_file_entropy(path)
+            ml = result.get('ember_score') or result.get('legacy_ml_score') or 0.0
+            yara = len(result.get('yara_matches', []))
+            # Combine entropy (0-8), ml (0-1), and yara hits into a 0-100 risk score.
+            risk = min(100.0, (entropy / 8.0) * 25.0 + ml * 50.0 + yara * 25.0)
+            entries.append({
+                'label': os.path.basename(path)[:24],
+                'risk': risk,
+                'entropy': entropy,
+                'ml': ml,
+                'yara': yara
+            })
+        # Sort by risk, highest first, and keep top 20 to keep the chart readable.
+        entries.sort(key=lambda x: x['risk'], reverse=True)
+        entries = entries[:20]
+        graph_path = os.path.join('static', 'threat_graph.png')
+        graph_url = None
+        if generate_threat_graph(entries, graph_path):
+            graph_url = url_for('static', filename='threat_graph.png') + '?t=' + str(int(time.time()))
+        return render_template('graph.html', entries=entries, graph_url=graph_url)
+    except Exception as e:
+        logger.warning(f'Failed to render threat graph: {e}')
+        return render_template('graph.html', entries=[], graph_url=None)
 
 
 # -- Main index page --
