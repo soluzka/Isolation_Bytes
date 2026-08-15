@@ -442,15 +442,18 @@ if (-not $SkipStore) {
         Get-AppxPackage -Name 'soluzka.AntivirusServer' | Remove-AppxPackage -ErrorAction SilentlyContinue
         Add-AppxPackage -Path $StoreMsix -ForceApplicationShutdown -ForceUpdateFromAnyVersion -ErrorAction Stop
         Write-Host "Installed $StoreMsix"
-        # Launch the installed app by AUMID.
+        # Launch the packaged executable directly with elevation. Explorer/AUMID
+        # launches do not reliably honor requireAdministrator for a full-trust
+        # executable inside an MSIX package.
         $InstalledPkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'
-        $Aumid = $InstalledPkg.PackageFamilyName + '!App'
-        Write-Host "AUMID: $Aumid"
+        if (-not $InstalledPkg) { throw 'Installed MSIX package could not be located.' }
+        $InstalledExe = Join-Path $InstalledPkg.InstallLocation 'antivirus_server.exe'
+        if (-not (Test-Path $InstalledExe)) { throw "Packaged executable not found: $InstalledExe" }
         try {
-            Start-Process "explorer.exe" "shell:AppsFolder\$Aumid"
-            Write-Host "Launched Antivirus Server."
+            Start-Process -FilePath $InstalledExe -Verb RunAs
+            Write-Host "Launched Antivirus Server as Administrator."
         } catch {
-            Write-Warning "Could not auto-launch the app: $_"
+            Write-Warning "Could not auto-launch the app as Administrator: $_"
         }
 
         # Create a desktop shortcut that launches the installed MSIX EXE as admin.
