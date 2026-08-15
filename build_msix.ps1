@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory=$false)]
     [string]$StorePublisher = 'CN=soluzka',
     [Parameter(ValueFromRemainingArguments=$true)]
-    [string[]]$RemainingArguments
+    [array]$RemainingArguments
 )
 
 $ErrorActionPreference = 'Stop'
