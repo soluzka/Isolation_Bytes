@@ -35,7 +35,7 @@ scipy<1.13.0
 scikit-learn>=1.7.0
 
 # Optional: clamd for ClamAV integration on Linux/macOS
-clamd>=1.0
+clamd>=1.0.2
 
 # For automated testing and dependency vulnerability scanning
 pytest>=9.0.3
