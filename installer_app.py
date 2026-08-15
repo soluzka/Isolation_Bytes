@@ -82,16 +82,16 @@ def main():
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
             "if (-not $pkg) {{ throw 'Package not found after install' }}; "
             "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
+            "$aumid = $pkg.PackageFamilyName + '!App'; "
             "$Wsh = New-Object -ComObject WScript.Shell; "
             "$S = $Wsh.CreateShortcut('{}'); "
-            "$S.TargetPath = 'powershell.exe'; "
-            "$S.Arguments = '-WindowStyle Hidden -Command {{ $pkg = Get-AppxPackage -Name ''soluzka.AntivirusServer''; if ($pkg) {{ $exe = Join-Path $pkg.InstallLocation ''antivirus_server.exe''; Start-Process -FilePath \"$exe\" -Verb RunAs }} }}'; "
+            "$S.TargetPath = 'explorer.exe'; "
+            "$S.Arguments = \"shell:AppsFolder\\$aumid\"; "
             "$S.IconLocation = \"$exe,0\"; "
             "$S.Description = 'Antivirus Server'; "
             "$S.Save()".format(shortcut_path),
             "Creating desktop shortcut"
         )
-        _set_shortcut_runas(shortcut_path)
 
         # Create the conditional startup and YARA scanner shortcuts.
         for name, arg, desc in [
@@ -113,13 +113,12 @@ def main():
                 "$S.Save()".format(sc_path, arg, desc),
                 "Creating {} shortcut".format(desc)
             )
-            _set_shortcut_runas(sc_path)
 
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
             "if (-not $pkg) {{ throw 'Package not found after install' }}; "
-            "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
-            "Start-Process -FilePath \"$exe\" -Verb RunAs",
+            "$aumid = $pkg.PackageFamilyName + '!App'; "
+            "Start-Process -FilePath 'explorer.exe' -ArgumentList \"shell:AppsFolder\\$aumid\"",
             "Launching Antivirus Server"
         )
 
