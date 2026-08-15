@@ -6,7 +6,7 @@
 # The Test Launcher package is signed with soluzka_test.pfx and that cert is
 # trusted, so it will install and launch locally.
 # Run this from the repo root (same directory as build_config.py) as Administrator.
-[CmdletBinding()]
+[CmdletBinding(PositionalBinding=$false)]
 param(
     [switch]$SkipBuild,
     [switch]$SkipStore,
@@ -18,9 +18,13 @@ param(
     [string]$StoreCertPassword,
     [Parameter(Mandatory=$false)]
     [string]$StorePublisher = 'CN=soluzka',
-    [Parameter(ValueFromRemainingArguments=$true)]
-    [array]$RemainingArguments
+    [Parameter(ValueFromRemainingArguments=$true, Position=0)]
+    [string[]]$RemainingArguments
 )
+
+if ($RemainingArguments) {
+    Write-Warning "Unexpected extra arguments were ignored: $RemainingArguments"
+}
 
 # Always run from the script's own directory so relative paths work.
 Set-Location -Path (Split-Path -Parent $MyInvocation.MyCommand.Definition)
@@ -29,7 +33,31 @@ $ErrorActionPreference = 'Stop'
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 if (-not $NoCertManagement -and -not $isAdmin) {
-    throw 'Administrator privileges are required to manage certificate trust. Run with -NoCertManagement to pack/sign only, or as Administrator.'
+    # Prompt for UAC elevation and re-run this script as Administrator so it
+    # can trust the certificate, install, and launch the MSIX automatically.
+    $reArgs = @('-ExecutionPolicy', 'Bypass', '-File', $MyInvocation.MyCommand.Path)
+    if ($SkipBuild) { $reArgs += '-SkipBuild' }
+    if ($SkipStore) { $reArgs += '-SkipStore' }
+    if ($SkipTest) { $reArgs += '-SkipTest' }
+    if ($StoreCertFile) { $reArgs += '-StoreCertFile', $StoreCertFile }
+    if ($StoreCertPassword) { $reArgs += '-StoreCertPassword', $StoreCertPassword }
+    if ($StorePublisher -ne 'CN=soluzka') { $reArgs += '-StorePublisher', $StorePublisher }
+
+    Write-Host 'Requesting Administrator privileges via UAC...'
+    $stdOut = Join-Path $env:TEMP 'antivirus_server_elevate_out.log'
+    $stdErr = Join-Path $env:TEMP 'antivirus_server_elevate_err.log'
+    try {
+        $proc = Start-Process -FilePath 'powershell.exe' -ArgumentList $reArgs -Verb 'RunAs' -Wait -PassThru -RedirectStandardOutput $stdOut -RedirectStandardError $stdErr
+        if (Test-Path $stdOut) { Write-Host (Get-Content -Path $stdOut -Raw) }
+        if (Test-Path $stdErr) { $err = Get-Content -Path $stdErr -Raw; if ($err) { Write-Warning $err } }
+        exit $proc.ExitCode
+    } catch {
+        if (Test-Path $stdOut) { Write-Host (Get-Content -Path $stdOut -Raw) }
+        if (Test-Path $stdErr) { $err = Get-Content -Path $stdErr -Raw; if ($err) { Write-Warning $err } }
+        throw "Could not elevate to Administrator. Run PowerShell as Administrator, or use -NoCertManagement to pack/sign only."
+    } finally {
+        Remove-Item -Path $stdOut, $stdErr -ErrorAction SilentlyContinue
+    }
 }
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
@@ -38,6 +66,7 @@ $Onedir = Join-Path $Dist 'antivirus_server'
 $Sdk = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
 $MakeAppx = Join-Path $Sdk 'makeappx.exe'
 $SignTool = Join-Path $Sdk 'signtool.exe'
+$Mt = Join-Path $Sdk 'mt.exe'
 
 if (-not (Test-Path $Onedir)) {
     throw "dist\antivirus_server not found. Run 'python build_config.py' first."
@@ -45,6 +74,11 @@ if (-not (Test-Path $Onedir)) {
 
 if (-not (Test-Path $MakeAppx) -or -not (Test-Path $SignTool)) {
     throw "Windows SDK 10.0.22621.0 tools not found at $Sdk"
+}
+
+if ($StoreCertFile -and -not (Test-Path $StoreCertFile)) {
+    Write-Warning "Store cert file not found at $StoreCertFile; using default soluzka.pfx."
+    $StoreCertFile = $null
 }
 
 if ($StoreCertFile) {
@@ -139,14 +173,8 @@ if (-not $NoCertManagement) {
     }
 }
 
-# Re-run PyInstaller build unless skipped, so the EXE is fresh.
-if (-not $SkipBuild) {
-    Write-Host 'Running build_config.py to refresh EXE...'
-    python (Join-Path $Root 'build_config.py')
-    if ($LASTEXITCODE -ne 0) {
-        throw "build_config.py failed with exit code $LASTEXITCODE"
-    }
-}
+# The onedir EXE is expected to be built already (e.g. by build_config.py).
+# This script only packages and signs it.
 
 # Stage the package contents in a temp directory so makeappx has a clean root.
 $StageRoot = Join-Path $env:TEMP 'antivirus_server_msix'
@@ -157,6 +185,46 @@ New-Item -ItemType Directory -Path $StageRoot | Out-Null
 
 Write-Host 'Staging dist\antivirus_server ...'
 Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
+
+# MSIX packaged full-trust apps cannot launch an EXE that requests
+# requireAdministrator. Strip the UAC admin manifest from the staged copies
+# so the Store package can start, while leaving dist\antivirus_server\antivirus_server.exe
+# with its admin manifest for the standalone desktop EXE.
+if (Test-Path $Mt) {
+    $stageExes = Get-ChildItem -Path $StageRoot -Filter '*.exe' -File
+    foreach ($exe in $stageExes) {
+        # mt.exe will merge any <base>.exe.manifest file found next to the EXE,
+        # so remove side-by-side manifests first to avoid "level" mismatches.
+        $sideBySide = "$($exe.FullName).manifest"
+        if (Test-Path $sideBySide) { Remove-Item -Path $sideBySide -Force }
+
+        $StageManifest = Join-Path $StageRoot "$($exe.BaseName).manifest"
+        $StageManifestTmp = "$StageManifest.tmp"
+
+        & $Mt -nologo -inputresource:"$($exe.FullName);#1" -out:$StageManifestTmp
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $StageManifestTmp)) { throw "mt.exe failed to extract manifest from $($exe.FullName)" }
+
+        $manifest = Get-Content -Path $StageManifestTmp -Raw
+        if ($manifest -notmatch 'requireAdministrator' -and $manifest -notmatch 'level\s*=\s*"highestAvailable"') {
+            Remove-Item -Path $StageManifestTmp -ErrorAction SilentlyContinue
+            continue
+        }
+        # Force every requested execution level to asInvoker so they all match.
+        $manifest = $manifest -replace 'level\s*=\s*"requireAdministrator"', 'level="asInvoker"'
+        $manifest = $manifest -replace 'level\s*=\s*"highestAvailable"', 'level="asInvoker"'
+        $manifest = $manifest -replace 'uiAccess\s*=\s*"true"', 'uiAccess="false"'
+        $manifest | Set-Content -Path $StageManifest -Encoding utf8 -NoNewline
+
+        # Output the manifest resource from scratch so mt does not try to merge.
+        & $Mt -nologo -manifest $StageManifest -outputresource:"$($exe.FullName);#1"
+        if ($LASTEXITCODE -ne 0) { throw "mt.exe failed to update manifest for $($exe.FullName)" }
+
+        Remove-Item -Path $StageManifest, $StageManifestTmp -ErrorAction SilentlyContinue
+        Write-Host "  Set manifest to asInvoker for: $($exe.Name)"
+    }
+} else {
+    Write-Warning 'mt.exe not found in SDK; staged EXEs still have admin manifests. The MSIX may fail to launch.'
+}
 
 # Create a simple placeholder 256x256 PNG logo.
 $Assets = Join-Path $StageRoot 'Assets'
@@ -226,6 +294,10 @@ if (-not $SkipStore) {
     Write-Host 'Signing Store MSIX (placeholder for Partner Center)...'
     & $SignTool sign /f $StorePfx /p 'password' /fd sha256 $StoreMsix
     if ($LASTEXITCODE -ne 0) { throw "signtool failed for Store package" }
+
+    Write-Host 'Verifying Store MSIX signature...'
+    & $SignTool verify /pa $StoreMsix
+    if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for Store package" }
 }
 
 if (-not $SkipTest) {
@@ -301,7 +373,9 @@ if (Test-Path $ExeSource) {
 if (-not $SkipStore) {
     if ($isAdmin) {
         Write-Host "Installing Store MSIX..."
-        Add-AppxPackage -Path $StoreMsix
+        Get-Process -Name 'antivirus_server' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Get-AppxPackage -Name 'soluzka.AntivirusServer' | Remove-AppxPackage -ErrorAction SilentlyContinue
+        Add-AppxPackage -Path $StoreMsix -ForceApplicationShutdown -ErrorAction Stop
         Write-Host "Installed $StoreMsix"
         # Launch the installed app by AUMID.
         $Aumid = 'soluzka.AntivirusServer!App'
@@ -345,30 +419,4 @@ if (-not $NoCertManagement -and -not $SkipTest) {
     Write-Host "  Add-AppxPackage -Path '$TestMsix'"
 }
 
-# Build the one-file installer EXE that bundles the cert and MSIX.
-$InstallerBuilder = Join-Path $Root 'tools' 'build_installer_exe.py'
-$OneFileInstaller = Join-Path $Dist 'Install_AntivirusServer.exe'
-if (Test-Path $InstallerBuilder) {
-    Write-Host "Building one-file installer EXE..."
-    python $InstallerBuilder
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "One-file installer build failed."
-    }
-} else {
-    Write-Warning "tools\build_installer_exe.py not found; skipping one-file installer build."
-}
 
-# Also run the one-file installer on the build machine so the package is
-# installed through the same path an end user would use.
-if ($isAdmin -and (Test-Path $OneFileInstaller)) {
-    Write-Host "Running one-file installer on build machine..."
-    Start-Process -FilePath $OneFileInstaller -Wait
-    Write-Host "One-file installer completed."
-}
-
-# Copy the one-file installer EXE to the desktop so it is easy to find and distribute.
-if (Test-Path $OneFileInstaller) {
-    $DesktopInstaller = Join-Path $Desktop 'Install_AntivirusServer.exe'
-    Copy-Item -Path $OneFileInstaller -Destination $DesktopInstaller -Force
-    Write-Host "Copied one-file installer EXE to desktop: $DesktopInstaller"
-}

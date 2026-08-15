@@ -5,7 +5,6 @@ import glob
 import shutil
 import logging
 import subprocess
-import ctypes
 import platform
 import time
 import argparse
@@ -415,31 +414,20 @@ else:
     print("Warning: ssdeep_runner.py not found; skipping ssdeep_runner build.")
 
 # Build the MSIX packages from the onedir that was just produced.
-# When running as Administrator, build_msix.ps1 also manages certificate trust
-# (store cert not trusted, test cert trusted). When not, it packs/signs only.
+# build_msix.ps1 will prompt for UAC elevation if it needs to manage certs,
+# install, and launch the app. Use build_msix.ps1 -NoCertManagement if you
+# want to pack/sign without installing.
 build_msix_ps1 = os.path.join(base_dir, 'build_msix.ps1')
 if os.path.exists(build_msix_ps1):
     try:
         skip_test = True  # Test launcher is no longer built.
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-        if is_admin:
-            print("Building MSIX packages and managing certificate trust...")
-            args = [
-                'powershell.exe',
-                '-ExecutionPolicy', 'Bypass',
-                '-File', build_msix_ps1,
-                '-SkipBuild'
-            ]
-        else:
-            print("Building MSIX packages (not running as Admin; skipping cert trust)...")
-            print("Run build_config.py as Administrator to make the test launcher installable.")
-            args = [
-                'powershell.exe',
-                '-ExecutionPolicy', 'Bypass',
-                '-File', build_msix_ps1,
-                '-SkipBuild',
-                '-NoCertManagement'
-            ]
+        print("Building MSIX packages (certificate trust/install/launch will be elevated if needed)...")
+        args = [
+            'powershell.exe',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', build_msix_ps1,
+            '-SkipBuild'
+        ]
         if skip_test:
             args.append('-SkipTest')
             print("Skipping test launcher (--no-test).")
@@ -451,6 +439,20 @@ if os.path.exists(build_msix_ps1):
             args.extend(['-StorePublisher', build_args.store_publisher])
         subprocess.check_call(args)
         print("MSIX build completed.")
+
+        # Build the one-file installer EXE that bundles the cert and MSIX.
+        one_file_installer = os.path.join(base_dir, 'tools', 'build_installer_exe.py')
+        if os.path.exists(one_file_installer):
+            print("Building one-file installer EXE...")
+            subprocess.check_call([sys.executable, one_file_installer])
+            print("One-file installer build completed.")
+            src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer.exe')
+            dst = os.path.join(os.path.expanduser('~'), 'Desktop', 'Install_AntivirusServer.exe')
+            if os.path.exists(src):
+                shutil.copy2(src, dst)
+                print(f"Copied installer to desktop: {dst}")
+        else:
+            print("Warning: tools/build_installer_exe.py not found; skipping one-file installer.")
     except Exception as e:
         print(f"Warning: MSIX build failed: {e}")
 else:
