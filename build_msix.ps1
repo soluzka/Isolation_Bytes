@@ -246,6 +246,40 @@ Write-Host "Done. MSIX files are in:"
 if (-not $SkipStore) { Write-Host "  $StoreMsix" }
 if (-not $SkipTest) { Write-Host "  $TestMsix" }
 
+# Create a redistributable sideload installer script for other machines.
+if (-not $SkipStore) {
+    Copy-Item -Path $StoreCer -Destination (Join-Path $Dist 'soluzka.cer') -Force
+
+    $InstallPs1 = Join-Path $Dist 'Install_AntivirusServer.ps1'
+    @"
+# Trust the package certificate and install the MSIX.
+# Run this PowerShell as Administrator on the target machine.
+`$ErrorActionPreference = 'Stop'
+`$package = Join-Path `$PSScriptRoot 'AntivirusServer_Store.msix'
+`$cert = Join-Path `$PSScriptRoot 'soluzka.cer'
+
+Import-Certificate -FilePath `$cert -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
+Import-Certificate -FilePath `$cert -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
+Import-Certificate -FilePath `$cert -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
+Import-Certificate -FilePath `$cert -CertStoreLocation 'Cert:\CurrentUser\TrustedPeople' | Out-Null
+
+Add-AppxPackage -Path `$package
+Write-Host 'Antivirus Server installed. Start it from the Start menu or desktop shortcut.'
+"@ | Out-File -FilePath $InstallPs1 -Encoding utf8
+
+    $InstallBat = Join-Path $Dist 'Install_AntivirusServer.bat'
+    @"
+@echo off
+powershell -ExecutionPolicy Bypass -File "%~dp0Install_AntivirusServer.ps1"
+pause
+"@ | Out-File -FilePath $InstallBat -Encoding ascii
+
+    Write-Host "Sideload installer created:"
+    Write-Host "  $InstallBat"
+    Write-Host "  $InstallPs1"
+    Write-Host "  $(Join-Path $Dist 'soluzka.cer')"
+}
+
 # Copy the standalone EXE to the desktop for easy access.
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $ExeSource = Join-Path $Onedir 'antivirus_server.exe'
