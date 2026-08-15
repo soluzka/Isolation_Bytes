@@ -31,6 +31,7 @@
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
     <h1>View Log Files for Phishing Indicators</h1>
     <form method="get" action="">
         <label for="logfile">Select log file:</label>

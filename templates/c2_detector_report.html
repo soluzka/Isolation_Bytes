@@ -40,6 +40,7 @@
     </style>
 </head>
 <body>
+<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
     <h2>C2 (Command & Control) Detection Report</h2>
     
     {% if c2_detections %}

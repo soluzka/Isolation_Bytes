@@ -182,6 +182,7 @@
 
 </head>
 <body>
+<div id="favicon-icon-overlay" style="position: fixed; top: 10px; left: 10px; z-index: 9999;"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield" style="width: 32px; height: 32px;"></div>
     <div class="scanlines"></div>
     <h2 class="glitch-title">Antivirus Web Interface</h2>
     <input type="hidden" id="network_monitor_running" value="{{ 'true' if network_monitor_running else 'false' }}">
