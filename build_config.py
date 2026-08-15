@@ -401,12 +401,14 @@ if os.path.exists(runner_script):
         PyInstaller.__main__.run(runner_args)
         print("ssdeep_runner build completed.")
 
-        # Move the standalone runner into the onedir install folder so it is
-        # available next to antivirus_server.exe in the generated project.
+        # Move the standalone runner into the onedir internal folder so it is
+        # included with the installed project and its packaged dependencies.
         runner_src = os.path.join(base_dir, 'dist', 'ssdeep_runner.exe')
         onedir_root = os.path.join(base_dir, 'dist', app_name)
-        runner_dst = os.path.join(onedir_root, 'ssdeep_runner.exe')
+        internal_dir = os.path.join(onedir_root, '_internal')
+        runner_dst = os.path.join(internal_dir, 'ssdeep_runner.exe')
         if os.path.exists(runner_src) and os.path.isdir(onedir_root):
+            os.makedirs(internal_dir, exist_ok=True)
             shutil.move(runner_src, runner_dst)
             print(f"Moved ssdeep_runner.exe to {runner_dst}")
     except Exception as e:
@@ -441,6 +443,17 @@ if os.path.exists(build_msix_ps1):
             args.extend(['-StorePublisher', build_args.store_publisher])
         subprocess.check_call(args)
         print("MSIX build completed.")
+
+        # Keep the MSIX shortcut on normal AUMID activation. The admin
+        # shortcuts below target unpacked executables only.
+        msix_shortcut = os.path.join(os.path.expanduser('~'), 'Desktop', 'Antivirus Server.lnk')
+        if os.path.exists(msix_shortcut):
+            try:
+                from installer_app import _clear_shortcut_runas
+                _clear_shortcut_runas(msix_shortcut)
+                print(f"Cleared administrator flag from MSIX shortcut: {msix_shortcut}")
+            except Exception as e:
+                print(f"Warning: could not clear MSIX shortcut administrator flag: {e}")
 
         # Build the one-file installer EXE that bundles the cert and MSIX.
         one_file_installer = os.path.join(base_dir, 'tools', 'build_installer_exe.py')

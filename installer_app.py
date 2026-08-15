@@ -29,8 +29,8 @@ def _run_powershell(cmd, description):
         raise
 
 
-def _set_shortcut_runas(path):
-    """Set the SLDF_RUNAS_USER (0x2000) flag on a .lnk file."""
+def _clear_shortcut_runas(path):
+    """Clear the RunAs flag so an MSIX shortcut uses normal activation."""
     try:
         with open(path, 'r+b') as f:
             header = struct.unpack('<I', f.read(4))[0]
@@ -38,7 +38,7 @@ def _set_shortcut_runas(path):
                 return
             f.seek(0x14)
             flags = struct.unpack('<I', f.read(4))[0]
-            flags |= 0x2000
+            flags &= ~0x2000
             f.seek(0x14)
             f.write(struct.pack('<I', flags))
     except Exception:
@@ -92,6 +92,7 @@ def main():
             "$S.Save()".format(shortcut_path),
             "Creating desktop shortcut"
         )
+        _clear_shortcut_runas(shortcut_path)
 
         # Create the conditional startup and YARA scanner shortcuts.
         for name, arg, desc in [
@@ -113,6 +114,7 @@ def main():
                 "$S.Save()".format(sc_path, arg, desc),
                 "Creating {} shortcut".format(desc)
             )
+            _clear_shortcut_runas(sc_path)
 
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "

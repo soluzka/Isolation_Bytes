@@ -166,13 +166,14 @@ def main():
     p = argparse.ArgumentParser(description='YARA + ssdeep fuzzy runner')
 
     if getattr(sys, 'frozen', False):
-        # build_config.py installs the runner beside antivirus_server.exe, so
-        # prefer the onedir project folder for its external rules and assets.
-        # Fall back to PyInstaller's extraction directory for standalone runs.
+        # build_config.py stores the runner in the onedir _internal folder;
+        # resolve project rules from its parent install folder. Fall back to
+        # PyInstaller's extraction directory for standalone runs.
         executable_dir = os.path.dirname(os.path.abspath(sys.executable))
+        install_dir = os.path.dirname(executable_dir) if os.path.basename(executable_dir).lower() == '_internal' else executable_dir
         packaged_dir = getattr(sys, '_MEIPASS', executable_dir)
-        project_rules = os.path.join(executable_dir, 'security', 'yara_rules')
-        base_dir = executable_dir if os.path.isdir(project_rules) else packaged_dir
+        project_rules = os.path.join(install_dir, 'security', 'yara_rules')
+        base_dir = install_dir if os.path.isdir(project_rules) else packaged_dir
     else:
         _here = os.path.dirname(os.path.abspath(__file__))
         base_dir = os.path.dirname(os.path.dirname(_here))
