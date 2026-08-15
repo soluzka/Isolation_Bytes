@@ -120,7 +120,7 @@ load_dotenv(dotenv_path)
 # Prefer ADMIN_PASSWORD_HASH (a bcrypt string). Fall back to ADMIN_PASSWORD
 # and hash it at startup for migration.
 try:
-    from security.web_auth import set_password, set_password_hash, verify_password, verify_user, register_user, has_auth_data
+    from security.web_auth import set_password, set_password_hash, verify_password, has_auth_data
     if not has_auth_data():
         admin_password_hash = os.environ.get('ADMIN_PASSWORD_HASH')
         admin_password = os.environ.get('ADMIN_PASSWORD')
@@ -129,9 +129,9 @@ try:
         elif admin_password:
             set_password(admin_password)
 except Exception:
+    set_password = None
+    set_password_hash = None
     verify_password = None
-    verify_user = None
-    register_user = None
 
 import secrets
 
@@ -1136,19 +1136,7 @@ def login():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
 
-        password_ok = False
-        if verify_user:
-            try:
-                password_ok = verify_user(username, password)
-            except Exception:
-                if verify_password:
-                    try:
-                        password_ok = (username == ADMIN_USERNAME) and verify_password(password)
-                    except Exception:
-                        password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
-                else:
-                    password_ok = (username == ADMIN_USERNAME) and (password == os.environ.get('ADMIN_PASSWORD', 'admin123'))
-        elif verify_password:
+        if verify_password:
             try:
                 password_ok = (username == ADMIN_USERNAME) and verify_password(password)
             except Exception:
@@ -1168,28 +1156,25 @@ def login():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
+    """Set the admin password. This replaces the single stored password."""
     error = None
     message = None
     if request.method == 'POST':
-        username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')
-        if not username or not password:
-            error = 'Username and password are required'
+        if not password:
+            error = 'Password is required'
         elif password != confirm:
             error = 'Passwords do not match'
-        elif not register_user:
+        elif not set_password:
             error = 'Registration is not available'
         else:
             try:
-                success, msg = register_user(username, password)
-                if success:
-                    message = 'Account created. You can now log in.'
-                else:
-                    error = msg
+                set_password(password)
+                message = 'Password set. You can now log in as admin.'
             except Exception as e:
                 error = str(e)
-    return render_template('register.html', error=error, message=message)
+    return render_template('login.html', register_error=error, register_message=message)
 
 
 @app.route('/logout')
