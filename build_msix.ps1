@@ -379,13 +379,16 @@ if (Test-Path $ExeSource) {
         }
         Write-Host "Set _internal and all contents to Hidden: $InternalDir"
     }
-    # Hide the standalone launcher EXE too so the AppData folder looks empty.
+    # Hide the standalone launcher EXE and the root AppData folder too.
     $LauncherExe = Join-Path $LocalAppDir 'antivirus_server.exe'
     if (Test-Path $LauncherExe) {
         $exeItem = Get-Item $LauncherExe -Force
         $exeItem.Attributes = $exeItem.Attributes -bor [System.IO.FileAttributes]::Hidden
         Write-Host "Set launcher EXE to Hidden: $LauncherExe"
     }
+    $rootItem = Get-Item $LocalAppDir -Force
+    $rootItem.Attributes = $rootItem.Attributes -bor [System.IO.FileAttributes]::Hidden
+    Write-Host "Set root app folder to Hidden: $LocalAppDir"
     $Wsh = New-Object -ComObject WScript.Shell
     $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server (standalone).lnk'))
     $Shortcut.TargetPath = $InstalledExe

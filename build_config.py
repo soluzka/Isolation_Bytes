@@ -370,12 +370,24 @@ for stale_spec in [os.path.join(base_dir, 'antivirus_server.spec'), os.path.join
         os.remove(stale_spec)
         print(f"Removed stale spec file: {stale_spec}")
 
-# Run PyInstaller
+# Run PyInstaller to generate the .spec, then force noarchive=True so the
+# PYZ/modules are written as separate files in _internal instead of embedded
+# in antivirus_server.exe. This keeps the EXE small and lets mt.exe safely
+# change its manifest for the MSIX without corrupting the embedded archive.
 try:
     print("Starting EXE build...")
     print("Redis status:", "Available" if redis_available else "Not Available")
     PyInstaller.__main__.run(pyinstaller_args)
-    print("Build completed successfully!")
+    print("Initial build completed. Patching .spec to use noarchive=True...")
+    spec_file = os.path.join(base_dir, 'antivirus_server.spec')
+    if os.path.exists(spec_file):
+        spec_text = open(spec_file, 'r', encoding='utf-8').read()
+        spec_text = spec_text.replace('noarchive=False,', 'noarchive=True,')
+        open(spec_file, 'w', encoding='utf-8').write(spec_text)
+        print(f"Patched {spec_file}")
+        print("Rebuilding with noarchive=True...")
+        PyInstaller.__main__.run([spec_file, '--noconfirm', '--clean'])
+        print("Build completed successfully!")
 except Exception as e:
     print(f"Error during build: {e}")
     sys.exit(1)

@@ -20,7 +20,7 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=['tensorflow', 'torch', 'torchvision', 'torchaudio', 'h5py', 'numba', 'IPython', 'ipykernel', 'notebook', 'pytest', 'scikit-learn-main'],
-    noarchive=False,
+    noarchive=True,
     optimize=0,
 )
 pyz = PYZ(a.pure)
