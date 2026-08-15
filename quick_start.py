@@ -3579,7 +3579,7 @@ def open_browser(port):
     # Wait a moment for the server to start
     time.sleep(1.5)
 
-    browser_url = f"http://127.0.0.1:{port}"
+    browser_url = f"http://127.0.0.1:{port}/login"
     print(f"Opening browser at {browser_url}")
 
     # Wait for the server to be responding before opening the browser
@@ -3847,7 +3847,7 @@ if __name__ == '__main__':
 
     if detected_port is not None:
         base_url = f"http://127.0.0.1:{detected_port}"
-        browser_path = '/yara-scanner' if '--open-yara' in sys.argv else ''
+        browser_path = '/yara-scanner' if '--open-yara' in sys.argv else '/login'
         url = f"{base_url}{browser_path}"
         print(f"Server is ready at {url}")
     else:

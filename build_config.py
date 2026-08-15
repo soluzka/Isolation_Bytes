@@ -8,6 +8,7 @@ import subprocess
 import ctypes
 import platform
 import time
+import argparse
 
 
 
@@ -17,6 +18,14 @@ entry_point = 'quick_start.py'
 
 # Base directory
 base_dir = os.path.abspath(os.path.dirname(__file__))
+
+# Parse optional MSIX certificate arguments (not PyInstaller flags)
+parser = argparse.ArgumentParser(add_help=False)
+parser.add_argument('--store-cert', dest='store_cert', default=None, help='Path to Partner Center .pfx')
+parser.add_argument('--store-cert-password', dest='store_cert_password', default=None, help='Password for the Partner Center .pfx')
+parser.add_argument('--store-publisher', dest='store_publisher', default='CN=soluzka', help='Publisher CN for the MSIX manifest')
+parser.add_argument('--help', '-h', action='help', help='Show this help message and exit')
+build_args, _ = parser.parse_known_args()
 
 # Folders to include
 data_dirs = [
@@ -153,9 +162,8 @@ if redis_available:
     logging.info("Redis configured for EXE build")
 
 # Add hidden imports
-if '--admin' in sys.argv:
-    pyinstaller_args.append('--uac-admin')
-    print('Admin mode enabled: --uac-admin added for local admin build')
+pyinstaller_args.append('--uac-admin')
+print('Admin mode enabled: --uac-admin added for local admin build')
 
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 
@@ -379,6 +387,7 @@ if os.path.exists(runner_script):
         runner_args = [
             '--name=ssdeep_runner',
             '--onefile',
+            '--uac-admin',
             '--noconfirm',
             '--log-level=INFO',
             '--add-data', f"{os.path.join(base_dir, 'security', 'yara_rules')}{sep}security\\yara_rules",
@@ -433,6 +442,12 @@ if os.path.exists(build_msix_ps1):
         if skip_test:
             args.append('-SkipTest')
             print("Skipping test launcher (--no-test).")
+        if build_args.store_cert:
+            args.extend(['-StoreCertFile', build_args.store_cert])
+        if build_args.store_cert_password:
+            args.extend(['-StoreCertPassword', build_args.store_cert_password])
+        if build_args.store_publisher:
+            args.extend(['-StorePublisher', build_args.store_publisher])
         subprocess.check_call(args)
         print("MSIX build completed.")
     except Exception as e:

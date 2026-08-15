@@ -10,7 +10,13 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipStore,
     [switch]$SkipTest,
-    [switch]$NoCertManagement
+    [switch]$NoCertManagement,
+    [Parameter(Mandatory=$false)]
+    [string]$StoreCertFile,
+    [Parameter(Mandatory=$false)]
+    [string]$StoreCertPassword,
+    [Parameter(Mandatory=$false)]
+    [string]$StorePublisher = 'CN=soluzka'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,20 +41,36 @@ if (-not (Test-Path $MakeAppx) -or -not (Test-Path $SignTool)) {
     throw "Windows SDK 10.0.22621.0 tools not found at $Sdk"
 }
 
-$StorePfx = Join-Path $Root 'soluzka.pfx'
+if ($StoreCertFile) {
+    $StorePfx = $StoreCertFile
+} else {
+    $StorePfx = Join-Path $Root 'soluzka.pfx'
+}
 
-if (-not (Test-Path $StorePfx)) { throw "soluzka.pfx not found at $StorePfx" }
+if (-not (Test-Path $StorePfx)) { throw "Store .pfx not found at $StorePfx" }
 
 $TestPfx = Join-Path $Root 'soluzka_test.pfx'
-if (-not $SkipTest -and -not (Test-Path $TestPfx)) { throw "soluzka_test.pfx not found at $TestPfx" }
+if (-not $SkipTest -and -not (Test-Path $TestPfx)) {
+    Write-Warning "soluzka_test.pfx not found at $TestPfx; skipping Test Launcher."
+    $SkipTest = $true
+}
 
 function Read-PfxSubject($Pfx, [SecureString]$Password) {
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($Pfx, $Password)
     return $cert
 }
 
-$StorePassword = ConvertTo-SecureString -String 'password' -AsPlainText -Force
+if ($StoreCertPassword) {
+    $StorePassword = ConvertTo-SecureString -String $StoreCertPassword -AsPlainText -Force
+} else {
+    $StorePassword = ConvertTo-SecureString -String 'password' -AsPlainText -Force
+}
 $StoreCert = Read-PfxSubject $StorePfx $StorePassword
+
+# If the real cert has a different publisher in its subject, use that when provided.
+if ($StorePublisher -eq 'CN=soluzka' -and $StoreCert.Subject) {
+    $StorePublisher = $StoreCert.Subject
+}
 
 if (-not $SkipTest) {
     $TestPassword = ConvertTo-SecureString -String 'Test1234!' -AsPlainText -Force
@@ -186,7 +208,7 @@ if (-not $SkipStore) {
     $StoreManifest = Join-Path $StageRoot 'AppxManifest.xml'
     New-AppxManifest -Path $StoreManifest `
         -PackageName 'soluzka.AntivirusServer' `
-        -Publisher 'CN=soluzka' `
+        -Publisher $StorePublisher `
         -PublisherDisplayName 'soluzka' `
         -DisplayName 'Antivirus Server' `
         -Version $Version
@@ -223,6 +245,60 @@ if (-not $SkipTest) {
 Write-Host "Done. MSIX files are in:"
 if (-not $SkipStore) { Write-Host "  $StoreMsix" }
 if (-not $SkipTest) { Write-Host "  $TestMsix" }
+
+# Copy the standalone EXE to the desktop for easy access.
+$Desktop = [Environment]::GetFolderPath('Desktop')
+$ExeSource = Join-Path $Onedir 'antivirus_server.exe'
+$DesktopExe = Join-Path $Desktop 'antivirus_server.exe'
+if (Test-Path $ExeSource) {
+    Copy-Item -Path $ExeSource -Destination $DesktopExe -Force
+    Write-Host "Copied standalone EXE to desktop: $DesktopExe"
+} else {
+    Write-Warning "antivirus_server.exe not found at $ExeSource; nothing copied to desktop."
+}
+
+# Install the Store package if running as Administrator; otherwise print instructions.
+if (-not $SkipStore) {
+    if ($isAdmin) {
+        Write-Host "Installing Store MSIX..."
+        Add-AppxPackage -Path $StoreMsix
+        Write-Host "Installed $StoreMsix"
+        # Launch the installed app by AUMID.
+        $Aumid = 'soluzka.AntivirusServer!App'
+        try {
+            Start-Process "explorer.exe" "shell:AppsFolder\$Aumid"
+            Write-Host "Launched Antivirus Server."
+        } catch {
+            Write-Warning "Could not auto-launch the app: $_"
+        }
+
+        # Create a desktop shortcut to the installed Store app.
+        $Wsh = New-Object -ComObject WScript.Shell
+        $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server.lnk'))
+        $Shortcut.TargetPath = "$env:SystemRoot\explorer.exe"
+        $Shortcut.Arguments = "shell:AppsFolder\$Aumid"
+        if (Test-Path $DesktopExe) {
+            $Shortcut.IconLocation = "$DesktopExe,0"
+        }
+        $Shortcut.Description = 'Antivirus Server'
+        $Shortcut.Save()
+        Write-Host "Desktop shortcut created: Antivirus Server.lnk"
+    } else {
+        Write-Host "Install the Store MSIX (run as Administrator) with:"
+        Write-Host "  Add-AppxPackage -Path '$StoreMsix'"
+    }
+}
+
+# If the desktop EXE was copied and we are not installing the MSIX, start the EXE so it also launches.
+if (-not $SkipStore -and -not $isAdmin -and (Test-Path $DesktopExe)) {
+    Write-Host "Desktop EXE is ready. Start it manually with:"
+    Write-Host "  & '$DesktopExe'"
+}
+
+if ($SkipStore -and (Test-Path $DesktopExe)) {
+    Write-Host "Starting the desktop EXE..."
+    Start-Process $DesktopExe
+}
 
 if (-not $NoCertManagement -and -not $SkipTest) {
     Write-Host "Install the test launcher with:"

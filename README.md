@@ -147,7 +147,7 @@ python build_config.py
 - Builds `dist\ssdeep_runner.exe` as a one-file bundle.
 - Bundles the `models\`, `security\`, `templates\`, `static\`, and related runtime directories.
 - Uses `--noconfirm` so existing build and dist folders are replaced without prompting.
-- Does **not** request UAC elevation through the manifest, so the executable can be launched by a normal user.
+- Requests UAC elevation through the manifest (`--uac-admin`), so the executable launches as Administrator.
 
 ### Packaged Application Layout
 
@@ -167,6 +167,40 @@ dist\antivirus_server\
 ```
 
 `dist\ssdeep_runner.exe` is built as a sibling file for fuzzy-hash scanning.
+
+### Creating the MSIX Store Package
+
+The `build_msix.ps1` script builds the EXE, packages it as a Microsoft Store `.msix`, copies the standalone EXE to the Desktop, and optionally installs and launches the app.
+
+Run from PowerShell as Administrator to build, install, and launch in one step:
+
+```powershell
+Set-Location "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c"
+powershell -ExecutionPolicy Bypass -File build_msix.ps1
+```
+
+To skip certificate trust management and just pack/sign:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build_msix.ps1 -NoCertManagement
+```
+
+If you have a real Partner Center code-signing certificate, pass it to avoid the placeholder `soluzka.pfx`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File build_msix.ps1 `
+    -StoreCertFile "C:\path\to\your_partner_center.pfx" `
+    -StoreCertPassword (ConvertTo-SecureString -String 'your_pfx_password' -AsPlainText -Force) `
+    -StorePublisher 'CN=YourPublisherName'
+```
+
+What it does:
+
+1. Refreshes `dist\antivirus_server\antivirus_server.exe` from the latest source.
+2. Packs `dist\AntivirusServer_Store.msix` with the Store certificate and a version like `1.0.<days>.<minutes>`.
+3. Copies `antivirus_server.exe` to the Desktop.
+4. If run as Administrator, installs the Store MSIX with `Add-AppxPackage` and launches the app.
+5. Skips the Test Launcher if `soluzka_test.pfx` is not present.
 
 ### Creating Installer Files
 

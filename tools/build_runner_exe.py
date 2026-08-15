@@ -19,6 +19,7 @@ sep = ';' if sys.platform.startswith('win') else ':'
 args = [
     '--name=ssdeep_runner',
     '--onefile',
+    '--uac-admin',
     '--noconfirm',
     '--log-level=INFO',
     '--add-data', f"{os.path.join(repo_root, 'security', 'yara_rules')}{sep}security\\yara_rules",
