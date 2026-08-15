@@ -147,8 +147,7 @@ pyinstaller_args = [
     f'--icon={icon_path}',
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
-    '--console',  # Keep console for debugging
-    '--uac-admin'  # Require elevation for every packaged executable launch
+    '--console'  # Keep console for debugging
 ]
 
 # Add Redis configuration
@@ -161,8 +160,9 @@ if redis_available:
     pyinstaller_args.append('--hidden-import=redis.utils')
     logging.info("Redis configured for EXE build")
 
-# Require UAC elevation for the EXE in standalone installs and MSIX packages.
-# The generated shortcuts also carry the shell RunAs flag for an explicit prompt.
+# The MSIX package must use an asInvoker executable. Windows does not support
+# launching a packaged full-trust executable with requireAdministrator.
+# Standalone shortcuts explicitly request RunAs where elevation is required.
 
 pyinstaller_args += [f'--hidden-import={mod}' for mod in hidden_imports]
 

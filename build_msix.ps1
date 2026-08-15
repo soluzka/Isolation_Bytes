@@ -193,10 +193,10 @@ New-Item -ItemType Directory -Path $StageRoot | Out-Null
 Write-Host 'Staging dist\antivirus_server ...'
 Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
 
-# The EXE is built with --uac-admin, so the embedded manifest requires
-# elevation when launched directly or through an MSIX shortcut. Do not rewrite
-# the embedded PyInstaller executable manifest after packaging.
-Write-Host "Using EXE as-is (requireAdministrator) for MSIX packaging."
+# The EXE is intentionally built as asInvoker for MSIX compatibility. Windows
+# does not support requireAdministrator for packaged full-trust applications.
+# Do not rewrite the embedded PyInstaller executable manifest after packaging.
+Write-Host "Using EXE as-is (asInvoker) for MSIX packaging."
 
 # Create a simple placeholder 256x256 PNG logo.
 $Assets = Join-Path $StageRoot 'Assets'
@@ -372,13 +372,21 @@ function Set-ShortcutRunAs($Path) {
             public class ShortcutRunAs {
                 public const uint SLDF_RUNAS_USER = 0x00002000;
                 public static void Set(string path) {
+                    Update(path, true);
+                }
+                public static void Clear(string path) {
+                    Update(path, false);
+                }
+                private static void Update(string path, bool runAs) {
                     var sl = new ShellLink();
                     var pf = (IPersistFile)sl;
                     pf.Load(path, 2);
                     var dl = (IShellLinkDataList)sl;
                     uint flags;
                     dl.GetFlags(out flags);
-                    dl.SetFlags(flags | SLDF_RUNAS_USER);
+                    if (runAs) flags |= SLDF_RUNAS_USER;
+                    else flags &= ~SLDF_RUNAS_USER;
+                    dl.SetFlags(flags);
                     pf.Save(path, true);
                 }
             }
@@ -386,6 +394,10 @@ function Set-ShortcutRunAs($Path) {
         $script:ShortcutRunAsLoaded = $true
     }
     [ShortcutRunAs]::Set($Path)
+}
+function Clear-ShortcutRunAs($Path) {
+    if (-not $script:ShortcutRunAsLoaded) { Set-ShortcutRunAs $Path }
+    [ShortcutRunAs]::Clear($Path)
 }
 
 # Hide the standalone onedir in AppData\Local and create a desktop shortcut.
@@ -442,31 +454,30 @@ if (-not $SkipStore) {
         Get-AppxPackage -Name 'soluzka.AntivirusServer' | Remove-AppxPackage -ErrorAction SilentlyContinue
         Add-AppxPackage -Path $StoreMsix -ForceApplicationShutdown -ForceUpdateFromAnyVersion -ErrorAction Stop
         Write-Host "Installed $StoreMsix"
-        # Launch the packaged executable directly with elevation. Explorer/AUMID
-        # launches do not reliably honor requireAdministrator for a full-trust
-        # executable inside an MSIX package.
+        # Launch the packaged app through its registered MSIX AUMID. Windows
+        # does not support RunAs/requireAdministrator for packaged full-trust apps.
         $InstalledPkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'
         if (-not $InstalledPkg) { throw 'Installed MSIX package could not be located.' }
-        $InstalledExe = Join-Path $InstalledPkg.InstallLocation 'antivirus_server.exe'
-        if (-not (Test-Path $InstalledExe)) { throw "Packaged executable not found: $InstalledExe" }
+        $Aumid = $InstalledPkg.PackageFamilyName + '!App'
+        Write-Host "AUMID: $Aumid"
         try {
-            Start-Process -FilePath $InstalledExe -Verb RunAs
-            Write-Host "Launched Antivirus Server as Administrator."
+            Start-Process -FilePath 'explorer.exe' -ArgumentList "shell:AppsFolder\$Aumid"
+            Write-Host "Launched Antivirus Server through MSIX."
         } catch {
-            Write-Warning "Could not auto-launch the app as Administrator: $_"
+            Write-Warning "Could not auto-launch the MSIX app: $_"
         }
 
-        # Create a desktop shortcut that launches the installed MSIX EXE as admin.
+        # Create a desktop shortcut that launches the installed MSIX app.
         $Wsh = New-Object -ComObject WScript.Shell
         $Shortcut = $Wsh.CreateShortcut((Join-Path $Desktop 'Antivirus Server.lnk'))
-        $Shortcut.TargetPath = 'powershell.exe'
-        $Shortcut.Arguments = '-WindowStyle Hidden -Command { $pkg = Get-AppxPackage -Name ''soluzka.AntivirusServer''; if ($pkg) { $exe = Join-Path $pkg.InstallLocation ''antivirus_server.exe''; Start-Process -FilePath "$exe" -Verb RunAs } }'
+        $Shortcut.TargetPath = 'explorer.exe'
+        $Shortcut.Arguments = "shell:AppsFolder\$Aumid"
         if (Test-Path $DesktopExe) {
             $Shortcut.IconLocation = "$DesktopExe,0"
         }
         $Shortcut.Description = 'Antivirus Server'
         $Shortcut.Save()
-        Set-ShortcutRunAs $Shortcut.FullName
+        Clear-ShortcutRunAs $Shortcut.FullName
         Write-Host "Desktop shortcut created: Antivirus Server.lnk"
     } else {
         Write-Host "Install the Store MSIX (run as Administrator) with:"
