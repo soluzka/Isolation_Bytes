@@ -51,6 +51,7 @@ if (-not $NoCertManagement -and -not $isAdmin) {
         }
     }
     if ($StorePublisher -ne 'CN=soluzka') { $reArgs += '-StorePublisher', $StorePublisher }
+    if ($StoreVersion) { $reArgs += '-StoreVersion', $StoreVersion }
 
     Write-Host 'Requesting Administrator privileges via UAC...'
     $stdOut = Join-Path $env:TEMP 'antivirus_server_elevate_out.log'
