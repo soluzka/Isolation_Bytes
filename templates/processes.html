@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windows Defender - Process Scanner</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .processes-container { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); margin: 2rem auto; max-width: 1400px; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <div class="processes-container">
+        <h2 class="text-center mb-4">Running Processes</h2>
+        <p class="text-center text-muted">Live process list scored for suspicious command lines, injection patterns and parent anomalies.</p>
+
+        {% if processes %}
+        <table class="table table-sm table-striped">
+            <thead>
+                <tr><th>PID</th><th>PPID</th><th>Name</th><th>Risk</th><th>User</th><th>Command Line</th></tr>
+            </thead>
+            <tbody>
+                {% for proc in processes %}
+                {% set score = process_risk_score(proc) %}
+                <tr class="{% if score >= 50 %}table-danger{% elif score >= 25 %}table-warning{% endif %}">
+                    <td>{{ proc.pid }}</td>
+                    <td>{{ proc.ppid }}</td>
+                    <td>{{ proc.name }}</td>
+                    <td>{{ score }}/100</td>
+                    <td>{{ proc.username }}</td>
+                    <td style="max-width:500px; overflow:hidden; text-overflow:ellipsis;">{{ proc.cmdline }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="alert alert-info text-center">No process data available, or psutil is not installed.</div>
+        {% endif %}
+
+        <p class="text-center mt-3"><a href="{{ url_for('index') }}">Back to dashboard</a></p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,2278 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <title>Antivirus Home</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <script src="{{ url_for('static', filename='traffic_display.js') }}"></script>
+    <style>
+        body { max-width: 900px; margin: 2em auto; font-family: 'Inter', Arial, sans-serif; background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%); min-height: 100vh; position: relative; color: #1f2937; }
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: url("{{ url_for('static', filename='shield_bg.png') }}") no-repeat center fixed;
+            background-size: 300px;
+            opacity: 0.40;
+            z-index: 9999;
+            pointer-events: none;
+            pointer-events: none;
+        }
+        h2 { color: #2d5f9a; }
+        @keyframes dash-glitch {
+            0% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(0); }
+            20% { text-shadow: -3px 0 #ff0055, 3px 0 #00eaff; transform: translate(-2px, 1px); }
+            40% { text-shadow: 3px 0 #00eaff, -3px 0 #ff0055; transform: translate(2px, -1px); }
+            60% { text-shadow: -2px 0 #00eaff, 2px 0 #ff0055; transform: translate(-1px, 2px); }
+            80% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(1px, -2px); }
+            100% { text-shadow: -2px 0 #ff0055, 2px 0 #00eaff; transform: translate(0); }
+        }
+        .glitch-title { animation: dash-glitch 0.18s infinite; }
+        .scanlines {
+            position: fixed; top:0; left:0; right:0; bottom:0;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0, rgba(0,0,0,0) 3px, rgba(0,0,0,0.3) 3px, rgba(0,0,0,0.3) 4px);
+            background-size: 100% 5px; pointer-events: none; z-index: 1000; opacity: 1;
+            animation: scroll-scanlines 10s linear infinite;
+        }
+        @keyframes scroll-scanlines {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+        @keyframes btn-glitch {
+            0% { transform: translate(0); box-shadow: 2px 0 #ff0055, -2px 0 #00eaff; }
+            25% { transform: translate(-2px, 1px); box-shadow: -2px 0 #ff0055, 2px 0 #00eaff; }
+            50% { transform: translate(2px, -1px); box-shadow: 2px 0 #00eaff, -2px 0 #ff0055; }
+            75% { transform: translate(-1px, 2px); box-shadow: -2px 0 #00eaff, 2px 0 #ff0055; }
+            100% { transform: translate(0); box-shadow: 2px 0 #ff0055, -2px 0 #00eaff; }
+        }
+        button, input[type="submit"] { animation: btn-glitch 0.2s infinite; }
+
+        nav a { margin-right: 1em; }
+        .status { font-weight: bold; }
+        .button-row form, .button-row .c2-group { display: inline; margin-right: 1em; }
+        iframe { border: none; margin-top: 2em; }
+        .card { background: white; border-radius: 8px; padding: 1em; margin: 1em 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card-header { border-bottom: 1px solid #eee; margin: -1em -1em 1em; padding: 1em; background: #f8f9fa; border-radius: 8px 8px 0 0; }
+        .alert { padding: 1em; margin: 1em 0; border-radius: 6px; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .alert-warning { background: #fff3cd; color: #856404; }
+        .alert-info { background: #d1ecf1; color: #0c5460; }
+        .secure-level { color: #27ae60; }
+        .insecure-level { color: #e74c3c; }
+        .malicious-request { border-left: 4px solid #e74c3c; }
+        .safe-request { border-left: 4px solid #27ae60; }
+        .malicious-color { color: #e74c3c; }
+        .safe-color { color: #27ae60; }
+        .domain-name { margin-left: 0; }
+        .reason { margin-left: 1em; color: #8e44ad; }
+        .last-seen { margin-left: 1em; }
+        
+        /* Network monitoring directory styles */
+        .directory-details {
+            margin-top: 5px;
+            padding-left: 15px;
+            font-size: 0.9em;
+            color: #555;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .high-risk-files {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        /* Styles for all monitored paths section */
+        .all-monitored-paths {
+            margin-top: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            border: 1px solid #eee;
+        }
+        
+        .toggle-all-paths {
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 0.85em;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+        
+        .toggle-all-paths:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .all-paths-list {
+            list-style-type: none;
+            padding-left: 10px;
+            margin-top: 10px;
+            max-height: 300px;
+            overflow-y: auto;
+            border-left: 2px solid #ddd;
+        }
+        
+        .all-paths-list li {
+            padding: 3px 5px;
+            margin-bottom: 3px;
+            border-bottom: 1px dotted #eee;
+            font-size: 0.9em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .file-count {
+            color: #3498db;
+        }
+        .subdir-count {
+            color: #9b59b6;
+        }
+        .directories-list {
+            list-style-type: none;
+            padding-left: 0;
+            margin-top: 10px;
+        }
+        .directories-list li {
+            padding: 8px;
+            margin-bottom: 8px;
+            border-left: 3px solid #3498db;
+            padding-left: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+        .directory-active {
+            color: #27ae60;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        .directory-inactive {
+            color: #e74c3c;
+            font-weight: bold;
+            margin-right: 5px;
+        }
+
+        #favicon-icon-overlay {
+            position: fixed; top: 12px; left: 12px; z-index: 10000;
+            background: #fff; border-radius: 50%; padding: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        #favicon-icon-overlay img { width: 32px; height: 32px; display: block; }
+
+        nav details { margin-right: 0.5em; margin-bottom: 0.5em; }
+        nav details > div {
+            background: #fff; border: 1px solid #cbd5e1; border-radius: 8px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); padding: 0.4em 0;
+            min-width: 190px; margin-top: 0.4em;
+        }
+        nav details a {
+            display: block; padding: 0.6em 1em; color: #334155;
+            text-decoration: none; transition: background 0.15s, color 0.15s;
+            font-size: 0.92em; border-bottom: 1px solid #f1f5f9;
+        }
+        nav details a:hover { background: #e2e8f0; color: #1d4ed8; }
+        nav details a:last-child { border-bottom: none; }
+        nav > a, nav summary {
+            border-radius: 8px; padding: 0.6em 1em; font-weight: 500;
+            text-decoration: none; display: inline-block; cursor: pointer;
+            transition: transform 0.08s, box-shadow 0.15s;
+        }
+        nav summary:hover, nav > a:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.12); }
+        .btn { border: none; border-radius: 6px; padding: 0.5em 1em; cursor: pointer; font-weight: 500; transition: filter 0.15s; }
+        .btn:hover { filter: brightness(1.1); }
+    </style>
+
+</head>
+<body>
+{% if not running_as_admin and administrator_service_available %}
+<div id="administrator-notice" class="alert alert-info" role="status" style="position:relative;z-index:10001;">
+    <strong>Administrator service connected.</strong>
+    {{ admin_helper_message }}
+</div>
+<script>
+    console.info('Antivirus Server is using the administrator service for privileged operations.');
+</script>
+{% elif not running_as_admin %}
+<div id="administrator-notice" class="alert alert-warning" role="status" style="position:relative;z-index:10001;">
+    <strong>Administrator service is not connected.</strong>
+    {{ admin_helper_message }}
+</div>
+<script>
+    console.info('Install and start the AntivirusProtectedAdmin service for privileged operations.');
+</script>
+{% endif %}
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <div class="scanlines"></div>
+    <h2 class="glitch-title">Antivirus Web Interface</h2>
+    <input type="hidden" id="network_monitor_running" value="{{ 'true' if network_monitor_running else 'false' }}">
+    <p>Real-Time Protection: <span class="status" id="rtp_status">{{ 'ENABLED' if folder_watcher_status else 'DISABLED' }}</span></p>
+    <p>Auto-Block: <span class="status" id="auto_block_status">{{ 'ENABLED' if auto_block_enabled else 'DISABLED' }}</span></p>
+<p style="color:#888;font-size:0.95em;margin-top:-1em;">For your security, real-time protection cannot be disabled. This ensures continuous protection against threats.</p>
+    <div class="button-row">
+    <script>
+        // Folder Watcher
+function folderWatcherHandler(action) {
+    const btn = action === 'start' ? document.getElementById('start_folder_watcher_btn') : document.getElementById('stop_folder_watcher_btn');
+    
+    // Check if button exists before trying to manipulate it
+    if (!btn) {
+        console.error(`Button for ${action} folder watcher not found`);
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = (action === 'start' ? 'Starting...' : 'Stopping...');
+    fetch(`/toggle_folder_watcher/${action}`, {method: 'POST'})
+        .then(async response => {
+            const text = await response.text();
+            let data;
+            try { data = JSON.parse(text); } catch (e) {
+                alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
+                btn.disabled = false;
+                btn.textContent = (action === 'start' ? 'Start Folder Watcher' : 'Stop Folder Watcher');
+                return;
+            }
+            alert(data.message || (action === 'start' ? 'Folder Watcher started.' : 'Folder Watcher stopped.'));
+            location.reload();
+        })
+        .catch(error => { alert('Error: ' + error); btn.disabled = false; });
+}
+// Safely add click handlers for folder watcher buttons
+const startFolderBtn = document.getElementById('start_folder_watcher_btn');
+if (startFolderBtn) {
+    startFolderBtn.onclick = function() { folderWatcherHandler('start'); };
+}
+
+const stopFolderBtn = document.getElementById('stop_folder_watcher_btn');
+if (stopFolderBtn) {
+    stopFolderBtn.onclick = function() { folderWatcherHandler('stop'); };
+}
+// Safe Downloader
+function safeDownloaderHandler(action) {
+    const btn = action === 'start' ? document.getElementById('start_safe_downloader_btn') : document.getElementById('stop_safe_downloader_btn');
+    
+    // Check if button exists before trying to manipulate it
+    if (!btn) {
+        console.error(`Button for ${action} safe downloader not found`);
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = (action === 'start' ? 'Starting...' : 'Stopping...');
+    fetch(`/toggle_safe_downloader/${action}`, {method: 'POST'})
+        .then(async response => {
+            const text = await response.text();
+            let data;
+            try { data = JSON.parse(text); } catch (e) {
+                alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
+                btn.disabled = false;
+                btn.textContent = (action === 'start' ? 'Start Safe Downloader' : 'Stop Safe Downloader');
+                return;
+            }
+            alert(data.message || (action === 'start' ? 'Safe Downloader started.' : 'Safe Downloader stopped.'));
+            location.reload();
+        })
+        .catch(error => { alert('Error: ' + error); btn.disabled = false; });
+}
+// Safely add safe downloader button handlers
+const startSafeDownloaderButton = document.getElementById('start_safe_downloader_btn');
+if (startSafeDownloaderButton) {
+    startSafeDownloaderButton.onclick = function() {
+        safeDownloaderHandler('start');
+    };
+}
+
+const stopSafeDownloaderButton = document.getElementById('stop_safe_downloader_btn');
+if (stopSafeDownloaderButton) {
+    stopSafeDownloaderButton.onclick = function() {
+        safeDownloaderHandler('stop');
+    };
+}
+// Auto Updates
+function autoUpdatesHandler(action) {
+    const btn = action === 'start' ? document.getElementById('start_auto_updates_btn') : document.getElementById('stop_auto_updates_btn');
+    
+    // Check if button exists before trying to manipulate it
+    if (!btn) {
+        console.error(`Button for ${action} auto updates not found`);
+        return;
+    }
+    
+    btn.disabled = true;
+    btn.textContent = (action === 'start' ? 'Starting...' : 'Stopping...');
+    fetch(`/${action}_auto_updates`, {method: 'POST'})
+        .then(async response => {
+            const text = await response.text();
+            let data;
+            try { data = JSON.parse(text); } catch (e) {
+                alert('Server returned an unexpected response. You may have been logged out or encountered a server error.');
+                btn.disabled = false;
+                btn.textContent = (action === 'start' ? 'Start Auto Updates' : 'Stop Auto Updates');
+                return;
+            }
+            alert(data.message || (action === 'start' ? 'Auto Updates started.' : 'Auto Updates stopped.'));
+            location.reload();
+        })
+        .catch(error => { alert('Error: ' + error); btn.disabled = false; });
+}
+// Safely add click handlers for auto updates buttons
+const startAutoUpdatesBtn = document.getElementById('start_auto_updates_btn');
+if (startAutoUpdatesBtn) {
+    startAutoUpdatesBtn.onclick = function() { autoUpdatesHandler('start'); };
+}
+
+const stopAutoUpdatesBtn = document.getElementById('stop_auto_updates_btn');
+if (stopAutoUpdatesBtn) {
+    stopAutoUpdatesBtn.onclick = function() { autoUpdatesHandler('stop'); };
+}
+
+        // Network monitor buttons
+        var startNetBtn = document.getElementById('start_network_monitor_btn');
+        var stopNetBtn = document.getElementById('stop_network_monitor_btn');
+        function updateNetworkMonitorStatus(running) {
+            const statusSpan = document.getElementById('network_monitor_status');
+            if (statusSpan) {
+                statusSpan.textContent = running ? 'Enabled' : 'Disabled';
+                statusSpan.style.color = running ? '#27ae60' : '#c0392b';
+            }
+        }
+        if (startNetBtn) startNetBtn.onclick = async function() {
+            startNetBtn.disabled = true;
+            startNetBtn.textContent = 'Starting...';
+            try {
+                const response = await fetch('/toggle_network_monitor/start', {method: 'POST', credentials: 'include'});
+                const data = await response.json();
+                if (data.status === 'ENABLED' || data.status === 'success' || data.network_monitor_running) {
+                    updateNetworkMonitorStatus(true);
+                    alert('Network monitor started.');
+                } else {
+                    alert(data.error || 'Failed to start network monitor.');
+                }
+            } catch (e) {
+                alert('Error: ' + e);
+            } finally {
+                startNetBtn.disabled = false;
+                startNetBtn.textContent = 'Start Network Monitoring';
+            }
+        };
+        if (stopNetBtn) stopNetBtn.onclick = async function() {
+            stopNetBtn.disabled = true;
+            stopNetBtn.textContent = 'Stopping...';
+            try {
+                const response = await fetch('/toggle_network_monitor/stop', {method: 'POST', credentials: 'include'});
+                const data = await response.json();
+                if (data.status === 'DISABLED' || data.status === 'success' || data.network_monitor_running === false) {
+                    updateNetworkMonitorStatus(false);
+                    alert('Network monitor stopped.');
+                } else {
+                    alert(data.error || 'Failed to stop network monitor.');
+                }
+            } catch (e) {
+                alert('Error: ' + e);
+            } finally {
+                stopNetBtn.disabled = false;
+                stopNetBtn.textContent = 'Stop Network Monitoring';
+            }
+        };
+
+        const stopRealtimeButton = document.getElementById('stop_realtime_btn');
+        if (stopRealtimeButton) {
+            stopRealtimeButton.onclick = function() {
+            fetch('/stop_realtime', {method: 'POST'})
+                .then(async response => {
+                    let text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+            };
+        }
+        
+        // Safely add start safe downloader button handler
+        const startSafeDownloaderButton2 = document.getElementById('start_safe_downloader_btn');
+        if (startSafeDownloaderButton2) {
+            startSafeDownloaderButton2.onclick = function() {
+            fetch('/toggle_safe_downloader/start', {method: 'POST'})
+                .then(async response => {
+                    let text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert(data.message || 'Safe Downloader started.');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+            };
+        }
+        
+        // Safely add stop safe downloader button handler
+        const stopSafeDownloaderButton2 = document.getElementById('stop_safe_downloader_btn');
+        if (stopSafeDownloaderButton2) {
+            stopSafeDownloaderButton2.onclick = function() {
+            fetch('/toggle_safe_downloader/stop', {method: 'POST'})
+                .then(async response => {
+                    let text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert(data.message || 'Safe Downloader stopped.');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+            };
+        }
+        
+        // Safely add start auto updates button handler
+        const startAutoUpdatesButton = document.getElementById('start_auto_updates_btn');
+        if (startAutoUpdatesButton) {
+            startAutoUpdatesButton.onclick = function() {
+            fetch('/start_auto_updates', {method: 'POST'})
+                .then(async response => {
+                    let text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert(data.message || 'Auto Updates started.');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+            };
+        }
+        
+        // Safely add stop auto updates button handler
+        const stopAutoUpdatesButton = document.getElementById('stop_auto_updates_btn');
+        if (stopAutoUpdatesButton) {
+            stopAutoUpdatesButton.onclick = function() {
+            fetch('/stop_auto_updates', {method: 'POST'})
+                .then(async response => {
+                    let text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        alert('Unexpected server response: ' + text);
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert(data.message || 'Auto Updates stopped.');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + (data.message || data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+            };
+        }
+        </script>
+    </div>
+
+    <h3>Scheduled Scan Controls</h3>
+    <p>Scheduled Scan: <span class="status">{{ 'ENABLED' if scheduled_scan_enabled else 'DISABLED' }}</span></p>
+
+    <!-- Network Monitoring Section -->
+    <div class="card">
+        <div class="card-header">
+            <h3 style="margin:0;color:#2d5f9a;">Network Traffic Monitoring</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <p>Monitor network traffic in real-time to detect suspicious activity and potential threats.</p>
+            <p>Status: <span id="network_monitor_status" class="status-span {{ 'status-enabled' if network_monitor_running is defined and network_monitor_running else 'status-disabled' }}">{{ ('Enabled' if network_monitor_running is defined and network_monitor_running else 'Disabled') | default('Disabled') }}</span></p>
+            <div class="button-row">
+                <button type="button" id="start_network_monitor_btn" style="background:#2980b9;color:#fff;">
+                    Start Network Monitoring
+                </button>
+                <button type="button" id="stop_network_monitor_btn" style="background:#c0392b;color:#fff;">
+                    Stop Network Monitoring
+                </button>
+            </div>
+            
+            <!-- Network Traffic Statistics -->
+            <div id="traffic_stats" class="traffic-stats-container" style="margin-top:15px;background:#f8f9fa;padding:10px;border-radius:5px;">
+                <!-- Traffic statistics will be loaded here dynamically -->
+                <p>Traffic statistics will appear here when monitoring is active.</p>
+            </div>
+
+            <!-- Live Connections -->
+            <div class="live-connections" style="margin-top:15px;">
+                <h4 style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                    Live Connections
+                    <label style="font-size:0.8em;font-weight:normal;display:flex;align-items:center;gap:5px;">
+                        <input type="checkbox" id="auto_block_toggle" {% if auto_block_enabled %}checked{% endif %} />
+                        Auto-block flagged connections (uncommon-port heuristic -- weak signal, on by default)
+                    </label>
+                </h4>
+                <div id="live_connections" style="background:#f8f9fa;padding:10px;border-radius:5px;max-height:400px;overflow:auto;">
+                    <p>Connection data will appear here when monitoring is active.</p>
+                </div>
+            </div>
+            
+            <!-- Network Monitored Directories -->
+            <div class="network-monitored-directories" style="margin-top:15px;">
+                <h4>Monitored Directories</h4>
+                <div id="monitored_directories" style="background:#f8f9fa;padding:10px;border-radius:5px;">
+                    <!-- Monitored directories will be loaded here dynamically -->
+                    <p>Directory information will appear here when monitoring is active.</p>
+                </div>
+            </div>
+
+            <!-- Conditional Startup Control & Status -->
+            <div class="conditional-startup-panel" style="margin-top:15px;border-top:1px solid #eee;padding-top:10px;">
+                <h4>Conditional Startup</h4>
+                <p style="margin-top:0;color:#555;font-size:0.9em;">Runs all scans (monitored directories, processes and routine maintenance) using the network monitoring data.</p>
+                <div id="conditional_startup_status">
+                    <p>Loading conditional startup status...</p>
+                </div>
+                <div id="ml_models_status" style="margin-top:10px;"></div>
+                <div class="button-row">
+                    <button type="button" id="run_conditional_startup_panel_btn" style="background:#b36200;color:#fff;">
+                        Run Conditional Startup
+                    </button>
+                    <button type="button" id="refresh_conditional_startup_btn" style="background:#7f8c8d;color:#fff;">
+                        Refresh Status
+                    </button>
+                </div>
+                <div id="conditional_startup_panel_message"></div>
+            </div>
+
+            <div class="card" id="local-assistant-panel" style="margin-top:15px;">
+                <h3>Local Findings Assistant</h3>
+                <p class="text-muted">Ask about local detections and scan results. No external AI service is required.</p>
+                <div id="assistant_messages" style="max-height:220px;overflow:auto;background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px;"></div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                    <button type="button" class="assistant-prompt" data-ai-question="Create an incident report from the current findings">Report</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Extract all IOCs from the current findings">Extract IOCs</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Prioritize the current findings by risk">Prioritize</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="What is the administrator service status?">Service status</button>
+                    <button type="button" id="assistant_download_report">Download report</button>
+                </div>
+                <form id="assistant_form">
+                    <input id="assistant_input" type="text" maxlength="500" placeholder="Why was this file flagged?" style="width:75%;padding:8px;">
+                    <button type="submit">Ask</button>
+                </form>
+                <small id="assistant_mode" class="text-muted"></small>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Conditional startup status panel inside the network monitoring card
+        (function () {
+            const statusDiv = document.getElementById('conditional_startup_status');
+            const mlDiv = document.getElementById('ml_models_status');
+            const messageDiv = document.getElementById('conditional_startup_panel_message');
+            const runBtn = document.getElementById('run_conditional_startup_panel_btn');
+            const refreshBtn = document.getElementById('refresh_conditional_startup_btn');
+            if (!statusDiv) return;
+
+            function tile(value, label, highlight) {
+                const color = highlight && value ? '#e74c3c' : '#2d5f9a';
+                return `<div style="flex:1;min-width:110px;padding:8px;background:#fff;border-radius:4px;text-align:center;">
+                            <span style="display:block;font-size:1.4em;font-weight:bold;color:${color};">${value}</span>
+                            <span style="font-size:0.8em;color:#555;">${label}</span>
+                        </div>`;
+            }
+
+            function renderMlModels(mlModels) {
+                if (!mlDiv || !mlModels) return;
+                mlDiv.textContent = '';
+                const heading = document.createElement('p');
+                heading.textContent = 'ML Models:';
+                heading.style.fontWeight = 'bold';
+                heading.style.marginBottom = '4px';
+                mlDiv.appendChild(heading);
+                const list = document.createElement('ul');
+                list.style.listStyle = 'none';
+                list.style.padding = '0';
+                list.style.margin = '0';
+                const names = {bodmas_cnn: 'BODMAS CNN', ember: 'EMBER', sklearn: 'Scikit-Learn'};
+                Object.entries(mlModels).forEach(function (entry) {
+                    const [key, loaded] = entry;
+                    const li = document.createElement('li');
+                    li.style.marginBottom = '2px';
+                    const label = document.createElement('span');
+                    label.textContent = (names[key] || key) + ': ';
+                    const status = document.createElement('span');
+                    status.textContent = loaded ? 'loaded' : 'unavailable';
+                    status.style.color = loaded ? '#27ae60' : '#e74c3c';
+                    status.style.fontWeight = 'bold';
+                    li.appendChild(label);
+                    li.appendChild(status);
+                    list.appendChild(li);
+                });
+                mlDiv.appendChild(list);
+            }
+
+            function renderStatus(data) {
+                window.currentConditionalStartupData = data;
+                if (!data.last_run && !data.running && !data.started_at) {
+                    statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
+                    renderMlModels(data.ml_models);
+                    return;
+                }
+                const state = data.running
+                    ? '<span class="status-span" style="color:#b36200;">Running...</span>'
+                    : '<span class="status-span status-enabled">Idle</span>';
+                const duration = (data.duration === null || data.duration === undefined) ? '' : ` &middot; took <strong>${data.duration}s</strong>`;
+                // While running, show when this run started and a live elapsed
+                // timer. "Last run" only gets set once the whole scan finishes.
+                let timeInfo;
+                if (data.running) {
+                    let elapsed = '';
+                    if (data.started_at) {
+                        const startMs = new Date(data.started_at.replace(' ', 'T')).getTime();
+                        const elapsedSec = Math.floor((Date.now() - startMs) / 1000);
+                        if (elapsedSec >= 0) elapsed = ` &middot; Elapsed: <strong>${elapsedSec}s</strong>`;
+                    }
+                    timeInfo = `Started: <strong>${data.started_at || 'unknown'}</strong> &middot; Last updated: <strong>${data.last_updated || 'unknown'}</strong>${elapsed}`;
+                } else {
+                    timeInfo = `Last run: <strong>${data.last_run || 'never'}</strong>`;
+                }
+                let html = `<p>State: ${state} &middot; ${timeInfo}${duration}</p>
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                        ${tile(data.scanned_files || 0, 'Files Scanned')}
+                        ${tile(data.quarantined_files || 0, 'Quarantined', true)}
+                        ${tile(data.errors || 0, 'Errors', true)}
+                        ${tile(data.process_events || 0, 'Process Events')}
+                        ${tile(data.ml_detections || 0, 'ML Suspicious', true)}
+                        ${tile(data.ransomware_indicators || 0, 'Ransomware Indicators', true)}
+                        ${tile(data.persistence_indicators || 0, 'Persistence Indicators', true)}
+                        ${tile(data.yara_suspicious || 0, 'YARA Suspicious', true)}
+                    </div>`;
+                if (data.last_error) {
+                    html += `<div class="alert alert-danger">Last error: ${data.last_error}</div>`;
+                }
+                html += `<div style="margin-top:10px;">
+                    <button onclick="quarantineYaraMatches()" style="background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine/review ransomware &amp; persistence</button>
+                    <span id="quarantineYaraMsg" style="margin-left:10px;"></span>
+                </div>`;
+                statusDiv.innerHTML = html;
+                renderMlModels(data.ml_models);
+            }
+
+            window.quarantineYaraMatches = function () {
+                const data = window.currentConditionalStartupData || {};
+                // If no YARA suspicious matches, there is nothing to quarantine on the
+                // YARA side. Show the review list immediately instead of timing out
+                // while the server is busy with the conditional startup scan.
+                if (!data.yara_suspicious) {
+                    reviewPersistenceRansomwareFindings('<span style="color:#27ae60;">YARA quarantined 0</span>');
+                    return;
+                }
+                messageDiv.innerHTML = '<span style="color:#b36200;">Running YARA quarantine...</span>';
+                fetch('/quarantine/yara-matches', {method: 'POST', credentials: 'include', headers: {'Accept': 'application/json'}, signal: AbortSignal.timeout(120000)})
+                    .then(r => {
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        return r.json();
+                    })
+                    .then(d => {
+                        const failedInfo = d.failed && d.failed.length ? ` (failed: ${d.failed.length})` : '';
+                        const color = (d.count || !failedInfo) ? '#27ae60' : '#c0392b';
+                        let details = '';
+                        if (d.failed && d.failed.length) {
+                            const sample = d.failed.slice(0, 5).map(f => `<li>${f}</li>`).join('');
+                            const more = d.failed.length > 5 ? `<p style="color:#c0392b;font-size:0.85em;">...and ${d.failed.length - 5} more</p>` : '';
+                            details = `<ul style="color:#c0392b;font-size:0.85em;margin-top:6px;">${sample}</ul>${more}`;
+                        }
+                        const yaraHtml = `<span style="color:${color};">YARA quarantined ${d.count}${failedInfo}</span>${details}`;
+                        reviewPersistenceRansomwareFindings(yaraHtml);
+                    })
+                    .catch(e => {
+                        messageDiv.innerHTML = `<span style="color:#c0392b;">Error: ${e.message || e}</span>`;
+                    });
+            };
+
+            window.reviewPersistenceRansomwareFindings = function (prefixHtml) {
+                prefixHtml = prefixHtml ? `<div style="margin-bottom:10px;">${prefixHtml}</div>` : '';
+                const data = window.currentConditionalStartupData || {};
+                const findings = data.findings || [];
+                if (!findings.length) {
+                    messageDiv.innerHTML = prefixHtml + '<span style="color:#7f8c8d;">No persistence/ransomware findings available. Run the conditional startup scan first.</span>';
+                    return;
+                }
+                let rows = findings.map((f, i) => `
+                    <tr>
+                        <td><input type="checkbox" class="finding-cb" value="${f.path.replace(/"/g, '&quot;')}" checked></td>
+                        <td title="${f.path.replace(/"/g, '&quot;')}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${f.path}</td>
+                        <td>${f.source}</td>
+                        <td style="font-size:0.85em;">${f.reason}</td>
+                    </tr>`).join('');
+                messageDiv.innerHTML = prefixHtml + `
+                    <div style="margin-top:10px;">
+                        <h4 style="margin:0 0 8px 0;">Review persistence/ransomware file findings</h4>
+                        <p style="color:#c0392b;font-size:0.85em;margin:0 0 8px 0;">
+                            Uncheck anything you do NOT want quarantined. System files may be false positives.
+                        </p>
+                        <table style="width:100%;font-size:0.85em;border-collapse:collapse;table-layout:fixed;">
+                            <thead><tr><th style="width:30px;"></th><th style="width:45%;">Path</th><th style="width:80px;">Source</th><th>Reason</th></tr></thead>
+                            <tbody>${rows}</tbody>
+                        </table>
+                        <button onclick="quarantineSelectedFindings()" style="margin-top:8px;background:#c0392b;color:#fff;padding:8px 12px;border:none;border-radius:4px;cursor:pointer;">Quarantine selected</button>
+                    </div>`;
+            };
+
+            window.quarantineSelectedFindings = function () {
+                const selected = Array.from(document.querySelectorAll('.finding-cb:checked')).map(cb => cb.value);
+                if (!selected.length) {
+                    messageDiv.innerHTML = '<span style="color:#c0392b;">No files selected.</span>';
+                    return;
+                }
+                messageDiv.innerHTML = '<span style="color:#b36200;">Quarantining selected files...</span>';
+                fetch('/quarantine/findings', {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify({paths: selected}),
+                    signal: AbortSignal.timeout(120000)
+                })
+                .then(async r => {
+                    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                    const text = await r.text();
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        throw new Error('Response was not valid JSON');
+                    }
+                })
+                .then(d => {
+                    const failedInfo = d.failed && d.failed.length ? ` (failed: ${d.failed.length})` : '';
+                    let details = '';
+                    if (d.failed && d.failed.length) {
+                        const sample = d.failed.slice(0, 5).map(f => `<li>${f}</li>`).join('');
+                        const more = d.failed.length > 5 ? `<p style="color:#c0392b;font-size:0.85em;">...and ${d.failed.length - 5} more</p>` : '';
+                        details = `<ul style="color:#c0392b;font-size:0.85em;margin-top:6px;">${sample}</ul>${more}`;
+                    }
+                    messageDiv.innerHTML = `<span style="color:#27ae60;">Quarantined ${d.count}${failedInfo}</span>${details}`;
+                })
+                .catch(e => {
+                    messageDiv.innerHTML = `<span style="color:#c0392b;">Error: ${e.message || e}</span>`;
+                });
+            };
+
+            function refreshStatus() {
+                return fetch('/api/conditional_startup/status', {
+                    credentials: 'include',
+                    headers: {'Accept': 'application/json'},
+                    signal: AbortSignal.timeout(10000)
+                })
+                    .then(async response => {
+                        const text = await response.text();
+                        let data;
+                        try {
+                            data = JSON.parse(text);
+                        } catch (error) {
+                            throw new Error(`Status endpoint returned non-JSON response (${response.status})`);
+                        }
+                        if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+                        return data;
+                    })
+                    .then(renderStatus)
+                    .catch(error => {
+                        statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${error.message || error}</div>`;
+                    });
+            }
+
+            if (runBtn) {
+                runBtn.onclick = function () {
+                    runBtn.disabled = true;
+                    const originalText = runBtn.textContent;
+                    runBtn.textContent = 'Running...';
+                    messageDiv.innerHTML = '<p style="color:#b36200;">Running all scans, this can take a while...</p>';
+                    fetch('/run_startup', {method: 'POST', credentials: 'include'})
+                        .then(async response => {
+                            if (!response.ok) {
+                                throw new Error(`Request failed with status ${response.status}`);
+                            }
+                            const text = await response.text();
+                            try {
+                                return JSON.parse(text);
+                            } catch (e) {
+                                throw new Error('Response was not valid JSON');
+                            }
+                        })
+                        .then(data => {
+                            if (data.success || data.status === 'success') {
+                                messageDiv.innerHTML = `<div class="alert alert-info">${data.message || 'Conditional startup completed.'}</div>`;
+                            } else {
+                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || data.error || 'Unknown error'}</div>`;
+                            }
+                            return refreshStatus();
+                        })
+                        .catch(error => {
+                            messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message || error}</div>`;
+                        })
+                        .finally(() => {
+                            runBtn.disabled = false;
+                            runBtn.textContent = originalText;
+                        });
+                };
+            }
+
+            if (refreshBtn) {
+                refreshBtn.onclick = refreshStatus;
+            }
+
+            refreshStatus();
+            setInterval(refreshStatus, 5000);
+
+            const assistantForm = document.getElementById('assistant_form');
+            const assistantInput = document.getElementById('assistant_input');
+            const assistantMessages = document.getElementById('assistant_messages');
+            const assistantMode = document.getElementById('assistant_mode');
+            const reportButton = document.getElementById('assistant_download_report');
+            if (reportButton) {
+                reportButton.addEventListener('click', async () => {
+                    const response = await fetch('/api/assistant/report', {method: 'POST', credentials: 'include', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({format: 'markdown'})});
+                    if (!response.ok) throw new Error(`Report failed (${response.status})`);
+                    const blob = await response.blob();
+                    const link = document.createElement('a');
+                    link.href = URL.createObjectURL(blob);
+                    link.download = 'assistant_report.md';
+                    link.click();
+                    URL.revokeObjectURL(link.href);
+                });
+            }
+            document.querySelectorAll('.assistant-prompt').forEach(button => {
+                button.addEventListener('click', () => {
+                    assistantInput.value = button.dataset.aiQuestion || '';
+                    assistantForm?.requestSubmit();
+                });
+            });
+            if (assistantForm) {
+                assistantForm.addEventListener('submit', async function (event) {
+                    event.preventDefault();
+                    const message = assistantInput.value.trim();
+                    if (!message) return;
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                    const userLine = document.createElement('p');
+                    userLine.textContent = `You: ${message}`;
+                    assistantMessages.appendChild(userLine);
+                    assistantInput.value = '';
+                    try {
+                        const response = await fetch('/api/assistant/chat', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': csrfToken},
+                            body: JSON.stringify({message})
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+                        const answerLine = document.createElement('p');
+                        answerLine.textContent = `Assistant (${data.mode}): ${data.answer}`;
+                        assistantMessages.appendChild(answerLine);
+                        assistantMode.textContent = `Mode: ${data.mode}`;
+                        assistantMessages.scrollTop = assistantMessages.scrollHeight;
+                    } catch (error) {
+                        const errorLine = document.createElement('p');
+                        errorLine.textContent = `Assistant error: ${error.message || error}`;
+                        assistantMessages.appendChild(errorLine);
+                    }
+                });
+            }
+        })();
+    </script>
+    <div class="card">
+        <div class="card-header">
+            <h3>Advanced Security Tools</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <div class="button-row">
+                <a href="/yara_scanner.html" target="_blank">
+                    <button type="button" style="background:#27ae60;color:#fff;">
+                        Open YARA Scanner
+                    </button>
+                </a>
+                <p style="display:inline-block;margin-left:1em;">YARA-based malware detection for advanced scanning capabilities</p>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .button-row {
+            display: flex;
+            gap: 10px;
+            margin: 10px 0;
+        }
+        .status-span {
+            font-weight: bold;
+        }
+        .status-enabled {
+            color: #27ae60;
+        }
+        .status-disabled {
+            color: #c0392b;
+        }
+
+        .button-row button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .scan-btn {
+            background: #2980b9;
+            color: #fff;
+        }
+
+        .scan-btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        #network_monitor_running {
+            display: none;
+        }
+
+        #features {
+            display: none;
+        }
+    </style>
+
+    <script>
+        // Convert template values to JavaScript booleans
+        const networkMonitorRunning = {{ network_monitor_running|default(false)|tojson|safe }};
+        const folderWatcherRunning = {{ folder_watcher_status|default(false)|tojson|safe }};
+        const safeDownloaderRunning = {{ safe_downloader_status|default(false)|tojson|safe }};
+        const autoUpdatesRunning = {{ auto_updates_running|default(false)|tojson|safe }};
+        const c2DetectorLowCount = parseInt('{{ c2_detector_low_count|default(0) }}') || 0;
+        const c2DetectorHighCount = parseInt('{{ c2_detector_high_count|default(0) }}') || 0;
+        const scheduledScanEnabled = {{ scheduled_scan_enabled|default(false)|tojson|safe }};
+        const status = {{ status|default({})|tojson|safe }};
+
+        // Initialize service states
+        window.serviceStates = {
+            networkMonitorRunning: !!networkMonitorRunning,
+            folderWatcherRunning: !!folderWatcherRunning,
+            safeDownloaderRunning: !!safeDownloaderRunning,
+            autoUpdatesRunning: !!autoUpdatesRunning
+        };
+
+        // Initialize button states
+        window.addEventListener('load', () => {
+            updateAllButtons();
+        });
+
+        // Function to update button states for a specific service
+        function updateServiceButtons(service, isRunning) {
+            const startBtn = document.getElementById(`start_${service}_btn`);
+            const stopBtn = document.getElementById(`stop_${service}_btn`);
+            if (startBtn) {
+                startBtn.disabled = isRunning;
+                startBtn.style.opacity = isRunning ? '0.5' : '1';
+            }
+            if (stopBtn) {
+                stopBtn.disabled = !isRunning;
+                stopBtn.style.opacity = !isRunning ? '0.5' : '1';
+            }
+        }
+
+        // Initialize all button states
+        window.addEventListener('load', () => {
+            // Initialize service states
+            window.serviceStates = {
+                networkMonitorRunning: true,
+                folderWatcherRunning: true,
+                safeDownloaderRunning: true,
+                autoUpdatesRunning: true
+            };
+
+            // Update all buttons based on initial states
+            updateServiceButtons('network_monitor', window.serviceStates.networkMonitorRunning);
+            updateServiceButtons('folder_watcher', window.serviceStates.folderWatcherRunning);
+            updateServiceButtons('safe_downloader', window.serviceStates.safeDownloaderRunning);
+            updateServiceButtons('auto_updates', window.serviceStates.autoUpdatesRunning);
+        });
+
+        function updateAllButtons() {
+            // Update network monitor buttons
+            const startNetworkBtn = document.getElementById('start_network_monitor_btn');
+            const stopNetworkBtn = document.getElementById('stop_network_monitor_btn');
+            if (startNetworkBtn) startNetworkBtn.disabled = false;
+            if (stopNetworkBtn) stopNetworkBtn.disabled = !window.serviceStates.networkMonitorRunning;
+
+            // Update folder watcher buttons
+            const startFolderBtn = document.getElementById('start_folder_watcher_btn');
+            const stopFolderBtn = document.getElementById('stop_folder_watcher_btn');
+            if (startFolderBtn) startFolderBtn.disabled = window.serviceStates.folderWatcherRunning;
+            if (stopFolderBtn) stopFolderBtn.disabled = !window.serviceStates.folderWatcherRunning;
+
+            // Update safe downloader buttons
+            const startSafeBtn = document.getElementById('start_safe_downloader_btn');
+            const stopSafeBtn = document.getElementById('stop_safe_downloader_btn');
+            if (startSafeBtn) startSafeBtn.disabled = window.serviceStates.safeDownloaderRunning;
+            if (stopSafeBtn) stopSafeBtn.disabled = !window.serviceStates.safeDownloaderRunning;
+
+            // Update auto updates buttons
+            const startUpdatesBtn = document.getElementById('start_auto_updates_btn');
+            const stopUpdatesBtn = document.getElementById('stop_auto_updates_btn');
+            if (startUpdatesBtn) startUpdatesBtn.disabled = window.serviceStates.autoUpdatesRunning;
+            if (stopUpdatesBtn) stopUpdatesBtn.disabled = !window.serviceStates.autoUpdatesRunning;
+        }
+
+        async function toggleService(service, action, endpoint = '/toggle_' + service + '/' + action) {
+            try {
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    credentials: 'include'  // Include cookies for authentication
+                });
+                if (response.status === 401) {  // Unauthorized
+                    window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    return;
+                }
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                if (data.status !== 'success') {
+                    throw new Error('Service operation failed');
+                }
+                window.serviceStates[service + 'Running'] = data.running;
+                updateServiceButtons(service, data.running);
+                return data;
+            } catch (error) {
+                console.error(`Error ${action}ing ${service}:`, error);
+                throw error;
+            }
+        }
+
+
+
+        function startFolderWatcher() {
+            toggleService('folder_watcher', 'start');
+        }
+
+        function stopFolderWatcher() {
+            toggleService('folder_watcher', 'stop');
+        }
+
+        function startSafeDownloader() {
+            toggleService('safe_downloader', 'start');
+        }
+
+        function stopSafeDownloader() {
+            toggleService('safe_downloader', 'stop');
+        }
+
+        async function performAction(action) {
+            try {
+                if (!networkMonitorRunning) {
+                    alert('Please start network monitoring first');
+                    return;
+                }
+
+                const btn = document.getElementById(`${action}_btn`);
+                btn.disabled = true;
+                
+                const response = await fetch(`/action/${action}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert(`Successfully started ${action}`);
+                } else {
+                    alert(`Failed to start ${action}: ${data.error}`);
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert(`Error performing action`);
+            } finally {
+                const btn = document.getElementById(`${action}_btn`);
+                btn.disabled = false;
+            }
+        }
+
+        async function startTrafficMonitoring() {
+            try {
+                const response = await fetch('/toggle_network_monitor/start', {
+                    method: 'POST',
+                    credentials: 'include'  // Include cookies for authentication
+                });
+                if (response.status === 401) {  // Unauthorized
+                    window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname + window.location.search);
+                    return;
+                }
+                const data = await response.json();
+                
+                // /toggle_network_monitor/<action> returns {success: true, status: 'ENABLED'|'DISABLED', ...},
+                // not {status: 'success'} -- check the actual fields the backend sends.
+                if (data.success && (data.network_monitor_running || data.status === 'ENABLED')) {
+                    updateTrafficStats();
+                    setInterval(updateTrafficStats, 5000); // Update every 5 seconds
+                }
+            } catch (error) {
+                console.error('Error starting traffic monitoring:', error);
+            }
+        }
+
+        // Fetch JSON from a URL, treating any failure (network error, 404,
+        // non-JSON body, etc.) as "not available" for that endpoint alone,
+        // instead of letting it reject and abort every other update.
+        async function fetchJsonOrNotAvailable(url) {
+            try {
+                const response = await fetch(url, {credentials: 'include'});
+                if (!response.ok) {
+                    return { success: false, error: 'Not implemented' };
+                }
+                return await response.json();
+            } catch (error) {
+                return { success: false, error: 'Not implemented' };
+            }
+        }
+
+        async function updateTrafficStats() {
+            const monitoringEnabled = window.serviceStates?.networkMonitorRunning ?? networkMonitorRunning;
+            if (monitoringEnabled === false) return;
+
+            try {
+                const [trafficData, c2Data, directoriesData, liveConnectionsData] = await Promise.all([
+                    fetchJsonOrNotAvailable('/get_traffic_stats'),
+                    fetchJsonOrNotAvailable('/get_c2_patterns'),
+                    fetchJsonOrNotAvailable('/get_network_monitored_directories'),
+                    fetchJsonOrNotAvailable('/get_live_connections')
+                ]);
+
+                updateTrafficDisplay(trafficData, c2Data);
+                updateMonitoredDirectoriesDisplay(directoriesData);
+                updateLiveConnectionsDisplay(liveConnectionsData);
+            } catch (error) {
+                console.error('Error updating traffic stats:', error);
+            }
+        }
+
+        async function blockConnectionIp(ip) {
+            try {
+                const resp = await fetch('/block_connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip, reason: 'Manually blocked from dashboard', confirmation: 'CONFIRM' })
+                });
+                const data = await resp.json();
+                alert(data.message || (data.success ? 'Blocked' : 'Failed to block'));
+                updateTrafficStats();
+            } catch (error) {
+                alert('Error blocking connection: ' + error);
+            }
+        }
+
+        async function unblockConnectionIp(ip) {
+            try {
+                const resp = await fetch('/unblock_connection', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip, confirmation: 'CONFIRM' })
+                });
+                const data = await resp.json();
+                alert(data.message || (data.success ? 'Unblocked' : 'Failed to unblock'));
+                updateTrafficStats();
+            } catch (error) {
+                alert('Error unblocking connection: ' + error);
+            }
+        }
+
+        function updateLiveConnectionsDisplay(data) {
+            const container = document.getElementById('live_connections');
+            if (!container) return;
+
+            const toggle = document.getElementById('auto_block_toggle');
+            if (toggle && data && data.success && toggle.dataset.userTouched !== 'true') {
+                toggle.checked = !!data.auto_block_enabled;
+            }
+
+            if (!data || !data.success || !Array.isArray(data.connections)) {
+                container.innerHTML = '<p>Connection data not available.</p>';
+                return;
+            }
+
+            const established = data.connections.filter(c => c.remote_ip);
+            if (established.length === 0) {
+                container.innerHTML = '<p>No active remote connections.</p>';
+                return;
+            }
+
+            // Flagged connections first, then the rest.
+            established.sort((a, b) => (b.flagged === true) - (a.flagged === true));
+
+            let html = `<table style="width:100%;border-collapse:collapse;font-size:0.85em;">
+                <thead><tr style="text-align:left;border-bottom:1px solid #ccc;">
+                    <th style="padding:4px;">Process</th>
+                    <th style="padding:4px;">Remote Address</th>
+                    <th style="padding:4px;">Protocol</th>
+                    <th style="padding:4px;">Status</th>
+                    <th style="padding:4px;">Flag</th>
+                    <th style="padding:4px;">Action</th>
+                </tr></thead><tbody>`;
+            for (const c of established.slice(0, 200)) {
+                const rowStyle = c.flagged ? 'background:#fdecea;' : '';
+                const escapedIp = String(c.remote_ip).replace(/'/g, "\\'");
+                const actionBtn = c.blocked
+                    ? `<button type="button" onclick="unblockConnectionIp('${escapedIp}')" style="background:#7f8c8d;color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;">Unblock</button>`
+                    : `<button type="button" onclick="blockConnectionIp('${escapedIp}')" style="background:#c0392b;color:#fff;border:none;padding:3px 8px;border-radius:3px;cursor:pointer;">Block</button>`;
+                html += `<tr style="${rowStyle}border-bottom:1px solid #eee;">
+                    <td style="padding:4px;">${c.process || 'Unknown'}</td>
+                    <td style="padding:4px;">${c.remote_ip}:${c.remote_port || ''}</td>
+                    <td style="padding:4px;">${c.protocol}</td>
+                    <td style="padding:4px;">${c.status || ''}${c.blocked ? ' <strong>(BLOCKED)</strong>' : ''}</td>
+                    <td style="padding:4px;">${c.flagged ? (c.flag_reason || 'Flagged') : ''}</td>
+                    <td style="padding:4px;">${actionBtn}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const toggle = document.getElementById('auto_block_toggle');
+            if (toggle) {
+                toggle.addEventListener('change', async () => {
+                    toggle.dataset.userTouched = 'true';
+                    try {
+                        const action = toggle.checked ? 'start' : 'stop';
+                        const resp = await fetch(`/toggle_auto_block/${action}`, { method: 'POST' });
+                        const data = await resp.json();
+                        if (!data.success) {
+                            alert('Failed to update auto-block setting');
+                            toggle.checked = !toggle.checked;
+                        }
+                    } catch (error) {
+                        alert('Error updating auto-block setting: ' + error);
+                        toggle.checked = !toggle.checked;
+                    } finally {
+                        toggle.dataset.userTouched = 'false';
+                    }
+                });
+            }
+        });
+
+        function updateMonitoredDirectoriesDisplay(data) {
+            const directoriesContainer = document.getElementById('monitored_directories');
+            if (!directoriesContainer) {
+                // Create the container if it doesn't exist
+                const networkCard = document.querySelector('.card');
+                if (networkCard) {
+                    const newSection = document.createElement('div');
+                    newSection.className = 'network-monitored-directories';
+                    newSection.innerHTML = `
+                        <h4>Monitored Directories</h4>
+                        <div id="monitored_directories"></div>
+                    `;
+                    networkCard.appendChild(newSection);
+                    directoriesContainer = document.getElementById('monitored_directories');
+                } else {
+                    return;
+                }
+            }
+            
+            // Clear previous contents
+            directoriesContainer.innerHTML = '';
+            
+            // Display monitoring status
+            if (data && data.success) {
+                const status = data.monitoring_status;
+                const statusDiv = document.createElement('div');
+                statusDiv.className = 'monitoring-status';
+                // Calculate total directories and subdirectories for clearer display
+                const rootDirsCount = data.monitored_directories ? data.monitored_directories.length : 0;
+                const totalDirsCount = status.total_directories || 0;
+                const subdirCount = totalDirsCount - rootDirsCount;
+                
+                statusDiv.innerHTML = `
+                    <p><strong>Status:</strong> <span class="${status.enabled ? 'enabled' : 'disabled'}">${status.enabled ? 'ENABLED' : 'DISABLED'}</span></p>
+                    <p><strong>Last Scan:</strong> ${status.last_scan}</p>
+                    <p><strong>Total Monitored:</strong> ${totalDirsCount} directories</p>
+                    <p><strong>Root Directories:</strong> ${rootDirsCount}</p>
+                    <p><strong>Subdirectories:</strong> ${subdirCount}</p>
+                    <p><strong>Total Files Monitored:</strong> ${status.total_files_monitored || 0}</p>
+                `;
+                directoriesContainer.appendChild(statusDiv);
+                
+                // Add a section to display all monitored paths (including subdirectories)
+                if (data.monitored_directories && data.monitored_directories.length > 0) {
+                    const allPathsContainer = document.createElement('div');
+                    allPathsContainer.className = 'all-monitored-paths';
+                    const pathsTitle = document.createElement('h4');
+                    pathsTitle.textContent = 'All Monitored Paths';
+                    allPathsContainer.appendChild(pathsTitle);
+                    
+                    // Add toggle button for all paths
+                    const toggleBtn = document.createElement('button');
+                    toggleBtn.className = 'toggle-all-paths';
+                    toggleBtn.innerText = 'Show All Paths';
+                    toggleBtn.onclick = function(e) {
+                        e.preventDefault();
+                        const pathsList = this.nextElementSibling;
+                        if (pathsList.style.display === 'none' || !pathsList.style.display) {
+                            pathsList.style.display = 'block';
+                            this.innerText = 'Hide All Paths';
+                        } else {
+                            pathsList.style.display = 'none';
+                            this.innerText = 'Show All Paths';
+                        }
+                    };
+                    allPathsContainer.appendChild(toggleBtn);
+                    
+                    // Create list of all paths
+                    const pathsList = document.createElement('ul');
+                    pathsList.className = 'all-paths-list';
+                    pathsList.style.display = 'none';
+                    
+                    // Sort paths for better readability
+                    const sortedPaths = [...data.monitored_directories].sort();
+                    
+                    // Add each path
+                    sortedPaths.forEach(path => {
+                        const pathItem = document.createElement('li');
+                        pathItem.innerText = path;
+                        pathsList.appendChild(pathItem);
+                    });
+                    
+                    allPathsContainer.appendChild(pathsList);
+                    directoriesContainer.appendChild(allPathsContainer);
+                }
+                
+                // Display directory list
+                if (status.directories && status.directories.length > 0) {
+                    const list = document.createElement('ul');
+                    list.className = 'directories-list';
+                    
+                    status.directories.forEach(dir => {
+                        const li = document.createElement('li');
+                        const statusClass = dir.exists && dir.accessible ? 'directory-active' : 'directory-inactive';
+                        const statusIcon = dir.exists && dir.accessible ? '✓' : '⚠️';
+                        
+                        li.innerHTML = `<span class="${statusClass}">${statusIcon}</span> ${dir.path}`;
+                        
+                        // Create detailed information div with enhanced data
+                        if (dir.exists && dir.accessible) {
+                            const detailsDiv = document.createElement('div');
+                            detailsDiv.className = 'directory-details';
+                            detailsDiv.innerHTML = `
+                                <span class="file-count">Files: ${dir.file_count || 0}</span>
+                                ${dir.subdirectory_count !== undefined ? `<span class="subdir-count">Subdirectories: ${dir.subdirectory_count}</span>` : ''}
+                                ${dir.high_risk_files > 0 ? `<span class="high-risk-files">High-risk files: ${dir.high_risk_files}</span>` : ''}
+                            `;
+                            
+                            // Add subdirectories if available
+                            if (dir.subdirectories && dir.subdirectories.length > 0) {
+                                const subdirContainer = document.createElement('div');
+                                subdirContainer.className = 'subdirectories-container';
+                                
+                                // Add toggle button
+                                const toggleBtn = document.createElement('button');
+                                toggleBtn.className = 'toggle-subdirs';
+                                toggleBtn.innerText = 'Show Subdirectories';
+                                toggleBtn.onclick = function(e) {
+                                    e.preventDefault();
+                                    const subdirList = this.nextElementSibling;
+                                    if (subdirList.style.display === 'none' || !subdirList.style.display) {
+                                        subdirList.style.display = 'block';
+                                        this.innerText = 'Hide Subdirectories';
+                                    } else {
+                                        subdirList.style.display = 'none';
+                                        this.innerText = 'Show Subdirectories';
+                                    }
+                                };
+                                subdirContainer.appendChild(toggleBtn);
+                                
+                                // Create list of subdirectories
+                                const subdirList = document.createElement('ul');
+                                subdirList.className = 'subdirectories-list';
+                                subdirList.style.display = 'none'; // Initially hidden
+                                
+                                // Add each subdirectory
+                                dir.subdirectories.forEach(subdir => {
+                                    const subdirItem = document.createElement('li');
+                                    subdirItem.innerText = subdir;
+                                    subdirList.appendChild(subdirItem);
+                                });
+                                
+                                subdirContainer.appendChild(subdirList);
+                                detailsDiv.appendChild(subdirContainer);
+                            }
+                            li.appendChild(detailsDiv);
+                        }
+                        
+                        list.appendChild(li);
+                    });
+                    
+                    directoriesContainer.appendChild(list);
+                } else {
+                    directoriesContainer.innerHTML += '<p>No directories currently being monitored.</p>';
+                }
+            } else {
+                directoriesContainer.innerHTML = '<p>Error loading monitored directories.</p>';
+            }
+        }
+        
+        // Update function for traffic display
+        function updateTrafficDisplay(trafficData, c2Data) {
+            // Update the existing "Traffic statistics will appear here..." placeholder
+            // in the Network Traffic Monitoring card, instead of creating a separate
+            // duplicate card elsewhere on the page.
+            const trafficContent = document.getElementById('traffic_stats');
+            if (trafficContent) {
+                if (!trafficData || trafficData.error || trafficData.success === false) {
+                    const message = (trafficData && trafficData.error) || 'Not available';
+                    trafficContent.innerHTML = `<div class="alert alert-warning">Traffic statistics unavailable: ${message}</div>`;
+                    return;
+                }
+
+                // Format bytes to KB/MB/GB
+                const formatBytes = (bytes) => {
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
+                    if (bytes < 1073741824) return (bytes / 1048576).toFixed(2) + ' MB';
+                    return (bytes / 1073741824).toFixed(2) + ' GB';
+                };
+
+                // Build HTML content
+                let html = `
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h4>Connection Summary</h4>
+                            <ul class="list-group">
+                                <li class="list-group-item">Total Connections: <strong>${trafficData.total_connections}</strong></li>
+                                <li class="list-group-item">Active IPs: <strong>${trafficData.active_ips ? trafficData.active_ips.length : 0}</strong></li>
+                                <li class="list-group-item">Inbound Traffic: <strong>${formatBytes(trafficData.inbound)}</strong></li>
+                                <li class="list-group-item">Outbound Traffic: <strong>${formatBytes(trafficData.outbound)}</strong></li>
+                            </ul>
+                        </div>
+                        <div class="col-md-6">
+                            <h4>Protocol Distribution</h4>
+                            <ul class="list-group">
+                `;
+
+                // Add protocol information
+                for (const [protocol, count] of Object.entries(trafficData.protocols || {})) {
+                    html += `<li class="list-group-item">${protocol}: <strong>${count}</strong></li>`;
+                }
+
+                html += `
+                            </ul>
+                        </div>
+                    </div>
+                    <h4 class="mt-3">Active Processes</h4>
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Process</th>
+                                <th>Connections</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                // Add process information
+                for (const [process, stats] of Object.entries(trafficData.processes || {})) {
+                    html += `
+                        <tr>
+                            <td>${process}</td>
+                            <td>${stats.connections}</td>
+                        </tr>
+                    `;
+                }
+
+                html += `
+                        </tbody>
+                    </table>
+                `;
+
+                // Add C2 detection section if data exists
+                if (c2Data && c2Data.suspicious_connections && c2Data.suspicious_connections.length > 0) {
+                    html += `
+                        <h4 class="mt-3">Suspicious Network Activity</h4>
+                        <div class="alert alert-danger">
+                            <strong>Warning:</strong> Potentially suspicious connections detected.
+                        </div>
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>Process</th>
+                                    <th>Remote Address</th>
+                                    <th>Reason</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+
+                    for (const conn of c2Data.suspicious_connections) {
+                        html += `
+                            <tr class="malicious-request">
+                                <td>${conn.process}</td>
+                                <td>${conn.remote_ip}:${conn.remote_port}</td>
+                                <td>${conn.reason}</td>
+                            </tr>
+                        `;
+                    }
+
+                    html += `
+                            </tbody>
+                        </table>
+                    `;
+                }
+
+                trafficContent.innerHTML = html;
+            }
+        }
+
+        // Function to fetch monitored network directories
+        function fetchMonitoredNetworkDirectories() {
+            fetch('/get_network_monitored_directories')
+                .then(async response => {
+                    if (!response.ok) {
+                        throw new Error(`Request failed with status ${response.status}`);
+                    }
+                    const text = await response.text();
+                    try {
+                        return JSON.parse(text);
+                    } catch (e) {
+                        throw new Error('Response was not valid JSON');
+                    }
+                })
+                .then(data => {
+                    updateMonitoredDirectoriesDisplay(data);
+                })
+                .catch(error => {
+                    console.error('Error fetching monitored network directories:', error);
+                });
+        }
+
+        // Initialize button states and start monitoring if enabled
+        window.addEventListener('load', () => {
+            updateAllButtons();
+            
+            // Start the stats poll independently of the toggle response. The
+            // backend exposes live psutil data even when the service toggle is
+            // already enabled from startup.
+            startTrafficMonitoring();
+            updateTrafficStats();
+            if (!window.trafficStatsInterval) {
+                window.trafficStatsInterval = setInterval(updateTrafficStats, 3000);
+            }
+            fetchMonitoredNetworkDirectories();
+        });
+
+        // Add CSS for network monitor directory display
+        document.head.insertAdjacentHTML('beforeend', `
+            <style>
+                .network-monitored-directories {
+                    margin-top: 20px;
+                    padding: 10px;
+                    border-top: 1px solid #eee;
+                }
+                .directories-list {
+                    list-style-type: none;
+                    padding-left: 0;
+                    margin-top: 10px;
+                }
+                .directories-list li {
+                    padding: 5px 0;
+                    border-bottom: 1px solid #f5f5f5;
+                }
+                .directory-active {
+                    color: #27ae60;
+                    margin-right: 5px;
+                }
+                .directory-inactive {
+                    color: #e74c3c;
+                    margin-right: 5px;
+                }
+                .file-count {
+                    color: #7f8c8d;
+                    font-size: 0.9em;
+                }
+                .monitoring-status {
+                    background-color: #f8f9fa;
+                    padding: 10px;
+                    border-radius: 5px;
+                    margin-bottom: 10px;
+                }
+                .enabled {
+                    color: #27ae60;
+                    font-weight: bold;
+                }
+                .disabled {
+                    color: #e74c3c;
+                    font-weight: bold;
+                }
+            </style>
+        `);
+        
+    </script>
+
+        {% if c2_detector_low_count > 0 %}
+        <li><strong style="color:#6c757d;">Low ({{ c2_detector_low_count }}):</strong> Minor anomalies detected</li>
+        {% endif %}
+        </ul>
+        <a href="/c2_detector_report" style="display:inline-block;background:#6c757d;color:#fff;padding:0.3em 0.8em;border-radius:4px;text-decoration:none;font-size:0.9em;">View Details</a>
+    </div>
+</div>
+    </div>
+        <div class="card-header">
+            <h3>Automatic Signature Updates</h3>
+        </div>
+        <div class="card-body">
+            <p>Keep your antivirus signature database up-to-date automatically</p>
+            <div class="toggle-container">
+                <label class="toggle-switch">
+                    <input type="checkbox" id="auto_updates_toggle" checked>
+                    <span class="slider round"></span>
+                </label>
+                <span id="auto_updates_status">Enabled</span>
+            </div>
+            <p class="last-update">Last update: <span id="last_update_time">Today</span></p>
+        </div>
+    </div>
+
+    <style>
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+        }
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 60px;
+            height: 34px;
+            margin-right: 10px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 26px;
+            width: 26px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+        }
+        input:checked + .slider {
+            background-color: #27ae60;
+        }
+        input:focus + .slider {
+            box-shadow: 0 0 1px #27ae60;
+        }
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        .slider.round {
+            border-radius: 34px;
+        }
+        .slider.round:before {
+            border-radius: 50%;
+        }
+        #auto_updates_status {
+            font-weight: bold;
+        }
+        .last-update {
+            font-size: 0.9em;
+            color: #666;
+            margin-top: 10px;
+        }
+    </style>
+
+    <script>
+    // Auto Updates Toggle Functionality
+    document.getElementById('auto_updates_toggle').addEventListener('change', function() {
+        const action = this.checked ? 'start' : 'stop';
+        const statusText = document.getElementById('auto_updates_status');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+        
+        fetch('/toggle_auto_updates/' + action, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-Token': csrfToken
+            }
+        })
+        .then(async response => {
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (error) {
+                throw new Error(`Server returned non-JSON response (${response.status})`);
+            }
+            if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+            return data;
+        })
+        .then(data => {
+            if (data.success) {
+                statusText.textContent = data.status;
+                document.getElementById('last_update_time').textContent = data.last_update;
+            } else {
+                alert('Error: ' + data.message);
+                this.checked = !this.checked; // Revert toggle if there was an error
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Network error while toggling automatic updates');
+            this.checked = !this.checked; // Revert toggle if there was an error
+        });
+    });
+
+    const startNetworkMonitorBtn = document.getElementById('start_network_monitor_btn');
+    if (startNetworkMonitorBtn) {
+        startNetworkMonitorBtn.onclick = function() {
+        fetch('/toggle_network_monitor/start', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success' || data.status === 'ENABLED') { 
+                    alert(data.message || 'Network Monitor started.'); 
+                    // Update the network monitor status in the UI
+                    if (document.getElementById('network_monitor_status')) {
+                        document.getElementById('network_monitor_status').textContent = 'Enabled';
+                        document.getElementById('network_monitor_status').style.color = '#27ae60';
+                    }
+                    // Start updating traffic stats
+                    window.serviceStates.networkMonitorRunning = true;
+                    updateTrafficStats();
+                    // Show monitored network directories
+                    fetchMonitoredNetworkDirectories();
+                } else { 
+                    alert('Error: ' + (data.message || data.error || 'Unknown error')); 
+                }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    
+    // Safely add stop network monitor button handler
+    const stopNetworkMonitorBtn = document.getElementById('stop_network_monitor_btn');
+    if (stopNetworkMonitorBtn) {
+        stopNetworkMonitorBtn.onclick = function() {
+        fetch('/toggle_network_monitor/stop', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success' || data.status === 'DISABLED') { 
+                    alert(data.message || 'Network Monitor stopped.'); 
+                    // Update the network monitor status in the UI
+                    if (document.getElementById('network_monitor_status')) {
+                        document.getElementById('network_monitor_status').textContent = 'Disabled';
+                        document.getElementById('network_monitor_status').style.color = '#c0392b';
+                    }
+                    window.serviceStates.networkMonitorRunning = false;
+                } else { 
+                    alert('Error: ' + (data.message || data.error || 'Unknown error')); 
+                }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    
+    // Safely handle folder watcher button clicks
+    const startFolderWatcherBtn = document.getElementById('start_folder_watcher_btn');
+    if (startFolderWatcherBtn) {
+        startFolderWatcherBtn.onclick = function() {
+            fetch('/toggle_folder_watcher/start', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success') { alert(data.message || 'Folder Watcher started.'); location.reload(); }
+                else { alert('Error: ' + (data.message || data.error || 'Unknown error')); }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    
+    // Safely handle stop folder watcher button
+    const stopFolderWatcherBtn = document.getElementById('stop_folder_watcher_btn');
+    if (stopFolderWatcherBtn) {
+        stopFolderWatcherBtn.onclick = function() {
+            fetch('/toggle_folder_watcher/stop', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success') { alert(data.message || 'Folder Watcher stopped.'); location.reload(); }
+                else { alert('Error: ' + (data.message || data.error || 'Unknown error')); }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    
+    // Safely handle safe downloader button
+    const startSafeDownloaderBtn = document.getElementById('start_safe_downloader_btn');
+    if (startSafeDownloaderBtn) {
+        startSafeDownloaderBtn.onclick = function() {
+            fetch('/toggle_safe_downloader/start', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success') { alert(data.message || 'Safe Downloader started.'); location.reload(); }
+                else { alert('Error: ' + (data.message || data.error || 'Unknown error')); }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    
+    // Safely handle stop safe downloader button
+    const stopSafeDownloaderBtn = document.getElementById('stop_safe_downloader_btn');
+    if (stopSafeDownloaderBtn) {
+        stopSafeDownloaderBtn.onclick = function() {
+            fetch('/toggle_safe_downloader/stop', {method: 'POST'})
+            .then(async response => {
+                let text = await response.text();
+                let data;
+                try { data = JSON.parse(text); } catch (e) { alert('Unexpected server response: ' + text); return; }
+                if (data.status === 'success') { alert(data.message || 'Safe Downloader stopped.'); location.reload(); }
+                else { alert('Error: ' + (data.message || data.error || 'Unknown error')); }
+            })
+            .catch(error => alert('Error: ' + error));
+        };
+    }
+    </script>
+    
+    <div id="features" style="display: none;">
+        <div class="button-row">
+            <button type="button" id="folder_watcher_btn"
+                style="background:#2980b9;color:#fff;"
+                onclick="toggleService('folder_watcher', 'start')">
+                Start Folder Watcher
+            </button>
+            <button type="button" id="safe_downloader_btn"
+                style="background:#8e44ad;color:#fff;"
+                onclick="toggleService('safe_downloader', 'start')">
+                Start Safe Downloader
+            </button>
+        </div>
+    </div>
+
+    <nav style="margin:1em 0;">
+        <details style="display:inline-block;vertical-align:top;margin-right:0.5em;">
+            <summary style="cursor:pointer;padding:0.5em 1em;background:#2c3e50;color:#fff;border-radius:5px;">Tools</summary>
+            <div style="background:#fff;border:1px solid #ccc;border-radius:5px;position:absolute;z-index:1000;min-width:180px;">
+                <a href="/safe_download" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Safe Download</a>
+                <a href="/graph" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Threat Graph</a>
+                <a href="/patches" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Patch Status</a>
+                <a href="/hash-lookup" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Hash Lookup</a>
+                <a href="/kill-switch" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Kill Switch</a>
+                <a href="/custom-scan" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Custom Scan</a>
+                <a href="/scan-report" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Report</a>
+            </div>
+        </details>
+
+        <details style="display:inline-block;vertical-align:top;margin-right:0.5em;">
+            <summary style="cursor:pointer;padding:0.5em 1em;background:#2980b9;color:#fff;border-radius:5px;">Monitoring</summary>
+            <div style="background:#fff;border:1px solid #ccc;border-radius:5px;position:absolute;z-index:1000;min-width:180px;">
+                <a href="/events" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Event Logs</a>
+                <a href="/scripts" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">PowerShell</a>
+                <a href="/processes" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Processes</a>
+                <a href="/services" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Services</a>
+                <a href="/network" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Network</a>
+                <a href="/canary" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Canary</a>
+            </div>
+        </details>
+
+        <details style="display:inline-block;vertical-align:top;margin-right:0.5em;">
+            <summary style="cursor:pointer;padding:0.5em 1em;background:#8e44ad;color:#fff;border-radius:5px;">Persistence</summary>
+            <div style="background:#fff;border:1px solid #ccc;border-radius:5px;position:absolute;z-index:1000;min-width:180px;">
+                <a href="/startup" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Startup & Tasks</a>
+                <a href="/startup-with-windows" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Startup with Windows</a>
+            </div>
+        </details>
+
+        <details style="display:inline-block;vertical-align:top;margin-right:0.5em;">
+            <summary style="cursor:pointer;padding:0.5em 1em;background:#16a085;color:#fff;border-radius:5px;">Quarantine</summary>
+            <div style="background:#fff;border:1px solid #ccc;border-radius:5px;position:absolute;z-index:1000;min-width:180px;">
+                <a href="/quarantine" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Manage Quarantine</a>
+                <a href="/quarantine/list" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">List Quarantine</a>
+                <a href="/quarantine-manage" style="display:block;padding:0.5em 1em;text-decoration:none;color:#2c3e50;border-bottom:1px solid #eee;">Manage Quarantine</a>
+            </div>
+        </details>
+
+        <a href="/settings" style="display:inline-block;padding:0.5em 1em;background:#7f8c8d;color:#fff;border-radius:5px;text-decoration:none;">Settings</a>
+        <a href="/logs" style="display:inline-block;padding:0.5em 1em;background:#7f8c8d;color:#fff;border-radius:5px;text-decoration:none;margin-left:0.5em;">Logs</a>
+        <a href="/break-the-cycle" style="display:inline-block;padding:0.5em 1em;background:#c0392b;color:#fff;border-radius:5px;text-decoration:none;margin-left:0.5em;font-weight:bold;">BREAK THE CYCLE</a>
+    </nav>
+    </div>
+
+    <div style="margin:1em 0; padding:1em; background:#eaf2f8; border-radius:6px;">
+        <b>Continuous Scan:</b>
+        <form method="POST" action="/toggle_scan_all/start" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <button type="submit" class="btn btn-sm btn-success">Start</button>
+        </form>
+        <form method="POST" action="/toggle_scan_all/stop" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+            <button type="submit" class="btn btn-sm btn-danger">Stop</button>
+        </form>
+        <a href="/scan_all/latest" class="btn btn-sm btn-info" style="text-decoration:none;">Latest Result</a>
+    </div>
+
+    {% if yara_scan_results %}
+    <div style="background:#fff3cd;color:#8e44ad;padding:1em;margin:1em 0;border-radius:6px;white-space:pre-wrap;">
+        <b>YARA Scan Results:</b><br>{{ yara_scan_results }}
+    </div>
+    {% endif %}
+
+    {% if scan_results %}
+    <div style="background:#eafaf1;color:#006644;padding:1em;margin:1em 0;border-radius:6px;white-space:pre-wrap;">
+        <b>Scan Results:</b><br>{{ scan_results }}
+    </div>
+    {% endif %}
+
+    {% if process_scan_results %}
+    <div style="background:#f6eaf1;color:#8e44ad;padding:1em;margin:1em 0;border-radius:6px;white-space:pre-wrap;">
+        <b>Process Scan Results:</b><br>{{ process_scan_results }}
+    </div>
+    {% endif %}
+
+    <div class="card">
+        <div class="card-header">
+            <h3>File Encryption / Decryption</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <p style="margin-top:0;color:#555;font-size:0.9em;">Encrypt or decrypt a file using Fernet.</p>
+            <iframe src="/file_crypto" width="100%" height="500" style="border:1px solid #ddd;border-radius:4px;"></iframe>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for service states
+        window.serviceStates = {
+            networkMonitorRunning: {{ network_monitor_running|default(false)|tojson|safe }},
+            folderWatcherRunning: {{ folder_watcher_status|default(false)|tojson|safe }},
+            safeDownloaderRunning: {{ safe_downloader_status|default(false)|tojson|safe }},
+            autoUpdatesRunning: {{ auto_updates_running|default(false)|tojson|safe }}
+        };
+
+        // Function to update button states
+        function updateButtonStates(service, isRunning) {
+            const startBtn = document.getElementById(`start_${service}_btn`);
+            const stopBtn = document.getElementById(`stop_${service}_btn`);
+            if (service === 'network_monitor') {
+                if (startBtn) startBtn.disabled = false;
+            } else {
+                if (startBtn) startBtn.disabled = isRunning;
+            }
+            if (stopBtn) stopBtn.disabled = !isRunning;
+        }
+
+        // Function to update all button states
+        function updateAllButtons() {
+            updateButtonStates('network_monitor', window.serviceStates.networkMonitorRunning);
+            updateButtonStates('folder_watcher', window.serviceStates.folderWatcherRunning);
+            updateButtonStates('safe_downloader', window.serviceStates.safeDownloaderRunning);
+            updateButtonStates('auto_updates', window.serviceStates.autoUpdatesRunning);
+        }
+
+        // Function to toggle any service
+        async function toggleService(service, action) {
+            try {
+                const endpoint = `/toggle_${service}/${action}`;
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Basic ' + btoa('admin:admin123')
+                    }
+                });
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                window.serviceStates.networkMonitorRunning = data.network_monitor_running;
+                window.serviceStates.folderWatcherRunning = data.folder_watcher_status;
+                window.serviceStates.safeDownloaderRunning = data.safe_downloader_status;
+                window.serviceStates.autoUpdatesRunning = data.auto_updates_running;
+                updateAllButtons();
+                
+                return data;
+            } catch (error) {
+                console.error('Error toggling service:', error);
+                throw error;
+            }
+        }
+
+        // Service toggle functions
+
+
+        function startFolderWatcher() {
+            toggleService('folder_watcher', 'start');
+        }
+
+        function stopFolderWatcher() {
+            toggleService('folder_watcher', 'stop');
+        }
+
+        function startSafeDownloader() {
+            toggleService('safe_downloader', 'start');
+        }
+
+        function stopSafeDownloader() {
+            toggleService('safe_downloader', 'stop');
+        }
+
+        // View functions
+        async function viewQuarantine() {
+            try {
+                const response = await fetch('/quarantine');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const contentType = response.headers.get('Content-Type') || '';
+                if (!contentType.includes('application/json')) {
+                    // /quarantine is an HTML page route, not a JSON API --
+                    // redirect there instead of trying to parse HTML as JSON.
+                    window.open('/quarantine', '_blank');
+                    return;
+                }
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    const filesDiv = document.getElementById('quarantineFiles');
+                    if (data.files.length === 0) {
+                        filesDiv.innerHTML = '<p>No files in quarantine.</p>';
+                    } else {
+                        filesDiv.innerHTML = data.files.map(file => `
+                            <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid #e74c3c;">
+                                <span style="color: #e74c3c;"><strong>${file.filename}</strong></span>
+                                <span style="margin-left: 1em;">${file.details}</span>
+                                <span style="margin-left: 1em;">${new Date(file.timestamp).toLocaleString()}</span>
+                            </div>
+                        `).join('');
+                    }
+                    document.getElementById('quarantineList').style.display = 'block';
+                } else {
+                    console.error('Error:', data.error);
+                }
+            } catch (error) {
+                console.error('Error viewing quarantine:', error);
+            }
+        }
+
+        async function viewAntivirusLog() {
+            try {
+                const response = await fetch('/antivirus_log');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const entriesDiv = document.getElementById('logEntries');
+                    if (data.log_entries.length === 0) {
+                        entriesDiv.innerHTML = '<p>No log entries found.</p>';
+                    } else {
+                        entriesDiv.innerHTML = data.log_entries.map(entry => `
+                            <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid ${
+                                entry.level === 'ERROR' ? '#e74c3c' : 
+                                entry.level === 'WARNING' ? '#f1c40f' : 
+                                '#27ae60'
+                            };">
+                                <span style="color: ${
+                                    entry.level === 'ERROR' ? '#e74c3c' : 
+                                    entry.level === 'WARNING' ? '#f1c40f' : 
+                                    '#27ae60'
+                                };"><strong>${entry.timestamp}</strong></span>
+                                <span style="margin-left: 1em; color: ${
+                                    entry.level === 'ERROR' ? '#e74c3c' : 
+                                    entry.level === 'WARNING' ? '#f1c40f' : 
+                                    '#27ae60'
+                                };">[${entry.level}]</span>
+                                <span style="margin-left: 1em;">${entry.message}</span>
+                            </div>
+                        `).join('');
+                    }
+                    document.getElementById('antivirusLog').style.display = 'block';
+                } else {
+                    console.error('Error:', data.error);
+                }
+            } catch (error) {
+                console.error('Error viewing antivirus log:', error);
+            }
+        }
+
+        async function viewSafeDownloaderDetails() {
+            try {
+                const response = await fetch('/safe_downloader_details');
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const statusDiv = document.getElementById('downloaderStatus');
+                    const downloadsDiv = document.getElementById('blockedDownloads');
+                    
+                    statusDiv.innerHTML = `
+                        <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid #3498db;">
+                            <span style="color: #3498db;"><strong>Status:</strong></span>
+                            <span style="margin-left: 1em;">${data.status}</span>
+                            <span style="margin-left: 1em;">Last scan: ${new Date(data.last_scan_time).toLocaleString()}</span>
+                        </div>
+                    `;
+                    
+                    if (data.blocked_downloads.length === 0) {
+                        downloadsDiv.innerHTML = '<p>No blocked downloads.</p>';
+                    } else {
+                        downloadsDiv.innerHTML = data.blocked_downloads.map(download => `
+                            <div style="margin: 0.5em 0; padding: 0.5em; border-left: 3px solid #e74c3c;">
+                                <span style="color: #e74c3c;"><strong>${download.url}</strong></span>
+                                <span style="margin-left: 1em;">${download.reason}</span>
+                                <span style="margin-left: 1em;">${new Date(download.timestamp).toLocaleString()}</span>
+                            </div>
+                        `).join('');
+                    }
+                    document.getElementById('safeDownloaderDetails').style.display = 'block';
+                } else {
+                    console.error('Error:', data.error);
+                }
+            } catch (error) {
+                console.error('Error viewing safe downloader details:', error);
+            }
+        }
+
+        // Initialize all button states
+        window.addEventListener('load', () => {
+            updateAllButtons();
+            
+            if (window.serviceStates.networkMonitorRunning) {
+                toggleService('network_monitor', 'start');
+            }
+        });
+
+        // --- Live Scan Log ---
+        // Polls /api/scan_log and displays file paths being scanned at the
+        // bottom of the page in real time.
+        (function () {
+            const logContainer = document.createElement('div');
+            logContainer.id = 'live_scan_log';
+            logContainer.style.cssText = 'position:fixed;bottom:0;left:0;right:0;max-height:220px;overflow-y:auto;background:#1a1a2e;color:#00ff41;font-family:Consolas,monospace;font-size:12px;padding:8px 12px;border-top:2px solid #0f3460;z-index:9999;display:none;';
+            logContainer.innerHTML = '<div style="color:#e94560;font-weight:bold;margin-bottom:4px;">Live Scan Log</div><div id="scan_log_entries"></div>';
+            document.body.appendChild(logContainer);
+
+            let lastEntryCount = 0;
+            function pollScanLog() {
+                fetch('/api/scan_log', { credentials: 'include' })
+                    .then(async r => {
+                        if (!r.ok) return null;
+                        const text = await r.text();
+                        try { return JSON.parse(text); } catch (e) { return null; }
+                    })
+                    .then(data => {
+                        if (!data) return;
+                        const entries = data.entries || [];
+                        if (data.running && entries.length > 0) {
+                            logContainer.style.display = 'block';
+                            const entriesDiv = document.getElementById('scan_log_entries');
+                            // Only append new entries since last poll.
+                            const newEntries = entries.slice(lastEntryCount);
+                            for (const entry of newEntries) {
+                                const line = document.createElement('div');
+                                line.style.cssText = 'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+                                line.textContent = `[${entry.timestamp}] ${entry.status}: ${entry.path}`;
+                                entriesDiv.appendChild(line);
+                            }
+                            lastEntryCount = entries.length;
+                            // Auto-scroll to bottom.
+                            logContainer.scrollTop = logContainer.scrollHeight;
+                            // Cap DOM nodes to prevent memory bloat.
+                            while (entriesDiv.children.length > 500) {
+                                entriesDiv.removeChild(entriesDiv.firstChild);
+                            }
+                        } else if (!data.running) {
+                            // Keep showing the log but stop polling new entries.
+                            if (entries.length === 0) {
+                                logContainer.style.display = 'none';
+                            }
+                        }
+                    })
+                    .catch(() => {});
+            }
+            setInterval(pollScanLog, 3000);
+            pollScanLog();
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,32 @@
+=== Antivirus Launcher Build Log ===
+DOTNET=C:\Users\bpier\AppData\Local\Microsoft\dotnet\dotnet.exe
+PYTHON=C:\Users\bpier\AppData\Local\Programs\Python\Python311\python.exe
+DIST=C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist
+
+8.0.424
+Python 3.11.0
+
+=== Embedding resources ===
+Resources embedded with heavy obfuscation.
+embed exit code: 0
+
+=== Cleaning dist ===
+C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist\Antivirus Server Login.exe - Access is denied.
+A subdirectory or file C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist already exists.
+
+=== Publishing launcher ===
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  AntivirusServerLogin -> C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\native\AntivirusServerLogin\bin\Release\net8.0-windows\win-x64\AntivirusServerLogin.dll
+  AntivirusServerLogin -> C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist\
+publish exit code: 0
+
+=== Files in dist ===
+Antivirus Server Login.exe
+AntivirusServerLogin.exe
+
+The process cannot access the file because it is being used by another process.
+        0 file(s) copied.
+Copied to: C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist\Antivirus Server Login.exe
+
+=== Done ===

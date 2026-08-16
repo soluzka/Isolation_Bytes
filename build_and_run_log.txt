@@ -1,0 +1,18 @@
+=== Build and run ===
+
+Building launcher...
+Resources embedded with heavy obfuscation.
+  Determining projects to restore...
+  All projects are up-to-date for restore.
+  AntivirusServerLogin -> C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\native\AntivirusServerLogin\bin\Release\net8.0-windows\win-x64\AntivirusServerLogin.dll
+  AntivirusServerLogin -> C:\Users\bpier\AppData\Local\Temp\antivirus_build_29418\
+publish exit code: 0
+
+Files in build temp:
+AntivirusServerLogin.exe
+
+        1 file(s) copied.
+copied to C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\dist\Antivirus Server Login.exe
+
+Starting cloud server...
+done.
