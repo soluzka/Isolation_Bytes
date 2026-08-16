@@ -539,7 +539,7 @@ Then set it in `.env`:
 ADMIN_PASSWORD_HASH=$2b$12$...
 ```
 
-For the pre-packaged build, the default login is `admin` / `soluzka` unless you replace the hash before building.
+For the pre-packaged build, the default login is `admin` unless you replace the hash before building.
 
 ## License
 
