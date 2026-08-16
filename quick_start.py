@@ -28,9 +28,13 @@ def _upsert_local_env_value(path, name, value):
             updated.append(line)
     if not replaced:
         updated.append(replacement)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, 'w', encoding='utf-8') as env_file:
-        env_file.write('\\n'.join(updated) + '\\n')
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w', encoding='utf-8') as env_file:
+            env_file.write('\\n'.join(updated) + '\\n')
+        return True
+    except (OSError, IOError, PermissionError):
+        return False
 
 
 def _load_environment_before_imports():
@@ -70,16 +74,26 @@ def _load_environment_before_imports():
             _upsert_local_env_value(path, 'SECRET_KEY', os.environ['SECRET_KEY'])
         return path
 
-    # First run: create per-install secrets in a writable local .env.
-    target = candidates[0]
-    os.makedirs(os.path.dirname(target), exist_ok=True)
-    if len(os.environ.get('FERNET_KEY', '')) != 44:
+    # First run: create per-install secrets in the first writable .env.
+    generated_fernet = len(os.environ.get('FERNET_KEY', '')) != 44
+    generated_secret = not os.environ.get('SECRET_KEY')
+    if generated_fernet:
         os.environ['FERNET_KEY'] = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
-        _upsert_local_env_value(target, 'FERNET_KEY', os.environ['FERNET_KEY'])
-    if not os.environ.get('SECRET_KEY'):
+    if generated_secret:
         os.environ['SECRET_KEY'] = secrets.token_urlsafe(32)
-        _upsert_local_env_value(target, 'SECRET_KEY', os.environ['SECRET_KEY'])
-    return target
+
+    for target in candidates:
+        writable = True
+        if generated_fernet:
+            writable = _upsert_local_env_value(target, 'FERNET_KEY', os.environ['FERNET_KEY']) and writable
+        if generated_secret:
+            writable = _upsert_local_env_value(target, 'SECRET_KEY', os.environ['SECRET_KEY']) and writable
+        if writable:
+            return target
+
+    # The package directory may be read-only. The process can still continue
+    # with in-memory keys, but report the condition rather than crashing.
+    return None
 
 
 _load_environment_before_imports()
