@@ -137,9 +137,29 @@ python build_config.py
 By default, `build_config.py` also runs the generated `Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. To build without installing, use:
 
 To include the large local GGUF assistant model in the installer for testing, use:
+```powershell
+$cert = New-SelfSignedCertificate `
+  -Type CodeSigningCert `
+  -Subject "CN=soluzka" `
+  -CertStoreLocation "Cert:\CurrentUser\My"
+ 
+$password = ConvertTo-SecureString "password" -AsPlainText -Force
+ 
+Export-PfxCertificate `
+  -Cert $cert `
+  -FilePath "$env:USERPROFILE\soluzka-build.pfx" `
+  -Password $password
+ 
+Export-Certificate `
+  -Cert $cert `
+  -FilePath "$env:USERPROFILE\soluzka-build.cer"
+```
 
 ```powershell
-python build_config.py --skip-install --include-local-model --store-cert "C:\SecureBuildKeys\soluzka.pfx"
+python build_config.py `
+  --store-cert "$env:USERPROFILE\soluzka-build.pfx" `
+  --skip-install `
+  --include-local-model
 ```
 
 Replace the certificate path with the actual secure location of your `.pfx` file. Never commit the `.pfx` or its password.
