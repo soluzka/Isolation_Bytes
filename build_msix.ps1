@@ -18,6 +18,7 @@ param(
     [SecureString]$StoreCertPassword,
     [Parameter(Mandatory=$false)]
     [string]$StorePublisher = 'CN=soluzka',
+    [string]$StoreVersion,
     [Parameter(ValueFromRemainingArguments=$true, Position=0)]
     [string[]]$RemainingArguments
 )
@@ -296,8 +297,14 @@ if (-not $SkipStore) {
     if ($LASTEXITCODE -ne 0) { throw "signtool failed for Store package" }
 
     Write-Host 'Verifying Store MSIX signature...'
-    & $SignTool verify /pa $StoreMsixBuild
-    if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for Store package" }
+    if ($NoCertManagement) {
+        Write-Host 'Skipping trust-chain verification because -NoCertManagement was specified.'
+        Write-Host 'The package was signed; install soluzka.cer before local installation.'
+    } else {
+        Write-Host 'Verifying Store MSIX signature against the trusted certificate...'
+        & $SignTool verify /pa $StoreMsixBuild
+        if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for Store package" }
+    }
     Copy-Item -Path $StoreMsixBuild -Destination $StoreMsix -Force
 }
 
