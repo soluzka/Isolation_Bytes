@@ -485,6 +485,88 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV', '').lower() == 'production'
 app.config['PERMANENT_SESSION_LIFETIME'] = 3600
 
+
+def _running_as_administrator():
+    """Return whether the current process has an elevated Windows token."""
+    if sys.platform != 'win32':
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        return False
+
+
+RUNNING_AS_ADMIN = _running_as_administrator()
+if not RUNNING_AS_ADMIN:
+    logger.warning(
+        'Running without Administrator privileges. Use the standalone '
+        'Administrator shortcut for network, quarantine, and protected scans.'
+    )
+
+
+@app.context_processor
+def privilege_context():
+    """Expose the current elevation state to dashboard templates."""
+    return {
+        'running_as_admin': RUNNING_AS_ADMIN,
+        'admin_helper_message': (
+            'Some network, quarantine, and protected-scan features require '
+            'Administrator privileges. Close this window and use the '
+            'Administrator shortcut.'
+        ),
+    }
+
+
+@app.route('/api/privilege-status', methods=['GET'])
+def privilege_status_api():
+    """Report whether the current app process is elevated."""
+    return jsonify({
+        'running_as_admin': RUNNING_AS_ADMIN,
+        'message': None if RUNNING_AS_ADMIN else (
+            'This MSIX session is running normally. Use the external '
+            'Administrator shortcut for privileged operations.'
+        ),
+    })
+
+
+_PRIVILEGED_PATH_PREFIXES = (
+    '/toggle_network_monitor',
+    '/start_realtime',
+    '/stop_realtime',
+    '/api/scan_processes',
+    '/api/scan-file',
+    '/api/scan_download',
+)
+
+
+@app.before_request
+def explain_privileged_msix_operation():
+    """Give MSIX users a clear response for known privileged operations."""
+    if RUNNING_AS_ADMIN or request.method in {'GET', 'HEAD', 'OPTIONS'}:
+        return None
+    if request.path.startswith(_PRIVILEGED_PATH_PREFIXES):
+        return jsonify({
+            'status': 'admin_required',
+            'error': (
+                'This feature requires Administrator privileges. Launch the '
+                'standalone Administrator shortcut instead of the MSIX shortcut.'
+            ),
+        }), 403
+    return None
+
+
+@app.errorhandler(PermissionError)
+def permission_error_response(error):
+    """Return actionable guidance instead of an opaque permission failure."""
+    message = (
+        'Administrator privileges are required for this operation. Use the '
+        'standalone Administrator shortcut; the MSIX app itself cannot be '
+        'elevated.'
+    )
+    if request.accept_mimetypes.best == 'text/html':
+        return message, 403
+    return jsonify({'status': 'admin_required', 'error': message}), 403
+
 # Create a blueprint for network-related API endpoints
 network_bp = Blueprint('network', __name__, url_prefix='/api/network')
 

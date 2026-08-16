@@ -6,6 +6,29 @@ from pathlib import Path
 
 
 APP_EXECUTABLE = "antivirus_server.exe"
+_ELEVATION_FLAG = "--helper-elevation-attempted"
+
+
+def _ensure_administrator():
+    """Re-launch the helper with UAC if its manifest was not applied."""
+    if sys.platform != 'win32' or _ELEVATION_FLAG in sys.argv:
+        return True
+    try:
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return True
+        params = [*sys.argv[1:], _ELEVATION_FLAG]
+        command_line = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in params)
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None, 'runas', sys.executable, command_line, None, 1
+        )
+        if result <= 32:
+            print('Administrator privileges were not granted.', file=sys.stderr)
+            return False
+        return None
+    except Exception as error:
+        print(f'Could not request Administrator privileges: {error}', file=sys.stderr)
+        return False
 
 
 def _application_path() -> Path:
@@ -24,6 +47,12 @@ def _application_path() -> Path:
 
 
 def main() -> int:
+    elevated = _ensure_administrator()
+    if elevated is None:
+        return 0
+    if not elevated:
+        return 1
+
     try:
         application = _application_path()
     except FileNotFoundError as error:
