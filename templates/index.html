@@ -214,6 +214,15 @@
 
 </head>
 <body>
+{% if not running_as_admin %}
+<div id="administrator-notice" class="alert alert-warning" role="status" style="position:relative;z-index:10001;">
+    <strong>Administrator features are unavailable in this MSIX session.</strong>
+    {{ admin_helper_message }}
+</div>
+<script>
+    console.info('Antivirus Server is running without Administrator privileges. Use the standalone Administrator shortcut for privileged operations.');
+</script>
+{% endif %}
 <div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <div class="scanlines"></div>
     <h2 class="glitch-title">Antivirus Web Interface</h2>
