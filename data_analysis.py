@@ -8,7 +8,11 @@ import subprocess
 import winreg
 from cryptography.fernet import Fernet
 
-# Visualization imports
+# Visualization imports. The application is a Flask server, not a desktop GUI;
+# force a non-interactive backend so matplotlib never creates Tkinter objects
+# that can be finalized from a worker thread during shutdown.
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import seaborn as sns
 

@@ -4,13 +4,32 @@ Import this module wherever you need access to API keys, endpoints, or encryptio
 """
 import os
 import shutil
-from dotenv import load_dotenv
-load_dotenv()
-
-ICACLS_PATH = shutil.which('icacls') or 'icacls'
+from dotenv import dotenv_values, load_dotenv
 
 # --- Base Directory ---
 BASEDIR = os.path.dirname(os.path.abspath(__file__))
+
+# Load packaged/source environment files relative to the application instead of
+# relying only on the current working directory. In a frozen onedir build,
+# config.py is under _internal while .env is in the parent install directory.
+_ENV_CANDIDATES = [
+    os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', ''), '.env'),
+    os.path.join(BASEDIR, '.env'),
+    os.path.join(os.path.dirname(BASEDIR), '.env'),
+    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server', '.env'),
+]
+for _env_path in _ENV_CANDIDATES:
+    if not _env_path or not os.path.exists(_env_path):
+        continue
+    _env_values = dotenv_values(_env_path)
+    _file_fernet_key = _env_values.get('FERNET_KEY') or ''
+    if len(_file_fernet_key) == 44:
+        load_dotenv(_env_path, override=False)
+        if len(os.environ.get('FERNET_KEY', '')) != 44:
+            os.environ['FERNET_KEY'] = _file_fernet_key
+        break
+
+ICACLS_PATH = shutil.which('icacls') or 'icacls'
 
 # --- Crypto Settings ---
 FERNET_KEY = os.environ.get('FERNET_KEY')

@@ -1693,6 +1693,21 @@ def _build_scanned_results(results, scanned_file_status):
     return scanned_results
 
 
+def _persist_conditional_startup_log(log_text, basedir):
+    """Persist diagnostics in the module folder and writable runtime folder."""
+    log_dirs = [basedir]
+    runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR')
+    if runtime_dir and os.path.abspath(runtime_dir) != os.path.abspath(basedir):
+        log_dirs.append(runtime_dir)
+    for log_dir in log_dirs:
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+            with open(os.path.join(log_dir, 'conditional_startup.log'), 'w', encoding='utf-8') as f:
+                f.write(log_text)
+        except Exception:
+            continue
+
+
 def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None):
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
@@ -1730,6 +1745,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     if modules is None:
         results["log"] = output.getvalue()
         results["errors"].append({"stage": "module_load", "error": load_error or "Failed to load scan utilities"})
+        _persist_conditional_startup_log(results["log"], basedir)
         return results
 
     # Run the file/folder scan and the process scan in parallel so that
@@ -1785,13 +1801,8 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     results["results"] = _build_scanned_results(results, scanned_file_status)
     results["log"] = output.getvalue()
 
-    # Persist the detailed log next to other runtime files for debugging.
-    log_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR') or basedir
-    try:
-        with open(os.path.join(log_dir, 'conditional_startup.log'), 'w', encoding='utf-8') as f:
-            f.write(results["log"])
-    except Exception:
-        pass
+    # Persist the detailed log in the module folder and writable runtime folder.
+    _persist_conditional_startup_log(results["log"], basedir)
 
     return results
 
