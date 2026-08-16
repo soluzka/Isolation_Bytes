@@ -1425,14 +1425,9 @@ def _require_csrf():
     token = request.headers.get('X-CSRF-Token') or request.form.get('csrf_token') or request.args.get('csrf_token')
     if not token or token != session.get('csrf_token'):
         return jsonify({'status': 'error', 'message': 'Invalid or missing CSRF token'}), 403
-    is_api = (
-        request.is_json
-        or request.headers.get('X-Requested-With') == 'XMLHttpRequest'
-        or 'application/json' in request.headers.get('Accept', '')
-    )
-    if is_api:
-        return jsonify({'status': 'error', 'message': 'Not authenticated'}), 401
-    return redirect(url_for('login', next=request.full_path))
+    # A valid token from an authenticated session is sufficient. The previous
+    # code incorrectly returned 401 for every valid AJAX/API POST request.
+    return None
 
 
 @app.route('/login', methods=['GET', 'POST'])

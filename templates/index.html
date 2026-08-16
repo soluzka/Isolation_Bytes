@@ -1643,11 +1643,27 @@ if (stopAutoUpdatesBtn) {
     document.getElementById('auto_updates_toggle').addEventListener('change', function() {
         const action = this.checked ? 'start' : 'stop';
         const statusText = document.getElementById('auto_updates_status');
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
         
         fetch('/toggle_auto_updates/' + action, {
-            method: 'POST'
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+                'Accept': 'application/json',
+                'X-CSRF-Token': csrfToken
+            }
         })
-        .then(response => response.json())
+        .then(async response => {
+            const text = await response.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch (error) {
+                throw new Error(`Server returned non-JSON response (${response.status})`);
+            }
+            if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+            return data;
+        })
         .then(data => {
             if (data.success) {
                 statusText.textContent = data.status;

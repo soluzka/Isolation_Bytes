@@ -207,7 +207,7 @@ Write-Host "Using EXE as-is (asInvoker) for MSIX packaging."
 
 # Create a simple placeholder 256x256 PNG logo.
 $Assets = Join-Path $StageRoot 'Assets'
-New-Item -ItemType Directory -Path $Assets | Out-Null
+New-Item -ItemType Directory -Path $Assets -Force | Out-Null
 
 Add-Type -AssemblyName System.Drawing
 $bmp = New-Object System.Drawing.Bitmap(256, 256)
@@ -217,8 +217,12 @@ $g.Dispose()
 $logo = Join-Path $Assets 'Logo.png'
 $bmp.Save($logo, [System.Drawing.Imaging.ImageFormat]::Png)
 $bmp.Dispose()
+if (-not (Test-Path $logo)) { throw "MSIX logo was not created: $logo" }
 
 function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName, $DisplayName, $Version) {
+    if ([string]::IsNullOrWhiteSpace($PublisherDisplayName)) {
+        $PublisherDisplayName = 'soluzka'
+    }
     $xml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
@@ -234,6 +238,9 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName
   <Dependencies>
     <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
   </Dependencies>
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
   </Capabilities>
@@ -253,8 +260,9 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName
 if (-not $SkipStore) {
     $now = Get-Date
     $days = ($now - [DateTime]::new(2024, 1, 1)).Days
-    $minutes = $now.Hour * 60 + $now.Minute
-    $Version = "1.0.$days.$minutes"
+    # Partner Center requires the revision component to be zero.
+    # The day counter provides a monotonically increasing Store version.
+    $Version = "1.0.$days.0"
 
     # Build the Store package (soluzka cert) for Partner Center.
     $StoreMsix = Join-Path $Dist 'AntivirusServer_Store.msix'
