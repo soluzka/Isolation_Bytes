@@ -1100,7 +1100,8 @@ if (stopAutoUpdatesBtn) {
         }
 
         async function updateTrafficStats() {
-            if (!networkMonitorRunning) return;
+            const monitoringEnabled = window.serviceStates?.networkMonitorRunning ?? networkMonitorRunning;
+            if (monitoringEnabled === false) return;
 
             try {
                 const [trafficData, c2Data, directoriesData, liveConnectionsData] = await Promise.all([
@@ -1509,11 +1510,15 @@ if (stopAutoUpdatesBtn) {
         window.addEventListener('load', () => {
             updateAllButtons();
             
-            // If network monitor is running, start traffic monitoring
-            if (window.serviceStates.networkMonitorRunning) {
-                startTrafficMonitoring();
-                fetchMonitoredNetworkDirectories(); // Fetch directories on load if monitoring is running
+            // Start the stats poll independently of the toggle response. The
+            // backend exposes live psutil data even when the service toggle is
+            // already enabled from startup.
+            startTrafficMonitoring();
+            updateTrafficStats();
+            if (!window.trafficStatsInterval) {
+                window.trafficStatsInterval = setInterval(updateTrafficStats, 3000);
             }
+            fetchMonitoredNetworkDirectories();
         });
 
         // Add CSS for network monitor directory display
