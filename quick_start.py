@@ -3,7 +3,7 @@ import sys
 import glob
 
 # Load .env before importing modules that validate FERNET_KEY at import time.
-from dotenv import load_dotenv
+from dotenv import dotenv_values, load_dotenv
 
 FLASK_DEBUG = '--debug' in sys.argv
 
@@ -21,10 +21,18 @@ def _load_environment_before_imports():
         ]
 
     for path in candidates:
-        if os.path.exists(path):
-            load_dotenv(path, override=False)
-            if len(os.environ.get('FERNET_KEY', '')) == 44:
-                return path
+        if not os.path.exists(path):
+            continue
+        values = dotenv_values(path)
+        file_fernet_key = values.get('FERNET_KEY') or ''
+        if len(file_fernet_key) != 44:
+            continue
+        load_dotenv(path, override=False)
+        # Replace only a missing/invalid environment value. Valid process
+        # environment settings continue to take precedence over .env.
+        if len(os.environ.get('FERNET_KEY', '')) != 44:
+            os.environ['FERNET_KEY'] = file_fernet_key
+        return path
     return None
 
 
