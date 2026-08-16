@@ -2,7 +2,33 @@ import os
 import sys
 import glob
 
+# Load .env before importing modules that validate FERNET_KEY at import time.
+from dotenv import load_dotenv
+
 FLASK_DEBUG = '--debug' in sys.argv
+
+
+def _load_environment_before_imports():
+    if getattr(sys, 'frozen', False):
+        candidates = [
+            os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server', '.env'),
+            os.path.join(os.path.dirname(sys.executable), '.env'),
+        ]
+    else:
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+            os.path.join(os.getcwd(), '.env'),
+        ]
+
+    for path in candidates:
+        if os.path.exists(path):
+            load_dotenv(path, override=False)
+            if len(os.environ.get('FERNET_KEY', '')) == 44:
+                return path
+    return None
+
+
+_load_environment_before_imports()
 
 import ctypes
 import time
@@ -31,7 +57,6 @@ from data_analysis import load_trusted_hashes
 # `flask run`) does not load .env/.flaskenv automatically. Without this,
 # anything that depends on FERNET_KEY being set (e.g. file_crypto.py) would
 # fail with EnvironmentError even though the key is present in .env.
-from dotenv import load_dotenv
 
 # When running as a PyInstaller bundle, prefer the onedir itself so the
 # package is self-contained. If the onedir is on a read-only / OneDrive
