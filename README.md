@@ -521,6 +521,7 @@ See [PRIVACY_POLICY.md](PRIVACY_POLICY.md) for the full policy. Summary:
 - No telemetry or analytics are sent to the developer by default.
 - Optional external lookups (MalwareBazaar, VirusTotal, ThreatFox, URLhaus, HTTPBL) only send hashes/IOCs, never full file contents.
 - Quarantined files are encrypted; session cookies are signed with `SECRET_KEY` from `.env`.
+- On first run, `SECRET_KEY` and `FERNET_KEY` are generated and stored locally in the application `_internal\.env` folder; they are never included in Git or distributed packages.
 - Admin credentials are stored as a bcrypt hash (`ADMIN_PASSWORD_HASH`), not plaintext.
 
 ## Admin Password Hash

@@ -1,6 +1,8 @@
 import os
 import sys
 import glob
+import base64
+import secrets
 
 # Load .env before importing modules that validate FERNET_KEY at import time.
 from dotenv import dotenv_values, load_dotenv
@@ -8,17 +10,46 @@ from dotenv import dotenv_values, load_dotenv
 FLASK_DEBUG = '--debug' in sys.argv
 
 
+def _upsert_local_env_value(path, name, value):
+    """Persist one generated secret without printing or exposing its value."""
+    lines = []
+    if os.path.exists(path):
+        with open(path, 'r', encoding='utf-8') as env_file:
+            lines = env_file.read().splitlines()
+    replacement = f'{name}={value}'
+    replaced = False
+    updated = []
+    for line in lines:
+        if line.startswith(f'{name}='):
+            if not replaced:
+                updated.append(replacement)
+                replaced = True
+        else:
+            updated.append(line)
+    if not replaced:
+        updated.append(replacement)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as env_file:
+        env_file.write('\\n'.join(updated) + '\\n')
+
+
 def _load_environment_before_imports():
     if getattr(sys, 'frozen', False):
         executable_dir = os.path.dirname(sys.executable)
+        appdata_dir = os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server'
+        )
         candidates = [
-            os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server', '.env'),
-            os.path.join(executable_dir, '.env'),
+            os.path.join(appdata_dir, '_internal', '.env'),
+            os.path.join(appdata_dir, '.env'),
             os.path.join(executable_dir, '_internal', '.env'),
+            os.path.join(executable_dir, '.env'),
         ]
     else:
+        project_dir = os.path.dirname(os.path.abspath(__file__))
         candidates = [
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+            os.path.join(project_dir, '_internal', '.env'),
+            os.path.join(project_dir, '.env'),
             os.path.join(os.getcwd(), '.env'),
         ]
 
@@ -34,8 +65,21 @@ def _load_environment_before_imports():
         # environment settings continue to take precedence over .env.
         if len(os.environ.get('FERNET_KEY', '')) != 44:
             os.environ['FERNET_KEY'] = file_fernet_key
+        if not os.environ.get('SECRET_KEY'):
+            os.environ['SECRET_KEY'] = secrets.token_urlsafe(32)
+            _upsert_local_env_value(path, 'SECRET_KEY', os.environ['SECRET_KEY'])
         return path
-    return None
+
+    # First run: create per-install secrets in a writable local .env.
+    target = candidates[0]
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    if len(os.environ.get('FERNET_KEY', '')) != 44:
+        os.environ['FERNET_KEY'] = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode()
+        _upsert_local_env_value(target, 'FERNET_KEY', os.environ['FERNET_KEY'])
+    if not os.environ.get('SECRET_KEY'):
+        os.environ['SECRET_KEY'] = secrets.token_urlsafe(32)
+        _upsert_local_env_value(target, 'SECRET_KEY', os.environ['SECRET_KEY'])
+    return target
 
 
 _load_environment_before_imports()

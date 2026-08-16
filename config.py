@@ -12,11 +12,16 @@ BASEDIR = os.path.dirname(os.path.abspath(__file__))
 # Load packaged/source environment files relative to the application instead of
 # relying only on the current working directory. In a frozen onedir build,
 # config.py is under _internal while .env is in the parent install directory.
+_APPDATA_DIR = os.path.join(
+    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server'
+)
 _ENV_CANDIDATES = [
-    os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', ''), '.env'),
+    os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', ''), '_internal', '.env'),
     os.path.join(BASEDIR, '.env'),
     os.path.join(os.path.dirname(BASEDIR), '.env'),
-    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server', '.env'),
+    os.path.join(_APPDATA_DIR, '_internal', '.env'),
+    os.path.join(os.environ.get('ANTIVIRUS_RUNTIME_DIR', ''), '.env'),
+    os.path.join(_APPDATA_DIR, '.env'),
 ]
 for _env_path in _ENV_CANDIDATES:
     if not _env_path or not os.path.exists(_env_path):
