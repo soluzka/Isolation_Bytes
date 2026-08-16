@@ -10,9 +10,11 @@ FLASK_DEBUG = '--debug' in sys.argv
 
 def _load_environment_before_imports():
     if getattr(sys, 'frozen', False):
+        executable_dir = os.path.dirname(sys.executable)
         candidates = [
             os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server', '.env'),
-            os.path.join(os.path.dirname(sys.executable), '.env'),
+            os.path.join(executable_dir, '.env'),
+            os.path.join(executable_dir, '_internal', '.env'),
         ]
     else:
         candidates = [
