@@ -774,8 +774,22 @@ if (stopAutoUpdatesBtn) {
             };
 
             function refreshStatus() {
-                return fetch('/api/conditional_startup/status', {credentials: 'include'})
-                    .then(response => response.json())
+                return fetch('/api/conditional_startup/status', {
+                    credentials: 'include',
+                    headers: {'Accept': 'application/json'},
+                    signal: AbortSignal.timeout(10000)
+                })
+                    .then(async response => {
+                        const text = await response.text();
+                        let data;
+                        try {
+                            data = JSON.parse(text);
+                        } catch (error) {
+                            throw new Error(`Status endpoint returned non-JSON response (${response.status})`);
+                        }
+                        if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+                        return data;
+                    })
                     .then(renderStatus)
                     .catch(error => {
                         statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${error.message || error}</div>`;
@@ -810,34 +824,6 @@ if (stopAutoUpdatesBtn) {
 
             if (refreshBtn) {
                 refreshBtn.onclick = refreshStatus;
-            }
-
-            if (breakBtn) {
-                breakBtn.onclick = function () {
-                    breakBtn.disabled = true;
-                    messageDiv.innerHTML = '<p style="color:#c0392b;">Stopping conditional startup...</p>';
-                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                    fetch('/api/conditional_startup/stop', {
-                        method: 'POST',
-                        credentials: 'include',
-                        headers: {'X-CSRF-Token': csrfToken}
-                    })
-                        .then(response => response.json())
-                        .then(data => {
-                            if (data.status === 'success') {
-                                messageDiv.innerHTML = `<div class="alert alert-info">${data.message}</div>`;
-                            } else {
-                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${data.message || data.error || 'Unknown error'}</div>`;
-                            }
-                            return refreshStatus();
-                        })
-                        .catch(error => {
-                            messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${error.message || error}</div>`;
-                        })
-                        .finally(() => {
-                            breakBtn.disabled = false;
-                        });
-                };
             }
 
             refreshStatus();
