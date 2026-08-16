@@ -34,6 +34,7 @@
 <div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <h1>Scan Log File for Phishing Indicators</h1>
     <form method="post" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <label for="file">Select log file:</label>
         <input type="file" name="file" id="file" required>
         <button type="submit">Scan</button>

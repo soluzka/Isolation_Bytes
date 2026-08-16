@@ -19,6 +19,7 @@
         <p class="text-center text-muted">Decoy files are placed in user folders. If they are modified, renamed or deleted, ransomware may be active.</p>
 
         <form method="POST" action="{{ url_for('canary') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <input type="hidden" name="action" value="create">
             <div class="text-center mb-3">
                 <button class="btn btn-primary" type="submit">Create / Refresh Canary Files</button>

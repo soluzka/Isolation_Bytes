@@ -36,6 +36,7 @@
         </ul>
 
         <form method="POST" action="/update-iocs" class="mt-3 text-center">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <button type="submit" class="btn btn-primary">Refresh IOC Feeds (URLhaus / ThreatFox)</button>
         </form>
 

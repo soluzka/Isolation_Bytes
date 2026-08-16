@@ -46,6 +46,7 @@
     <h2>File Encryption / Decryption</h2>
     <p style="color:#555;font-size:0.9em;">Maximum file size: 125MB.</p>
     <form method="post" action="/encrypt" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <label for="file">Choose file to encrypt:</label>
         <input type="file" name="file" id="file" required>
         <label for="key">Key (optional):</label>
@@ -53,6 +54,7 @@
         <button type="submit">Encrypt</button>
     </form>
     <form method="post" action="/decrypt" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <label for="file">Choose file to decrypt:</label>
         <input type="file" name="file" id="file" required>
         <label for="key">Key (optional):</label>

@@ -571,6 +571,7 @@ _PRIVILEGED_PATH_PREFIXES = (
     '/api/scan_processes',
     '/api/scan-file',
     '/api/scan_download',
+    '/break-the-cycle/engage',
 )
 
 

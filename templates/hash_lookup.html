@@ -20,6 +20,7 @@
         <p class="text-center text-muted">Query VirusTotal, MalwareBazaar and ThreatFox by SHA-256.</p>
 
         <form method="POST" action="{{ url_for('hash_lookup') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <div class="input-group mb-3">
                 <input type="text" class="form-control" name="hash" placeholder="SHA-256 hash" value="{{ query }}" maxlength="64" pattern="[a-fA-F0-9]{64}">
                 <button class="btn btn-primary" type="submit">Look up</button>

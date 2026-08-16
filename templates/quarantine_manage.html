@@ -40,6 +40,7 @@
                     <td style="font-family:monospace;">{{ f.sha256[:16] }}...</td>
                     <td>
                         <form method="POST" action="{{ url_for('quarantine_manage') }}" style="display:inline;">
+                            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
                             <input type="hidden" name="action" value="restore">
                             <input type="hidden" name="filename" value="{{ f.filename }}">
                             <button type="submit" class="btn btn-sm btn-success">Restore</button>

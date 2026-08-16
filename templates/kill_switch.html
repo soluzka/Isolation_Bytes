@@ -25,6 +25,7 @@
         <div class="status active">ACTIVE</div>
         <p class="text-muted">Outbound traffic is currently blocked.</p>
         <form method="POST" action="{{ url_for('kill_switch') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <input type="hidden" name="action" value="disable">
             <button type="submit" class="btn btn-success btn-lg">Restore Outbound Traffic</button>
         </form>
@@ -32,6 +33,7 @@
         <div class="status inactive">INACTIVE</div>
         <p class="text-muted">Outbound traffic is flowing normally.</p>
         <form method="POST" action="{{ url_for('kill_switch') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <input type="hidden" name="action" value="enable">
             <button type="submit" class="btn btn-danger btn-lg">Block Outbound Traffic</button>
         </form>

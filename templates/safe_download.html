@@ -43,6 +43,7 @@
 <div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
     <h2>Safe File Download</h2>
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <label for="url">File URL:</label>
         <input type="url" name="url" id="url" required style="width:60%">
         <button type="submit">Download & Scan</button>

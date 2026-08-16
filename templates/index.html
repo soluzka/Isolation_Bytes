@@ -1863,9 +1863,11 @@ if (stopAutoUpdatesBtn) {
     <div style="margin:1em 0; padding:1em; background:#eaf2f8; border-radius:6px;">
         <b>Continuous Scan:</b>
         <form method="POST" action="/toggle_scan_all/start" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <button type="submit" class="btn btn-sm btn-success">Start</button>
         </form>
         <form method="POST" action="/toggle_scan_all/stop" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <button type="submit" class="btn btn-sm btn-danger">Stop</button>
         </form>
         <a href="/scan_all/latest" class="btn btn-sm btn-info" style="text-decoration:none;">Latest Result</a>

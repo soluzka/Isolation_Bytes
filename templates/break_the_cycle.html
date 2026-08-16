@@ -118,10 +118,25 @@
             log.innerHTML = '';
             status.textContent = 'Initializing overload cycle...';
             overload.style.display = 'block';
-            fetch('/break-the-cycle/engage', {method: 'POST'})
-                .then(r => {
-                    if (!r.ok) throw new Error('Server returned ' + r.status);
-                    return r.json();
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            fetch('/break-the-cycle/engage', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                }
+            })
+                .then(async r => {
+                    const text = await r.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (error) {
+                        throw new Error(`Server returned non-JSON response (${r.status}). Please restart the current app build.`);
+                    }
+                    if (!r.ok) throw new Error(data.error || data.message || `Server returned ${r.status}`);
+                    return data;
                 })
                 .then(d => {
                     status.textContent = 'Overload complete.';

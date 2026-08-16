@@ -24,12 +24,14 @@
         {% if active %}
         <div class="status active">ENABLED</div>
         <form method="POST" action="{{ url_for('startup_with_windows') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <input type="hidden" name="action" value="disable">
             <button type="submit" class="btn btn-danger btn-lg">Disable</button>
         </form>
         {% else %}
         <div class="status inactive">DISABLED</div>
         <form method="POST" action="{{ url_for('startup_with_windows') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <input type="hidden" name="action" value="enable">
             <button type="submit" class="btn btn-success btn-lg">Enable</button>
         </form>

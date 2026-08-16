@@ -19,6 +19,7 @@
         <p class="text-center text-muted">Scan a single file or a directory with YARA rules.</p>
 
         <form method="POST" action="{{ url_for('custom_scan') }}">
+            <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
             <div class="mb-3">
                 <label class="form-label">Path to scan</label>
                 <input type="text" class="form-control" name="target_path" value="{{ target }}" placeholder="C:\\Users\\...\\file.exe" required>
