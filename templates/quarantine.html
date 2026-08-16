@@ -1,0 +1,274 @@
+<!-- filepath: c:\Users\bpier\Desktop\antivirus\antivirus\antivirus\templates\quarantine.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>Quarantine Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        :root {
+            --danger: #c0392b;
+            --danger-hover: #a93226;
+            --success: #27ae60;
+            --success-hover: #219150;
+            --primary: #b36200;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --border: #e1e4e8;
+            --text: #2c3e50;
+        }
+        body {
+            max-width: 900px;
+            margin: 2em auto;
+            padding: 0 1em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+        h2, h3 { color: var(--primary); margin-top: 1.5em; margin-bottom: 0.5em; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 1.5em;
+        }
+        p { margin-top: 0; }
+        button {
+            border: none;
+            border-radius: 6px;
+            padding: 0.5em 1em;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.05s;
+        }
+        button:hover { transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        .btn-restore {
+            background: var(--success);
+            color: #fff;
+            margin-right: 0.5em;
+        }
+        .btn-restore:hover { background: var(--success-hover); }
+        .btn-delete, .btn-delete-all {
+            background: var(--danger);
+            color: #fff;
+        }
+        .btn-delete:hover, .btn-delete-all:hover { background: var(--danger-hover); }
+        .btn-delete-all { margin-bottom: 0.5em; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.75em;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            border-bottom: 1px solid var(--border);
+            padding: 0.75em;
+            text-align: left;
+            vertical-align: top;
+        }
+        th { background-color: #f4f4f4; font-weight: 600; }
+        tr:hover { background-color: #f8f9fa; }
+        .actions { white-space: nowrap; }
+        .actions button { font-size: 0.85em; padding: 0.4em 0.75em; }
+        pre {
+            background: #fff3cd;
+            color: #856404;
+            padding: 1em;
+            border-radius: 6px;
+            max-height: 250px;
+            overflow: auto;
+            border: 1px solid #ffe8a1;
+        }
+        nav {
+            margin-top: 2em;
+            padding-top: 1em;
+            border-top: 1px solid var(--border);
+        }
+        nav a {
+            margin-right: 1.5em;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        nav a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h2>Quarantine Management</h2>
+    <p>Manage quarantined files below. You can view details, download files, release them, or delete them permanently.</p>
+
+    <div class="card">
+        <div style="margin-bottom: 1em;">
+            <button type="button" class="btn-delete-all js-delete-all-btn">Delete All Quarantined Files</button>
+        </div>
+        <table>
+        <thead>
+            <tr>
+                <th>File Name</th>
+                <th>Detection Type</th>
+                <th>Date Quarantined</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in quarantined_files %}
+            <tr>
+                <td>{{ file.filename }}</td>
+                <td>{% if file.detection_info and file.detection_info.matches %}{{ file.detection_info.matches|join(', ') }}{% else %}Unknown{% endif %}</td>
+                <td>{{ file.quarantine_time }}</td>
+                <td class="actions">
+                    <button type="button" class="btn-restore js-restore-btn" data-quarantine-path="{{ file.quarantine_path|e }}" data-destination="{{ file.original_path|e }}">Restore</button>
+                    <button type="button" class="btn-delete js-delete-btn" data-quarantine-path="{{ file.quarantine_path|e }}">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not quarantined_files %}
+            <tr>
+                <td colspan="4" style="text-align: center;">No files in quarantine.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+
+    <div class="card">
+    <h3>Recent Quarantine/Deletion Events</h3>
+    <pre style="background:#fff3cd;color:#856404;padding:0.5em 1em;border-radius:6px;max-height:250px;overflow:auto;">{{ quarantine_log|default('No recent events found.') }}</pre>
+    </div>
+
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/yara_scanner.html">YARA Scanner</a>
+    </nav>
+    
+    <script>
+        function getFilename(path) {
+            return path.split(/[\\/]/).pop();
+        }
+
+        function restoreFile(filePath, destination) {
+            if (!confirm('Are you sure you want to restore this file? It may contain malware.')) return;
+            const formData = new FormData();
+            formData.append('file_path', filePath);
+            if (destination) {
+                formData.append('destination', destination);
+            }
+            fetch('/restore_file', { method: 'POST', credentials: 'include', headers: {'Accept': 'application/json'}, body: formData })
+                .then(async response => {
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        const snippet = text.slice(0, 100).replace(/</g, '&lt;');
+                        alert('Unexpected server response (status ' + response.status + '): ' + snippet + (text.length > 100 ? '...' : '') + ' — try refreshing the page and logging in again.');
+                        return;
+                    }
+                    if (data.success) {
+                        alert('File restored successfully to: ' + data.restored_to);
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+        }
+
+        function deleteFile(quarantinePath) {
+            if (!confirm('Are you sure you want to permanently delete this file?')) return;
+            const filename = getFilename(quarantinePath);
+            fetch('/quarantine/delete/' + encodeURIComponent(filename), { method: 'POST', credentials: 'include', headers: {'Accept': 'application/json'} })
+                .then(async response => {
+                    const text = await response.text();
+                    if (response.status === 404) {
+                        alert('File not found or already deleted.');
+                        return;
+                    }
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        const snippet = text.slice(0, 100).replace(/</g, '&lt;');
+                        alert('Unexpected server response (status ' + response.status + '): ' + snippet + (text.length > 100 ? '...' : '') + ' — try refreshing the page and logging in again.');
+                        return;
+                    }
+                    if (data.status === 'success') {
+                        alert('File deleted successfully');
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+        }
+
+        function deleteAllFiles() {
+            if (!confirm('Are you sure you want to permanently delete ALL quarantined files?')) return;
+            fetch('/quarantine/delete_all', { method: 'POST', credentials: 'include', headers: {'Accept': 'application/json'} })
+                .then(async response => {
+                    const text = await response.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (e) {
+                        const snippet = text.slice(0, 100).replace(/</g, '&lt;');
+                        alert('Unexpected server response (status ' + response.status + '): ' + snippet + (text.length > 100 ? '...' : '') + ' — try refreshing the page and logging in again.');
+                        return;
+                    }
+                    if (data.status === 'success' || data.status === 'partial') {
+                        alert('Deleted ' + data.deleted + ' file(s)' + (data.errors ? ', ' + data.errors + ' error(s)' : ''));
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + (data.error || 'Unknown error'));
+                    }
+                })
+                .catch(error => alert('Error: ' + error));
+        }
+
+        document.querySelectorAll('.js-restore-btn').forEach(btn => {
+            btn.addEventListener('click', () => restoreFile(btn.dataset.quarantinePath, btn.dataset.destination));
+        });
+        document.querySelectorAll('.js-delete-btn').forEach(btn => {
+            btn.addEventListener('click', () => deleteFile(btn.dataset.quarantinePath));
+        });
+        const deleteAllBtn = document.querySelector('.js-delete-all-btn');
+        if (deleteAllBtn) {
+            deleteAllBtn.addEventListener('click', deleteAllFiles);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+python.exe
+pythonw.exe
+code.exe
+chrome.exe
+msedge.exe
+explorer.exe
+powershell.exe
+cmd.exe
+notepad.exe
+svchost.exe
+conhost.exe
+System

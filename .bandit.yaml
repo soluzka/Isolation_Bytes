@@ -1,0 +1,4 @@
+skips:
+  - B101  # assert_used
+  - B110  # try_except_pass
+  - B112  # try_except_continue

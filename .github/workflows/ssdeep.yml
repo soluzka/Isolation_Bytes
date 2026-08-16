@@ -1,0 +1,30 @@
+name: ssdeep-fuzzy-scan
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'security/yara_rules/**'
+
+jobs:
+  fuzzy-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          # Prefer pyssdeep on runners; attempt ssdeep but don't fail if it needs a native build
+          pip install yara-python pyssdeep || true
+          pip install ssdeep || true
+
+      - name: Run ssdeep runner
+        run: |
+          python security/yara_rules/ssdeep_runner.py --rules security/yara_rules/yara_rules.yar --dir security/yara_rules --threshold 60

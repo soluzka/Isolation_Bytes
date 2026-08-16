@@ -1,0 +1,1 @@
+Defend your Windows PC with a portable YARA antivirus dashboard. Scan files, folders and processes, quarantine threats with Fernet encryption and block malicious connections. Copy .env.example to .env to set your admin password, Fernet key and API keys. Open source, runs locally on Windows 10 and 11
