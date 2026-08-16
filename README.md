@@ -148,6 +148,17 @@ python build_config.py --skip-install --include-local-model
 
 This produces a multi-gigabyte installer. The default build excludes the GGUF model.
 
+To build with a signing certificate outside the repository and include the local GGUF assistant model, use:
+
+```powershell
+python build_config.py `
+  --store-cert "C:\SecureBuildKeys\soluzka.pfx" `
+  --skip-install `
+  --include-local-model
+```
+
+Replace the certificate path with the actual secure location of your `.pfx` file. Never commit the `.pfx` or its password.
+
 To also make the test launcher MSIX installable locally, run PowerShell as Administrator first:
 
 ```powershell
