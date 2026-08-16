@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--store-cert', dest='store_cert', default=None, help='Path to Partner Center .pfx')
 parser.add_argument('--store-cert-password', dest='store_cert_password', default=None, help='Password for the Partner Center .pfx')
 parser.add_argument('--store-publisher', dest='store_publisher', default='CN=soluzka', help='Publisher CN for the MSIX manifest')
+parser.add_argument('--skip-install', dest='skip_install', action='store_true', help='Build the installer EXE without running it')
 parser.add_argument('--help', '-h', action='help', help='Show this help message and exit')
 parser.add_argument('extra', nargs='*', help='Extra positional arguments are ignored')
 build_args, _ = parser.parse_known_args()
@@ -492,6 +493,10 @@ if os.path.exists(build_msix_ps1):
             if os.path.exists(src):
                 shutil.copy2(src, dst)
                 print(f"Copied installer to desktop: {dst}")
+                if not build_args.skip_install:
+                    print("Running the installer app to install the MSIX...")
+                    subprocess.check_call([src])
+                    print("Installer app completed.")
 
             # Create the other desktop shortcuts with the admin flag.
             for script in ['create_conditional_shortcut.py', 'create_yara_scanner_shortcut.py']:

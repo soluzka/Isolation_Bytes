@@ -128,10 +128,16 @@ ADMIN_PASSWORD=admin123
 
 The project is packaged as a **onedir** PyInstaller distribution. This means the `antivirus_server.exe` entry point lives inside a folder (`dist\antivirus_server\`) that contains all of its Python modules, native extensions, models, YARA rules, signatures, blocklists, and other runtime assets.
 
-Build everything with:
+Build and install everything with:
 
 ```powershell
 python build_config.py
+```
+
+By default, `build_config.py` also runs the generated `Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. To build without installing, use:
+
+```powershell
+python build_config.py --skip-install
 ```
 
 To also make the test launcher MSIX installable locally, run PowerShell as Administrator first:
