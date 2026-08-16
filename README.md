@@ -137,6 +137,7 @@ python build_config.py
 By default, `build_config.py` also runs the generated `Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. To build without installing, use:
 
 To include the large local GGUF assistant model in the installer for testing, use:
+
 ```powershell
 $cert = New-SelfSignedCertificate `
   -Type CodeSigningCert `
