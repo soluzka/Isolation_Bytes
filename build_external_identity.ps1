@@ -4,7 +4,8 @@
 param(
     [switch]$NoCertManagement,
     [string]$StoreCertFile,
-    [string]$StorePublisher = 'CN=soluzka'
+    [string]$StorePublisher = 'CN=soluzka',
+    [string]$StoreVersion
 )
 
 Set-Location -Path (Split-Path -Parent $MyInvocation.MyCommand.Definition)
@@ -37,7 +38,11 @@ if (-not (Test-Path $logo)) { throw "Identity package logo was not created: $log
 
 $now = Get-Date
 $days = ($now - [DateTime]::new(2024, 1, 1)).Days
-$version = "1.0.$days.0"
+if (-not $StoreVersion) { $StoreVersion = "1.0.$days.0" }
+if ($StoreVersion -notmatch '^\d+\.\d+\.\d+\.0$') {
+    throw "StoreVersion must use four numeric components and end in .0, for example 1.0.958.0"
+}
+$version = $StoreVersion
 $manifest = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Package IgnorableNamespaces="uap uap5 uap10 rescap"

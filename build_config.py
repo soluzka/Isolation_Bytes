@@ -23,6 +23,7 @@ parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--store-cert', dest='store_cert', default=None, help='Path to Partner Center .pfx')
 parser.add_argument('--store-cert-password', dest='store_cert_password', default=None, help='Password for the Partner Center .pfx')
 parser.add_argument('--store-publisher', dest='store_publisher', default='CN=soluzka', help='Publisher CN for the MSIX manifest')
+parser.add_argument('--store-version', dest='store_version', default=None, help='MSIX version, e.g. 1.0.958.0')
 parser.add_argument('--skip-install', dest='skip_install', action='store_true', help='Build the installer EXE without running it')
 parser.add_argument('--include-local-model', dest='include_local_model', action='store_true', help='Include the large local GGUF assistant model in the installer')
 parser.add_argument('--help', '-h', action='help', help='Show this help message and exit')
@@ -469,6 +470,8 @@ if os.path.exists(build_msix_ps1):
             args.extend(['-StoreCertPassword', build_args.store_cert_password])
         if build_args.store_publisher:
             args.extend(['-StorePublisher', build_args.store_publisher])
+        if build_args.store_version:
+            args.extend(['-StoreVersion', build_args.store_version])
         subprocess.check_call(args)
         print("MSIX build completed.")
 
@@ -480,6 +483,8 @@ if os.path.exists(build_msix_ps1):
                 'powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', identity_script,
                 '-NoCertManagement', '-StorePublisher', build_args.store_publisher
             ]
+            if build_args.store_version:
+                identity_args.extend(['-StoreVersion', build_args.store_version])
             if build_args.store_cert:
                 identity_args.extend(['-StoreCertFile', build_args.store_cert])
             try:
