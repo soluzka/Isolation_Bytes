@@ -8,6 +8,7 @@ app = os.path.join(base_dir, 'installer_app.py')
 msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Store.msix')
 cer = os.path.join(base_dir, 'dist', 'soluzka.cer')
 standalone = os.path.join(base_dir, 'dist', 'antivirus_server')
+identity_msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Identity.msix')
 
 if not os.path.exists(msix):
     print('AntivirusServer_Store.msix not found at', msix)
@@ -36,6 +37,8 @@ args = [
     '--add-data', f"{standalone}{sep}antivirus_server",
     app,
 ]
+if os.path.exists(identity_msix):
+    args[args.index(app):args.index(app)] = ['--add-data', f"{identity_msix}{sep}."]
 
 print('Building one-file installer with:', args)
 PyInstaller.__main__.run(args)

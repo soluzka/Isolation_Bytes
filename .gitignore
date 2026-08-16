@@ -92,6 +92,10 @@ models/*.txt
 models/*.onnx
 models/**/*.onnx
 
+# Local GGUF language models (large, downloaded separately)
+models/**/*.gguf
+models/*.gguf
+
 # Rust build artifacts (myproject/)
 target/
 

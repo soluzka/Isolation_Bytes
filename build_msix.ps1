@@ -227,8 +227,9 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
          xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+         xmlns:uap5="http://schemas.microsoft.com/appx/manifest/uap/windows10/5"
          xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
-         IgnorableNamespaces="uap rescap">
+         IgnorableNamespaces="uap uap5 rescap">
   <Identity Name="$PackageName" Publisher="$Publisher" Version="$Version" ProcessorArchitecture="x64" />
   <Properties>
     <DisplayName>$DisplayName</DisplayName>
@@ -250,6 +251,13 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName
                           BackgroundColor="transparent"
                           Square150x150Logo="Assets\Logo.png"
                           Square44x44Logo="Assets\Logo.png" />
+      <Extensions>
+        <uap5:Extension Category="windows.appExecutionAlias">
+          <uap5:AppExecutionAlias>
+            <uap5:ExecutionAlias Alias="antivirus-server.exe" />
+          </uap5:AppExecutionAlias>
+        </uap5:Extension>
+      </Extensions>
     </Application>
   </Applications>
 </Package>

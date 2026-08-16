@@ -3192,6 +3192,17 @@ def api_persistence_ransomware_findings():
     return jsonify({'findings': _findings_for_review()})
 
 
+@app.route('/api/assistant/chat', methods=['POST'])
+def assistant_chat():
+    """Answer a local findings question using optional llama.cpp support."""
+    data = request.get_json(silent=True) or {}
+    from security.local_assistant import LocalFindingsAssistant
+    assistant = LocalFindingsAssistant(os.path.dirname(os.path.abspath(__file__)))
+    context = data.get('context') or {}
+    context.setdefault('findings', _findings_for_review())
+    return jsonify(assistant.answer(data.get('message', ''), context))
+
+
 @app.route('/quarantine/findings', methods=['POST'])
 def quarantine_selected_findings():
     """Quarantine files selected from the persistence/ransomware review list."""

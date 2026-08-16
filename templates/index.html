@@ -590,6 +590,17 @@ if (stopAutoUpdatesBtn) {
                 </div>
                 <div id="conditional_startup_panel_message"></div>
             </div>
+
+            <div class="card" id="local-assistant-panel" style="margin-top:15px;">
+                <h3>Local Findings Assistant</h3>
+                <p class="text-muted">Ask about local detections and scan results. No external AI service is required.</p>
+                <div id="assistant_messages" style="max-height:220px;overflow:auto;background:#f8f9fa;padding:10px;border-radius:5px;margin-bottom:10px;"></div>
+                <form id="assistant_form">
+                    <input id="assistant_input" type="text" maxlength="500" placeholder="Why was this file flagged?" style="width:75%;padding:8px;">
+                    <button type="submit">Ask</button>
+                </form>
+                <small id="assistant_mode" class="text-muted"></small>
+            </div>
         </div>
     </div>
 
@@ -828,6 +839,42 @@ if (stopAutoUpdatesBtn) {
 
             refreshStatus();
             setInterval(refreshStatus, 5000);
+
+            const assistantForm = document.getElementById('assistant_form');
+            const assistantInput = document.getElementById('assistant_input');
+            const assistantMessages = document.getElementById('assistant_messages');
+            const assistantMode = document.getElementById('assistant_mode');
+            if (assistantForm) {
+                assistantForm.addEventListener('submit', async function (event) {
+                    event.preventDefault();
+                    const message = assistantInput.value.trim();
+                    if (!message) return;
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                    const userLine = document.createElement('p');
+                    userLine.textContent = `You: ${message}`;
+                    assistantMessages.appendChild(userLine);
+                    assistantInput.value = '';
+                    try {
+                        const response = await fetch('/api/assistant/chat', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-Token': csrfToken},
+                            body: JSON.stringify({message})
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
+                        const answerLine = document.createElement('p');
+                        answerLine.textContent = `Assistant (${data.mode}): ${data.answer}`;
+                        assistantMessages.appendChild(answerLine);
+                        assistantMode.textContent = `Mode: ${data.mode}`;
+                        assistantMessages.scrollTop = assistantMessages.scrollHeight;
+                    } catch (error) {
+                        const errorLine = document.createElement('p');
+                        errorLine.textContent = `Assistant error: ${error.message || error}`;
+                        assistantMessages.appendChild(errorLine);
+                    }
+                });
+            }
         })();
     </script>
     <div class="card">

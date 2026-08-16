@@ -311,6 +311,16 @@ dist\antivirus_server\antivirus_server.exe --debug
 
 Use `--debug` to enable tracebacks and extra startup output. When running without `--debug`, the Flask server and background services still start, but unhandled exceptions are reported more quietly.
 
+### Optional Local Chat Model
+
+The dashboard includes a local findings assistant. It works in findings mode without a language model. To enable local llama.cpp responses, install an optional `llama-cpp-python` build and download the openly licensed Qwen3 GGUF model:
+
+```powershell
+python tools\download_local_assistant_model.py
+```
+
+The model is saved as `models\assistant.gguf` and is not bundled or committed because it is several gigabytes. The model download comes from the official Qwen3 GGUF repository on Hugging Face. No paid API is required.
+
 **Important:** Do not run the packaged executable from `C:\Windows` or other protected directories. The application writes logs and runtime state next to the executable, and protected locations will cause permission errors.
 
 ### Runtime Directories

@@ -471,6 +471,22 @@ if os.path.exists(build_msix_ps1):
         subprocess.check_call(args)
         print("MSIX build completed.")
 
+        # Build the sparse/external-location identity package before the
+        # installer app is bundled. It is registered after Program Files is populated.
+        identity_script = os.path.join(base_dir, 'build_external_identity.ps1')
+        if os.path.exists(identity_script):
+            identity_args = [
+                'powershell.exe', '-ExecutionPolicy', 'Bypass', '-File', identity_script,
+                '-NoCertManagement', '-StorePublisher', build_args.store_publisher
+            ]
+            if build_args.store_cert:
+                identity_args.extend(['-StoreCertFile', build_args.store_cert])
+            try:
+                subprocess.check_call(identity_args)
+                print("External-location identity package completed.")
+            except Exception as e:
+                print(f"Warning: external identity package failed: {e}")
+
         # Keep the MSIX shortcut on normal AUMID activation. The admin
         # shortcuts below target unpacked executables only.
         msix_shortcut = os.path.join(os.path.expanduser('~'), 'Desktop', 'Antivirus Server.lnk')

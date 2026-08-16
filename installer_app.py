@@ -194,10 +194,18 @@ def main():
 
         # Install the unpacked administrator bundle alongside the MSIX.
         try:
+            standalone_root = os.path.join(os.environ.get('ProgramFiles', r'C:\\Program Files'), 'Antivirus Server')
             helper_path = _install_standalone_bundle(_resource('antivirus_server'))
             _create_admin_shortcuts(helper_path, desktop)
+            identity_msix = _resource('AntivirusServer_Identity.msix')
+            if os.path.exists(identity_msix):
+                _run_powershell(
+                    "Get-AppxPackage -Name 'soluzka.AntivirusServer.External' | Remove-AppxPackage -ErrorAction SilentlyContinue; "
+                    "Add-AppxPackage -Path '{}' -ExternalLocation '{}' -ErrorAction Stop".format(identity_msix, standalone_root),
+                    "Registering external-location identity"
+                )
         except Exception as error:
-            print(f"  WARNING: Administrator helper setup failed: {error}")
+            print(f"  WARNING: Administrator helper/identity setup failed: {error}")
 
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "

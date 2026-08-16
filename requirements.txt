@@ -67,6 +67,9 @@ bcrypt>=5.0.0
 
 # For TOTP-based 2FA
 pyotp>=2.9
+
+# Optional local llama.cpp backend for the findings assistant
+llama-cpp-python==0.3.34
 rarfile>=1.0
 py7zr>=1.1.3
 
