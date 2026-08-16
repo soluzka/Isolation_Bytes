@@ -9,6 +9,31 @@ import subprocess
 import base64
 
 
+_INSTALLER_ELEVATION_FLAG = '--installer-elevation-attempted'
+
+
+def _ensure_administrator():
+    """Ensure the one-file installer has permission for machine-wide setup."""
+    if sys.platform != 'win32' or _INSTALLER_ELEVATION_FLAG in sys.argv:
+        return True
+    try:
+        import ctypes
+        if ctypes.windll.shell32.IsUserAnAdmin():
+            return True
+        params = [*sys.argv[1:], _INSTALLER_ELEVATION_FLAG]
+        command_line = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in params)
+        result = ctypes.windll.shell32.ShellExecuteW(
+            None, 'runas', sys.executable, command_line, None, 1
+        )
+        if result <= 32:
+            print('Administrator privileges were not granted.', file=sys.stderr)
+            return False
+        return None
+    except Exception as error:
+        print(f'Could not request Administrator privileges: {error}', file=sys.stderr)
+        return False
+
+
 def _resource(name):
     base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     path = os.path.join(base, name)
@@ -26,6 +51,9 @@ def _run_powershell(cmd, description):
         print(f"  OK")
     except Exception as e:
         print(f"  FAILED: {e}")
+        if description.startswith('Creating '):
+            print('  Continuing installation; shortcut creation is non-critical.')
+            return False
         raise
 
 
@@ -45,7 +73,49 @@ def _clear_shortcut_runas(path):
         pass
 
 
+def _install_standalone_bundle(source):
+    """Install the unpacked app and elevated helper beside the MSIX."""
+    program_files = os.environ.get('ProgramFiles', r'C:\\Program Files')
+    target = os.path.join(program_files, 'Antivirus Server')
+    if not os.path.isdir(source):
+        raise FileNotFoundError(f'Standalone bundle not found: {source}')
+    os.makedirs(target, exist_ok=True)
+    shutil.copytree(source, target, dirs_exist_ok=True)
+    return os.path.join(target, 'AntivirusServer_AdminHelper.exe')
+
+
+def _create_admin_shortcuts(helper_path, desktop):
+    """Create shortcuts that target the unpacked elevated helper."""
+    helper = helper_path.replace("'", "''")
+    desktop_path = desktop.replace("'", "''")
+    command = f"""
+$wsh = New-Object -ComObject WScript.Shell
+$desktop = '{desktop_path}'
+$items = @(
+    @{{ Name = 'Antivirus Server (Administrator).lnk'; Args = '' }},
+    @{{ Name = 'Start Conditional Antivirus (Administrator).lnk'; Args = '' }},
+    @{{ Name = 'Start YARA Scanner (Administrator).lnk'; Args = '--open-yara' }}
+)
+foreach ($item in $items) {{
+    $s = $wsh.CreateShortcut((Join-Path $desktop $item.Name))
+    $s.TargetPath = '{helper}'
+    $s.Arguments = $item.Args
+    $s.WorkingDirectory = Split-Path -Parent '{helper}'
+    $s.IconLocation = '{helper},0'
+    $s.Description = 'Antivirus Server (Administrator)'
+    $s.Save()
+}}
+"""
+    _run_powershell(command, 'Creating Administrator shortcuts')
+
+
 def main():
+    elevated = _ensure_administrator()
+    if elevated is None:
+        return
+    if not elevated:
+        sys.exit(1)
+
     msix = _resource('AntivirusServer_Store.msix')
     cer = _resource('soluzka.cer')
 
@@ -76,7 +146,12 @@ def main():
             "Installing Antivirus Server"
         )
 
-        desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+        desktop_candidates = [
+            os.path.join(os.environ.get('OneDrive', ''), 'Desktop'),
+            os.path.join(os.path.expanduser('~'), 'Desktop'),
+        ]
+        desktop = next((path for path in desktop_candidates if os.path.isdir(path)), desktop_candidates[-1])
+        os.makedirs(desktop, exist_ok=True)
         shortcut_path = os.path.join(desktop, 'Antivirus Server.lnk')
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
@@ -94,27 +169,35 @@ def main():
         )
         _clear_shortcut_runas(shortcut_path)
 
-        # Create the conditional startup and YARA scanner shortcuts.
-        for name, arg, desc in [
-            ('Start Conditional Antivirus (MSIX).lnk', '', 'Start Conditional Antivirus (MSIX)'),
-            ('Start YARA Scanner (MSIX).lnk', '--open-yara', 'Start YARA Scanner (MSIX)'),
+        # Create MSIX shortcuts through the registered AUMID. Direct shortcuts
+        # into WindowsApps can produce an access-denied launch error.
+        for name, desc in [
+            ('Start Conditional Antivirus (MSIX).lnk', 'Start Conditional Antivirus (MSIX)'),
+            ('Start YARA Scanner (MSIX).lnk', 'Start YARA Scanner (MSIX)'),
         ]:
             sc_path = os.path.join(desktop, name)
             _run_powershell(
                 "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "
                 "if (-not $pkg) {{ throw 'Package not found after install' }}; "
+                "$aumid = $pkg.PackageFamilyName + '!App'; "
                 "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
                 "$Wsh = New-Object -ComObject WScript.Shell; "
                 "$S = $Wsh.CreateShortcut('{}'); "
-                "$S.TargetPath = $exe; "
-                "$S.Arguments = '{}'; "
-                "$S.WorkingDirectory = $pkg.InstallLocation; "
+                "$S.TargetPath = 'explorer.exe'; "
+                "$S.Arguments = \"shell:AppsFolder\\$aumid\"; "
                 "$S.IconLocation = \"$exe,0\"; "
                 "$S.Description = '{}'; "
-                "$S.Save()".format(sc_path, arg, desc),
+                "$S.Save()".format(sc_path, desc),
                 "Creating {} shortcut".format(desc)
             )
             _clear_shortcut_runas(sc_path)
+
+        # Install the unpacked administrator bundle alongside the MSIX.
+        try:
+            helper_path = _install_standalone_bundle(_resource('antivirus_server'))
+            _create_admin_shortcuts(helper_path, desktop)
+        except Exception as error:
+            print(f"  WARNING: Administrator helper setup failed: {error}")
 
         _run_powershell(
             "$pkg = Get-AppxPackage -Name 'soluzka.AntivirusServer'; "

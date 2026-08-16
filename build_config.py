@@ -482,33 +482,63 @@ if os.path.exists(build_msix_ps1):
             except Exception as e:
                 print(f"Warning: could not clear MSIX shortcut administrator flag: {e}")
 
-        # Build the one-file installer EXE that bundles the cert and MSIX.
-        one_file_installer = os.path.join(base_dir, 'tools', 'build_installer_exe.py')
-        if os.path.exists(one_file_installer):
-            print("Building one-file installer EXE...")
-            subprocess.check_call([sys.executable, one_file_installer])
-            print("One-file installer build completed.")
-            src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer.exe')
-            dst = os.path.join(os.path.expanduser('~'), 'Desktop', 'Install_AntivirusServer.exe')
-            if os.path.exists(src):
-                shutil.copy2(src, dst)
-                print(f"Copied installer to desktop: {dst}")
-                if not build_args.skip_install:
-                    print("Running the installer app to install the MSIX...")
-                    subprocess.check_call([src])
-                    print("Installer app completed.")
-
-            # Create the other desktop shortcuts with the admin flag.
-            for script in ['create_conditional_shortcut.py', 'create_yara_scanner_shortcut.py']:
-                shortcut_script = os.path.join(base_dir, script)
-                if os.path.exists(shortcut_script):
-                    print(f"Creating shortcut from {script}...")
-                    subprocess.check_call([sys.executable, shortcut_script])
-                else:
-                    print(f"Warning: {script} not found; skipping.")
-        else:
-            print("Warning: tools/build_installer_exe.py not found; skipping one-file installer.")
     except Exception as e:
         print(f"Warning: MSIX build failed: {e}")
 else:
     print("Warning: build_msix.ps1 not found; skipping MSIX build.")
+
+
+def build_and_run_installer_app():
+    """Always build the installer app when its MSIX inputs are available."""
+    one_file_installer = os.path.join(base_dir, 'tools', 'build_installer_exe.py')
+    store_msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Store.msix')
+    store_cer = os.path.join(base_dir, 'dist', 'soluzka.cer')
+    if not os.path.exists(one_file_installer):
+        print("Warning: tools/build_installer_exe.py not found; skipping installer app.")
+        return
+    if not os.path.exists(store_msix) or not os.path.exists(store_cer):
+        print("Warning: MSIX or certificate output is missing; installer app was not built.")
+        return
+
+    print("Building one-file installer EXE...")
+    subprocess.check_call([sys.executable, one_file_installer])
+    src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer.exe')
+    if not os.path.exists(src):
+        raise FileNotFoundError(f"Installer app was not produced: {src}")
+    print(f"Installer app produced: {src}")
+    dst = os.path.join(os.path.expanduser('~'), 'Desktop', 'Install_AntivirusServer.exe')
+    shutil.copy2(src, dst)
+    if sys.platform.startswith('win'):
+        escaped_dst = dst.replace("'", "''")
+        subprocess.run(
+            ['powershell.exe', '-NoProfile', '-Command', f"Unblock-File -LiteralPath '{escaped_dst}'"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    print(f"Copied installer to desktop: {dst}")
+
+    if not build_args.skip_install:
+        print("Running the installer app with UAC elevation...")
+        if sys.platform.startswith('win'):
+            escaped_src = src.replace("'", "''")
+            install_command = f"Start-Process -FilePath '{escaped_src}' -Verb RunAs -Wait"
+            subprocess.check_call([
+                'powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                '-Command', install_command
+            ])
+        else:
+            subprocess.check_call([src])
+        print("Installer app completed.")
+
+    for script in ['create_conditional_shortcut.py', 'create_yara_scanner_shortcut.py']:
+        shortcut_script = os.path.join(base_dir, script)
+        if os.path.exists(shortcut_script):
+            print(f"Creating shortcut from {script}...")
+            subprocess.check_call([sys.executable, shortcut_script])
+
+
+try:
+    build_and_run_installer_app()
+except Exception as e:
+    print(f"Warning: installer app build/install failed: {e}")
