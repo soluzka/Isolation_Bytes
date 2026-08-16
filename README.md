@@ -164,13 +164,6 @@ python build_config.py `
 
 Replace the certificate path with the actual secure location of your `.pfx` file. Never commit the `.pfx` or its password.
 
-To also make the test launcher MSIX installable locally, run PowerShell as Administrator first:
-
-```powershell
-Set-Location "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c"
-python build_config.py
-```
-
 `build_config.py`:
 
 - Builds `dist\antivirus_server\antivirus_server.exe` as an onedir bundle.
