@@ -270,9 +270,13 @@ function New-AppxManifest($Path, $PackageName, $Publisher, $PublisherDisplayName
 if (-not $SkipStore) {
     $now = Get-Date
     $days = ($now - [DateTime]::new(2024, 1, 1)).Days
-    # Partner Center requires the revision component to be zero.
-    # The day counter provides a monotonically increasing Store version.
-    $Version = "1.0.$days.0"
+    # Partner Center requires the revision component to be zero. Supply a
+    # higher -StoreVersion when publishing more than one build on the same day.
+    if (-not $StoreVersion) { $StoreVersion = "1.0.$days.0" }
+    if ($StoreVersion -notmatch '^\d+\.\d+\.\d+\.0$') {
+        throw "StoreVersion must use four numeric components and end in .0, for example 1.0.958.0"
+    }
+    $Version = $StoreVersion
 
     # Build the Store package (soluzka cert) for Partner Center.
     $StoreMsix = Join-Path $Dist 'AntivirusServer_Store.msix'
