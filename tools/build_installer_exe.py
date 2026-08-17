@@ -34,6 +34,7 @@ sep = ';' if sys.platform.startswith('win') else ':'
 # Do not bundle multi-gigabyte local GGUF models into the one-file installer.
 # They are downloaded separately on machines that enable the local assistant.
 stage_root = Path(tempfile.mkdtemp(prefix='antivirus_installer_stage_'))
+work_root = Path(tempfile.mkdtemp(prefix='antivirus_installer_work_'))
 staged_standalone = stage_root / 'antivirus_server'
 shutil.copytree(
     standalone,
@@ -63,6 +64,7 @@ args = [
     '--uac-admin',
     '--noconfirm',
     '--log-level=INFO',
+    '--workpath', str(work_root),
     '--add-data', f"{msix}{sep}.",
     '--add-data', f"{cer}{sep}.",
     '--add-data', f"{standalone_archive}{sep}.",
@@ -76,4 +78,5 @@ try:
     PyInstaller.__main__.run(args)
 finally:
     shutil.rmtree(stage_root, ignore_errors=True)
+    shutil.rmtree(work_root, ignore_errors=True)
 print('Done. dist\\Install_AntivirusServer.exe should be available.')
