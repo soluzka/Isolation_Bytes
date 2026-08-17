@@ -27,6 +27,7 @@ elif 'OneDrive' in base_dir:
 else:
     dist_dir = repo_dist_dir
 build_dir = os.path.join(os.path.dirname(dist_dir), 'build')
+os.environ['ANTIVIRUS_BUILD_DIST'] = dist_dir
 
 upx_executable = shutil.which('upx')
 if not upx_executable:
