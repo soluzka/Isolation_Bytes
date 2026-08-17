@@ -14,7 +14,7 @@ _INSTALLER_ELEVATION_FLAG = '--installer-elevation-attempted'
 
 
 def _ensure_administrator():
-    """Ensure the one-file installer has permission for machine-wide setup."""
+    """Ensure the installer has permission for machine-wide setup."""
     if sys.platform != 'win32' or _INSTALLER_ELEVATION_FLAG in sys.argv:
         return True
     try:

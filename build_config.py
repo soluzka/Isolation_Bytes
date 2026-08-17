@@ -18,6 +18,13 @@ entry_point = 'quick_start.py'
 # Base directory
 base_dir = os.path.abspath(os.path.dirname(__file__))
 
+upx_executable = shutil.which('upx')
+if not upx_executable:
+    user_upx = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'UPX', 'upx.exe')
+    if os.path.isfile(user_upx):
+        upx_executable = user_upx
+upx_dir = os.path.dirname(upx_executable) if upx_executable else None
+
 # Parse optional MSIX certificate arguments (not PyInstaller flags)
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--store-cert', dest='store_cert', default=None, help='Path to Partner Center .pfx')
@@ -146,12 +153,22 @@ pyinstaller_args = [
     '--clean',
     '--noconfirm',
     '--log-level=DEBUG',
-    '--noupx',
     f'--icon={icon_path}',
     '--paths', base_dir,
     os.path.join(base_dir, entry_point),
     '--console'  # Keep console for debugging
 ]
+
+
+def add_upx_option(args):
+    if upx_dir:
+        args.extend(['--upx-dir', upx_dir])
+        logging.info("UPX compression enabled: %s", upx_executable)
+    else:
+        logging.warning("UPX not found; executable compression is disabled.")
+
+
+add_upx_option(pyinstaller_args)
 
 # Add Redis configuration
 redis_available = configure_redis()
@@ -401,6 +418,7 @@ if os.path.exists(runner_script):
             '--hidden-import', 'yara',
             runner_script,
         ]
+        add_upx_option(runner_args)
         PyInstaller.__main__.run(runner_args)
         print("ssdeep_runner build completed.")
 
@@ -434,6 +452,7 @@ if os.path.exists(helper_script):
             f'--icon={icon_path}',
             helper_script,
         ]
+        add_upx_option(helper_args)
         PyInstaller.__main__.run(helper_args)
         helper_src = os.path.join(base_dir, 'dist', 'AntivirusServer_AdminHelper.exe')
         helper_dst = os.path.join(base_dir, 'dist', app_name, 'AntivirusServer_AdminHelper.exe')
@@ -522,26 +541,16 @@ def build_and_run_installer_app():
         print("Warning: MSIX or certificate output is missing; installer app was not built.")
         return
 
-    print("Building one-file installer EXE...")
+    print("Building onedir installer...")
     installer_args = [sys.executable, one_file_installer]
     if build_args.include_local_model:
         installer_args.append('--include-local-model')
     subprocess.check_call(installer_args)
-    src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer.exe')
+    src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer', 'Install_AntivirusServer.exe')
     if not os.path.exists(src):
         raise FileNotFoundError(f"Installer app was not produced: {src}")
     print(f"Installer app produced: {src}")
-    dst = os.path.join(os.path.expanduser('~'), 'Desktop', 'Install_AntivirusServer.exe')
-    shutil.copy2(src, dst)
-    if sys.platform.startswith('win'):
-        escaped_dst = dst.replace("'", "''")
-        subprocess.run(
-            ['powershell.exe', '-NoProfile', '-Command', f"Unblock-File -LiteralPath '{escaped_dst}'"],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    print(f"Copied installer to desktop: {dst}")
+    print("The onedir installer remains in the dist directory; run its EXE to install.")
 
     if not build_args.skip_install:
         print("Running the installer app with UAC elevation...")

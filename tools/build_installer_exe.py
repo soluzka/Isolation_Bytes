@@ -1,4 +1,4 @@
-"""Build a one-file installer EXE for the Antivirus Server MSIX package."""
+"""Build an onedir installer for the Antivirus Server MSIX package."""
 import os
 import sys
 import shutil
@@ -31,8 +31,8 @@ if not os.path.isdir(standalone):
 
 sep = ';' if sys.platform.startswith('win') else ':'
 
-# Do not bundle multi-gigabyte local GGUF models into the one-file installer.
-# They are downloaded separately on machines that enable the local assistant.
+# Stage the standalone bundle separately so the onedir installer can carry
+# multi-gigabyte payloads without PyInstaller's one-file archive size limit.
 stage_root = Path(tempfile.mkdtemp(prefix='antivirus_installer_stage_'))
 work_root = Path(tempfile.mkdtemp(prefix='antivirus_installer_work_'))
 staged_standalone = stage_root / 'antivirus_server'
@@ -59,7 +59,7 @@ if os.path.exists(stale_spec):
 
 args = [
     '--name=Install_AntivirusServer',
-    '--onefile',
+    '--onedir',
     '--clean',
     '--uac-admin',
     '--noconfirm',
@@ -73,10 +73,21 @@ args = [
 if os.path.exists(identity_msix):
     args[args.index(app):args.index(app)] = ['--add-data', f"{identity_msix}{sep}."]
 
-print('Building one-file installer with:', args)
+upx = shutil.which('upx')
+if not upx:
+    user_upx = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'UPX', 'upx.exe')
+    if os.path.isfile(user_upx):
+        upx = user_upx
+if upx:
+    args.extend(['--upx-dir', os.path.dirname(upx)])
+    print('UPX compression enabled:', upx)
+else:
+    print('UPX not found; executable compression is disabled.')
+
+print('Building onedir installer with:', args)
 try:
     PyInstaller.__main__.run(args)
 finally:
     shutil.rmtree(stage_root, ignore_errors=True)
     shutil.rmtree(work_root, ignore_errors=True)
-print('Done. dist\\Install_AntivirusServer.exe should be available.')
+print('Done. dist\\Install_AntivirusServer\\Install_AntivirusServer.exe should be available.')

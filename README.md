@@ -134,7 +134,7 @@ Build and install everything with:
 python build_config.py
 ```
 
-By default, `build_config.py` also runs the generated `Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. To build without installing, use:
+By default, `build_config.py` also runs the generated onedir installer at `dist\Install_AntivirusServer\Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. To build without installing, use:
 
 To include the large local GGUF assistant model in the installer for testing, use:
 

@@ -4,6 +4,7 @@ Intended to run on Windows (build and runtime must match platform).
 """
 import os
 import sys
+import shutil
 import PyInstaller.__main__
 
 base_dir = os.path.abspath(os.path.dirname(__file__))
@@ -27,6 +28,17 @@ args = [
     '--hidden-import', 'yara',
     runner,
 ]
+
+upx = shutil.which('upx')
+if not upx:
+    user_upx = os.path.join(os.environ.get('LOCALAPPDATA', ''), 'UPX', 'upx.exe')
+    if os.path.isfile(user_upx):
+        upx = user_upx
+if upx:
+    args.extend(['--upx-dir', os.path.dirname(upx)])
+    print('UPX compression enabled:', upx)
+else:
+    print('UPX not found; executable compression is disabled.')
 
 print('Running PyInstaller with args:', args)
 PyInstaller.__main__.run(args)
