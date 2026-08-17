@@ -7,11 +7,12 @@ from pathlib import Path
 import PyInstaller.__main__
 
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+dist_dir = os.environ.get('ANTIVIRUS_BUILD_DIST', os.path.join(base_dir, 'dist'))
 app = os.path.join(base_dir, 'installer_app.py')
-msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Store.msix')
-cer = os.path.join(base_dir, 'dist', 'soluzka.cer')
-standalone = os.path.join(base_dir, 'dist', 'antivirus_server')
-identity_msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Identity.msix')
+msix = os.path.join(dist_dir, 'AntivirusServer_Store.msix')
+cer = os.path.join(dist_dir, 'soluzka.cer')
+standalone = os.path.join(dist_dir, 'antivirus_server')
+identity_msix = os.path.join(dist_dir, 'AntivirusServer_Identity.msix')
 include_local_model = '--include-local-model' in sys.argv
 
 if not os.path.exists(msix):
@@ -64,6 +65,7 @@ args = [
     '--uac-admin',
     '--noconfirm',
     '--log-level=INFO',
+    '--distpath', dist_dir,
     '--workpath', str(work_root),
     '--add-data', f"{msix}{sep}.",
     '--add-data', f"{cer}{sep}.",

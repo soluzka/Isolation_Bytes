@@ -2,6 +2,7 @@ import PyInstaller.__main__
 import os
 import sys
 import glob
+import stat
 import shutil
 import logging
 import subprocess
@@ -17,6 +18,15 @@ entry_point = 'quick_start.py'
 
 # Base directory
 base_dir = os.path.abspath(os.path.dirname(__file__))
+
+repo_dist_dir = os.path.join(base_dir, 'dist')
+if os.environ.get('ANTIVIRUS_BUILD_DIST'):
+    dist_dir = os.path.abspath(os.environ['ANTIVIRUS_BUILD_DIST'])
+elif 'OneDrive' in base_dir:
+    dist_dir = os.path.join(os.environ.get('LOCALAPPDATA', base_dir), 'AntivirusServerBuild', 'dist')
+else:
+    dist_dir = repo_dist_dir
+build_dir = os.path.join(os.path.dirname(dist_dir), 'build')
 
 upx_executable = shutil.which('upx')
 if not upx_executable:
@@ -155,6 +165,8 @@ pyinstaller_args = [
     '--log-level=DEBUG',
     f'--icon={icon_path}',
     '--paths', base_dir,
+    '--distpath', dist_dir,
+    '--workpath', build_dir,
     os.path.join(base_dir, entry_point),
     '--console'  # Keep console for debugging
 ]
@@ -354,19 +366,25 @@ redis_config = os.path.join(base_dir, 'redis', 'redis.conf')
 if os.path.exists(redis_config):
     pyinstaller_args.append(f'--add-data={redis_config}{sep}redis')
 
+def _clear_readonly(func, path, _exc_info):
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
 def _cleanup_dir(path):
-    """Remove path if possible; otherwise rename it so PyInstaller can create a fresh one."""
+    """Remove a stale build directory while tolerating transient Windows locks."""
     if not os.path.exists(path):
         return
-    for attempt in range(3):
+    last_error = None
+    for attempt in range(10):
         try:
-            shutil.rmtree(path)
+            shutil.rmtree(path, onerror=_clear_readonly)
             print(f"Removed {path}")
             return
         except (PermissionError, OSError) as e:
-            print(f"Warning: could not remove {path}: {e} (attempt {attempt + 1}/3)")
-            time.sleep(1)
-    # Fallback: rename the locked directory out of the way
+            last_error = e
+            print(f"Warning: could not remove {path}: {e} (attempt {attempt + 1}/10)")
+            time.sleep(2)
     for i in range(100):
         backup = f"{path}.old{i}"
         if not os.path.exists(backup):
@@ -374,16 +392,19 @@ def _cleanup_dir(path):
                 os.rename(path, backup)
                 print(f"Renamed {path} to {backup}")
                 return
-            except Exception as e:
-                print(f"Warning: could not rename {path}: {e}")
+            except (PermissionError, OSError) as e:
+                last_error = e
                 break
-    print(f"Warning: {path} is still present; PyInstaller may fail to overwrite it.")
+    raise PermissionError(
+        f"Could not clear locked build directory {path}. "
+        "Close the packaged app and pause OneDrive synchronization, then retry."
+    ) from last_error
 
 # Remove stale build output directories and .spec files so PyInstaller creates
 # a fresh onedir build instead of reusing a stale onefile .spec.
 if '--clean' in pyinstaller_args:
     pyinstaller_args.remove('--clean')
-for stale in [os.path.join(base_dir, 'build', app_name), os.path.join(base_dir, 'dist', app_name)]:
+for stale in [os.path.join(build_dir, app_name), os.path.join(dist_dir, app_name)]:
     _cleanup_dir(stale)
 for stale_spec in [os.path.join(base_dir, 'antivirus_server.spec'), os.path.join(base_dir, 'Install_AntivirusServer.spec')]:
     if os.path.exists(stale_spec):
@@ -413,6 +434,8 @@ if os.path.exists(runner_script):
             '--uac-admin',
             '--noconfirm',
             '--log-level=INFO',
+            '--distpath', dist_dir,
+            '--workpath', os.path.join(build_dir, 'ssdeep_runner'),
             '--add-data', f"{os.path.join(base_dir, 'security', 'yara_rules')}{sep}security\\yara_rules",
             '--collect-all', 'pyssdeep',
             '--hidden-import', 'yara',
@@ -424,8 +447,8 @@ if os.path.exists(runner_script):
 
         # Move the standalone runner into the onedir internal folder so it is
         # included with the installed project and its packaged dependencies.
-        runner_src = os.path.join(base_dir, 'dist', 'ssdeep_runner.exe')
-        onedir_root = os.path.join(base_dir, 'dist', app_name)
+        runner_src = os.path.join(dist_dir, 'ssdeep_runner.exe')
+        onedir_root = os.path.join(dist_dir, app_name)
         internal_dir = os.path.join(onedir_root, '_internal')
         runner_dst = os.path.join(internal_dir, 'ssdeep_runner.exe')
         if os.path.exists(runner_src) and os.path.isdir(onedir_root):
@@ -449,13 +472,15 @@ if os.path.exists(helper_script):
             '--uac-admin',
             '--noconfirm',
             '--log-level=INFO',
+            '--distpath', dist_dir,
+            '--workpath', os.path.join(build_dir, 'admin_helper'),
             f'--icon={icon_path}',
             helper_script,
         ]
         add_upx_option(helper_args)
         PyInstaller.__main__.run(helper_args)
-        helper_src = os.path.join(base_dir, 'dist', 'AntivirusServer_AdminHelper.exe')
-        helper_dst = os.path.join(base_dir, 'dist', app_name, 'AntivirusServer_AdminHelper.exe')
+        helper_src = os.path.join(dist_dir, 'AntivirusServer_AdminHelper.exe')
+        helper_dst = os.path.join(dist_dir, app_name, 'AntivirusServer_AdminHelper.exe')
         if os.path.exists(helper_src) and os.path.isdir(os.path.dirname(helper_dst)):
             shutil.move(helper_src, helper_dst)
             print(f"Moved AntivirusServer_AdminHelper.exe to {helper_dst}")
@@ -532,8 +557,8 @@ else:
 def build_and_run_installer_app():
     """Always build the installer app when its MSIX inputs are available."""
     one_file_installer = os.path.join(base_dir, 'tools', 'build_installer_exe.py')
-    store_msix = os.path.join(base_dir, 'dist', 'AntivirusServer_Store.msix')
-    store_cer = os.path.join(base_dir, 'dist', 'soluzka.cer')
+    store_msix = os.path.join(dist_dir, 'AntivirusServer_Store.msix')
+    store_cer = os.path.join(dist_dir, 'soluzka.cer')
     if not os.path.exists(one_file_installer):
         print("Warning: tools/build_installer_exe.py not found; skipping installer app.")
         return
@@ -546,7 +571,7 @@ def build_and_run_installer_app():
     if build_args.include_local_model:
         installer_args.append('--include-local-model')
     subprocess.check_call(installer_args)
-    src = os.path.join(base_dir, 'dist', 'Install_AntivirusServer', 'Install_AntivirusServer.exe')
+    src = os.path.join(dist_dir, 'Install_AntivirusServer', 'Install_AntivirusServer.exe')
     if not os.path.exists(src):
         raise FileNotFoundError(f"Installer app was not produced: {src}")
     print(f"Installer app produced: {src}")

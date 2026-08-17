@@ -9,6 +9,8 @@ import PyInstaller.__main__
 
 base_dir = os.path.abspath(os.path.dirname(__file__))
 repo_root = os.path.abspath(os.path.join(base_dir, '..'))
+dist_dir = os.environ.get('ANTIVIRUS_BUILD_DIST', os.path.join(repo_root, 'dist'))
+work_dir = os.path.join(os.path.dirname(dist_dir), 'build', 'ssdeep_runner')
 runner = os.path.join(repo_root, 'security', 'yara_rules', 'ssdeep_runner.py')
 if not os.path.exists(runner):
     print('ssdeep_runner.py not found at', runner)
@@ -23,6 +25,8 @@ args = [
     '--uac-admin',
     '--noconfirm',
     '--log-level=INFO',
+    '--distpath', dist_dir,
+    '--workpath', work_dir,
     '--add-data', f"{os.path.join(repo_root, 'security', 'yara_rules')}{sep}security\\yara_rules",
     '--collect-all', 'pyssdeep',
     '--hidden-import', 'yara',

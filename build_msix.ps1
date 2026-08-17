@@ -71,7 +71,7 @@ if (-not $NoCertManagement -and -not $isAdmin) {
 }
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$Dist = Join-Path $Root 'dist'
+$Dist = if ($env:ANTIVIRUS_BUILD_DIST) { $env:ANTIVIRUS_BUILD_DIST } else { Join-Path $Root 'dist' }
 $Onedir = Join-Path $Dist 'antivirus_server'
 $Sdk = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
 $MakeAppx = Join-Path $Sdk 'makeappx.exe'
