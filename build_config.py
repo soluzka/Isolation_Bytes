@@ -509,6 +509,9 @@ if os.path.exists(build_msix_ps1):
         if skip_test:
             args.append('-SkipTest')
             print("Skipping test launcher (--no-test).")
+        if build_args.include_local_model:
+            args.append('-IncludeLocalModel')
+            print("Including models\\assistant.gguf in the signed MSIX.")
         if build_args.store_cert:
             args.extend(['-StoreCertFile', build_args.store_cert])
         if build_args.store_cert_password:
@@ -577,6 +580,26 @@ def build_and_run_installer_app():
         raise FileNotFoundError(f"Installer app was not produced: {src}")
     print(f"Installer app produced: {src}")
     print("The onedir installer remains in the dist directory; run its EXE to install.")
+    if sys.platform.startswith('win'):
+        desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+        shortcut = os.path.join(desktop, 'Install_AntivirusServer.lnk')
+        escaped_src = src.replace("'", "''")
+        escaped_shortcut = shortcut.replace("'", "''")
+        escaped_working_dir = os.path.dirname(src).replace("'", "''")
+        shortcut_command = (
+            "$wsh = New-Object -ComObject WScript.Shell; "
+            f"$s = $wsh.CreateShortcut('{escaped_shortcut}'); "
+            f"$s.TargetPath = '{escaped_src}'; "
+            f"$s.WorkingDirectory = '{escaped_working_dir}'; "
+            "$s.Save()"
+        )
+        subprocess.run(
+            ['powershell.exe', '-NoProfile', '-Command', shortcut_command],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        print(f"Updated installer shortcut: {shortcut}")
 
     if not build_args.skip_install:
         print("Running the installer app with UAC elevation...")

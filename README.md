@@ -136,7 +136,7 @@ python build_config.py
 
 By default, `build_config.py` also runs the generated onedir installer at `dist\Install_AntivirusServer\Install_AntivirusServer.exe` after building it, so the MSIX is installed automatically. When the repository is under OneDrive, build outputs are redirected to `%LOCALAPPDATA%\AntivirusServerBuild\dist` to avoid synchronization locks. Override this with the `ANTIVIRUS_BUILD_DIST` environment variable. To build without installing, use:
 
-To include the large local GGUF assistant model in the installer for testing, use:
+To include the large local GGUF assistant model in both the signed MSIX and the onedir installer for testing, use:
 
 ```powershell
 $cert = New-SelfSignedCertificate `
@@ -337,7 +337,7 @@ The dashboard includes a local findings assistant. It works in findings mode wit
 python tools\download_local_assistant_model.py
 ```
 
-The model is saved as `models\assistant.gguf` and is not bundled or committed because it is several gigabytes. The model download comes from the official Qwen3 GGUF repository on Hugging Face. No paid API is required.
+The model is saved as `models\assistant.gguf` and is not committed because it is still a large file. The download script uses a smaller Qwen3 4B Q2_K GGUF model to minimize package size while retaining local assistant support. This quantization is approximately 1.67 GB, with noticeable quality loss compared with Q4_K_M. The model is a community GGUF quantization based on Qwen3 and is downloaded from Hugging Face. No paid API is required.
 
 **Important:** Do not run the packaged executable from `C:\Windows` or other protected directories. The application writes logs and runtime state next to the executable, and protected locations will cause permission errors.
 

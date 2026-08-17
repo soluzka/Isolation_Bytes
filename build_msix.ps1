@@ -11,6 +11,7 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipStore,
     [switch]$SkipTest,
+    [switch]$IncludeLocalModel,
     [switch]$NoCertManagement,
     [Parameter(Mandatory=$false)]
     [string]$StoreCertFile,
@@ -194,6 +195,17 @@ New-Item -ItemType Directory -Path $StageRoot | Out-Null
 
 Write-Host 'Staging dist\antivirus_server ...'
 Copy-Item -Path "$Onedir\*" -Destination $StageRoot -Recurse -Force
+
+# Keep the optional multi-gigabyte assistant model out of the signed MSIX by
+# default. The onedir installer can carry it separately without enlarging the
+# Store package beyond Windows signing tool limits.
+if (-not $IncludeLocalModel) {
+    $MsixAssistantModel = Join-Path $StageRoot 'models\assistant.gguf'
+    if (Test-Path $MsixAssistantModel) {
+        Remove-Item -Force $MsixAssistantModel
+        Write-Host 'Excluded models\assistant.gguf from MSIX.'
+    }
+}
 
 # Keep administrator-only unpacked helpers out of the MSIX. They are installed
 # by the traditional MSI/Inno installers and cannot be elevated from a package.
