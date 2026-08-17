@@ -505,7 +505,7 @@ if os.path.exists(build_msix_ps1):
             '-ExecutionPolicy', 'Bypass',
             '-File', build_msix_ps1,
             '-SkipBuild',
-            '-NoCertManagement'
+            '-BuildDist', dist_dir
         ]
         if skip_test:
             args.append('-SkipTest')
@@ -571,12 +571,12 @@ def build_and_run_installer_app():
         print("Warning: MSIX or certificate output is missing; installer app was not built.")
         return
 
-    print("Building onedir installer...")
+    print("Building single-file WinRAR installer...")
     installer_args = [sys.executable, one_file_installer]
     if build_args.include_local_model:
         installer_args.append('--include-local-model')
     subprocess.check_call(installer_args)
-    src = os.path.join(dist_dir, 'Install_AntivirusServer', 'Install_AntivirusServer.exe')
+    src = os.path.join(dist_dir, 'Install_AntivirusServer.exe')
     if not os.path.exists(src):
         raise FileNotFoundError(f"Installer app was not produced: {src}")
     print(f"Installer app produced: {src}")

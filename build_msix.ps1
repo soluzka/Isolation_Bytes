@@ -14,6 +14,8 @@ param(
     [switch]$IncludeLocalModel,
     [switch]$NoCertManagement,
     [Parameter(Mandatory=$false)]
+    [string]$BuildDist,
+    [Parameter(Mandatory=$false)]
     [string]$StoreCertFile,
     [Parameter(Mandatory=$false)]
     [SecureString]$StoreCertPassword,
@@ -41,6 +43,8 @@ if (-not $NoCertManagement -and -not $isAdmin) {
     if ($SkipBuild) { $reArgs += '-SkipBuild' }
     if ($SkipStore) { $reArgs += '-SkipStore' }
     if ($SkipTest) { $reArgs += '-SkipTest' }
+    if ($IncludeLocalModel) { $reArgs += '-IncludeLocalModel' }
+    if ($BuildDist) { $reArgs += '-BuildDist', $BuildDist }
     if ($StoreCertFile) { $reArgs += '-StoreCertFile', $StoreCertFile }
     if ($StoreCertPassword) {
         # UAC re-elevation requires a plain string for the command line; extract and zero the BSTR immediately.
@@ -72,7 +76,7 @@ if (-not $NoCertManagement -and -not $isAdmin) {
 }
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Definition
-$Dist = if ($env:ANTIVIRUS_BUILD_DIST) { $env:ANTIVIRUS_BUILD_DIST } else { Join-Path $Root 'dist' }
+$Dist = if ($BuildDist) { $BuildDist } elseif ($env:ANTIVIRUS_BUILD_DIST) { $env:ANTIVIRUS_BUILD_DIST } else { Join-Path $Root 'dist' }
 $Onedir = Join-Path $Dist 'antivirus_server'
 $Sdk = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
 $MakeAppx = Join-Path $Sdk 'makeappx.exe'

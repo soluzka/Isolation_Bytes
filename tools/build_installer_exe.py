@@ -1,7 +1,8 @@
-"""Build an onedir installer for the Antivirus Server MSIX package."""
+"""Build a WinRAR self-extracting installer for the Antivirus Server package."""
 import os
 import sys
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 import PyInstaller.__main__
@@ -92,4 +93,36 @@ try:
 finally:
     shutil.rmtree(stage_root, ignore_errors=True)
     shutil.rmtree(work_root, ignore_errors=True)
-print('Done. dist\\Install_AntivirusServer\\Install_AntivirusServer.exe should be available.')
+winrar = r'C:\Program Files\WinRAR\WinRAR.exe'
+if not os.path.exists(winrar):
+    raise FileNotFoundError(f'WinRAR was not found at {winrar}')
+
+sfx_output = os.path.join(dist_dir, 'Install_AntivirusServer.exe')
+sfx_config = Path(tempfile.mkstemp(prefix='antivirus_server_sfx_', suffix='.txt')[1])
+sfx_config.write_text(
+    'TempMode=1\\n'
+    'Silent=0\\n'
+    'Overwrite=1\\n'
+    'Setup=Install_AntivirusServer\\Install_AntivirusServer.exe\\n',
+    encoding='utf-8',
+)
+try:
+    print('Creating WinRAR self-extracting installer:', sfx_output)
+    subprocess.check_call([
+        winrar,
+        'a',
+        '-sfx',
+        '-m5',
+        '-y',
+        f'-z{sfx_config}',
+        sfx_output,
+        'Install_AntivirusServer',
+    ], cwd=dist_dir)
+finally:
+    sfx_config.unlink(missing_ok=True)
+
+installer_payload = os.path.join(dist_dir, 'Install_AntivirusServer')
+if os.path.isdir(installer_payload):
+    shutil.rmtree(installer_payload)
+    print('Removed unpacked installer payload after creating the SFX.')
+print('Done. Single-file installer: ' + sfx_output)
