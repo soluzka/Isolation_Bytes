@@ -133,5 +133,9 @@ lightgbm>=4.7.0
 certbot>=5.7.0
 certbot-dns-godaddy>=2.8.0
 
+# ACME client for DNS-01 certificate acquisition (used by get_cert.py)
+acme>=3.0.0
+pyopenssl>=24.0.0
+
 # UPnP client for auto port forwarding
 upnpclient>=2.0.3
