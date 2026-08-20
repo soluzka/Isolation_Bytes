@@ -121,10 +121,210 @@ static class Program
             return form.TryLoadExistingLicense() ? 0 : 1;
         }
 
+        // Start the Flask cloud server (soluzka.com:8443) if it's not already running.
+        CloudServerStarter.EnsureRunning();
+
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new LoginForm());
         return 0;
+    }
+}
+
+/// <summary>
+/// Finds and starts the Flask cloud server (cloud_server.py) so the website
+/// at soluzka.com:8443 is available. Does nothing if the server is already
+/// listening on port 8443.
+/// </summary>
+internal static class CloudServerStarter
+{
+    private const int ServerPort = 8443;
+
+    /// <summary>True if something is already listening on the server port.</summary>
+    private static bool IsPortListening()
+    {
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            var ar = client.BeginConnect("127.0.0.1", ServerPort, null, null);
+            var ok = ar.AsyncWaitHandle.WaitOne(500);
+            if (!ok) return false;
+            client.EndConnect(ar);
+            return true;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>Wait up to ~15 seconds for the server to start listening.</summary>
+    public static void WaitForServer(int timeoutMs = 15000)
+    {
+        var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+        while (DateTime.UtcNow < deadline)
+        {
+            if (IsPortListening()) return;
+            System.Threading.Thread.Sleep(500);
+        }
+    }
+
+    /// <summary>Find cloud_server.py relative to the launcher EXE or install dirs.</summary>
+    private static string? FindCloudServerScript()
+    {
+        var local = Path.GetDirectoryName(Application.ExecutablePath);
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrEmpty(local))
+        {
+            // Same folder as launcher
+            candidates.Add(Path.Combine(local, "cloud", "cloud_server.py"));
+            candidates.Add(Path.Combine(local, "cloud_server.py"));
+            // One/two/three levels up (dev layout, install layouts)
+            candidates.Add(Path.Combine(local, "..", "cloud", "cloud_server.py"));
+            candidates.Add(Path.Combine(local, "..", "..", "cloud", "cloud_server.py"));
+            candidates.Add(Path.Combine(local, "..", "..", "..", "cloud", "cloud_server.py"));
+            // Sibling "Antivirus Server" folder
+            candidates.Add(Path.Combine(local, "Antivirus Server", "cloud", "cloud_server.py"));
+            candidates.Add(Path.Combine(local, "..", "Antivirus Server", "cloud", "cloud_server.py"));
+        }
+
+        // Program Files install layouts
+        var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        candidates.Add(Path.Combine(pf, "Antivirus Server", "cloud", "cloud_server.py"));
+        candidates.Add(Path.Combine(pf86, "Antivirus Server", "cloud", "cloud_server.py"));
+        candidates.Add(Path.Combine(pf, "AntivirusServer", "cloud", "cloud_server.py"));
+        candidates.Add(Path.Combine(pf86, "AntivirusServer", "cloud", "cloud_server.py"));
+
+        // Runtime dir from service.cache (highest priority — insert at front)
+        try
+        {
+            var envPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AntivirusServer", "service.cache");
+            if (File.Exists(envPath))
+            {
+                foreach (var line in File.ReadAllLines(envPath))
+                {
+                    if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                    {
+                        var runtimeDir = line.Substring("ANTIVIRUS_RUNTIME_DIR=".Length).Trim();
+                        if (!string.IsNullOrEmpty(runtimeDir))
+                        {
+                            candidates.Insert(0, Path.Combine(runtimeDir, "cloud", "cloud_server.py"));
+                            candidates.Insert(1, Path.Combine(runtimeDir, "cloud_server.py"));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        // Also check the embedded env for a runtime dir hint.
+        try
+        {
+            var env = EnvData.GetDecrypted();
+            foreach (var line in env.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                {
+                    var runtimeDir = line.Substring("ANTIVIRUS_RUNTIME_DIR=".Length).Trim();
+                    if (!string.IsNullOrEmpty(runtimeDir))
+                    {
+                        candidates.Insert(0, Path.Combine(runtimeDir, "cloud", "cloud_server.py"));
+                        candidates.Insert(1, Path.Combine(runtimeDir, "cloud_server.py"));
+                    }
+                    break;
+                }
+            }
+        }
+        catch { }
+
+        foreach (var c in candidates)
+        {
+            try { if (File.Exists(c)) return Path.GetFullPath(c); } catch { }
+        }
+        return null;
+    }
+
+    /// <summary>Find the python executable to run the server with.</summary>
+    private static string? FindPython()
+    {
+        var candidates = new List<string>
+        {
+            "python.exe",
+            "python",
+            "py",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python311", "python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python312", "python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python313", "python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python310", "python.exe"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "Python", "Python39", "python.exe"),
+            @"C:\Program Files\Python311\python.exe",
+            @"C:\Program Files\Python312\python.exe",
+            @"C:\Program Files\Python313\python.exe",
+            @"C:\Program Files\Python310\python.exe",
+            @"C:\Program Files\Python39\python.exe",
+            @"C:\Program Files (x86)\Python311\python.exe",
+            @"C:\Program Files (x86)\Python312\python.exe",
+        };
+
+        foreach (var c in candidates)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = c,
+                    Arguments = "--version",
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                using var p = Process.Start(psi);
+                if (p is not null)
+                {
+                    p.WaitForExit(3000);
+                    if (p.ExitCode == 0) return c;
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Start the Flask cloud server if it's not already running and the
+    /// script can be found. Waits for the server to be ready before returning.
+    /// </summary>
+    public static void EnsureRunning()
+    {
+        if (IsPortListening()) return; // Already running.
+
+        var script = FindCloudServerScript();
+        if (script is null) return; // Not installed alongside the launcher.
+
+        var python = FindPython();
+        if (python is null) return; // Python not found.
+
+        var workingDir = Path.GetDirectoryName(script) ?? "";
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = python,
+                Arguments = $"\"{script}\"",
+                WorkingDirectory = workingDir,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            proc.Start();
+        }
+        catch { }
+
+        // Wait for the server to come up so the page doesn't load white.
+        WaitForServer(15000);
     }
 }
 
