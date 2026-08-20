@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -121,7 +122,9 @@ static class Program
             return form.TryLoadExistingLicense() ? 0 : 1;
         }
 
-        // Start the Flask cloud server (soluzka.com:8443) if it's not already running.
+        // Start the Flask cloud server (soluzka.com:8443) in the background
+        // if it's not already running. Non-blocking — the form will retry
+        // fetching the page until the server is ready.
         CloudServerStarter.EnsureRunning();
 
         Application.EnableVisualStyles();
@@ -244,6 +247,57 @@ internal static class CloudServerStarter
         return null;
     }
 
+    /// <summary>Find a standalone cloud_server.exe (PyInstaller build, no Python needed).</summary>
+    private static string? FindCloudServerExe()
+    {
+        var local = Path.GetDirectoryName(Application.ExecutablePath);
+        var candidates = new List<string>();
+
+        if (!string.IsNullOrEmpty(local))
+        {
+            candidates.Add(Path.Combine(local, "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "cloud", "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "..", "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "..", "cloud", "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "..", "..", "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "Antivirus Server", "cloud_server.exe"));
+            candidates.Add(Path.Combine(local, "dist", "cloud_server.exe"));
+        }
+
+        var pf = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        var pf86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        candidates.Add(Path.Combine(pf, "Antivirus Server", "cloud_server.exe"));
+        candidates.Add(Path.Combine(pf86, "Antivirus Server", "cloud_server.exe"));
+        candidates.Add(Path.Combine(pf, "AntivirusServer", "cloud_server.exe"));
+        candidates.Add(Path.Combine(pf86, "AntivirusServer", "cloud_server.exe"));
+
+        // Runtime dir from service.cache
+        try
+        {
+            var envPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AntivirusServer", "service.cache");
+            if (File.Exists(envPath))
+            {
+                foreach (var line in File.ReadAllLines(envPath))
+                {
+                    if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                    {
+                        var runtimeDir = line.Substring("ANTIVIRUS_RUNTIME_DIR=".Length).Trim();
+                        if (!string.IsNullOrEmpty(runtimeDir))
+                            candidates.Insert(0, Path.Combine(runtimeDir, "cloud_server.exe"));
+                        break;
+                    }
+                }
+            }
+        }
+        catch { }
+
+        foreach (var c in candidates)
+        {
+            try { if (File.Exists(c)) return Path.GetFullPath(c); } catch { }
+        }
+        return null;
+    }
+
     /// <summary>Find the python executable to run the server with.</summary>
     private static string? FindPython()
     {
@@ -292,39 +346,167 @@ internal static class CloudServerStarter
     }
 
     /// <summary>
-    /// Start the Flask cloud server if it's not already running and the
-    /// script can be found. Waits for the server to be ready before returning.
+    /// Extract the embedded Python 3.11 installer and run it silently to
+    /// install Python for all users. Returns true if Python is available
+    /// after the install (or was already installed).
     /// </summary>
+    private static bool EnsurePythonInstalled()
+    {
+        // Already installed?
+        if (FindPython() is not null) return true;
+
+        try
+        {
+            // Extract the embedded installer to temp.
+            var asm = Assembly.GetExecutingAssembly();
+            var resourceName = "python_installer.exe";
+            var tempInstaller = Path.Combine(Path.GetTempPath(), "python-3.11.9-amd64.exe");
+
+            using (var stream = asm.GetManifestResourceStream(resourceName))
+            {
+                if (stream is null) return false; // Installer not embedded.
+                using var fs = new FileStream(tempInstaller, FileMode.Create, FileAccess.Write);
+                stream.CopyTo(fs);
+            }
+
+            // Run the installer silently for all users:
+            //   /quiet       — no UI
+            //   InstallAllUsers=1 — install for all users
+            //   PrependPath=1     — add to PATH
+            //   Include_pip=1     — include pip
+            var psi = new ProcessStartInfo
+            {
+                FileName = tempInstaller,
+                Arguments = "/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                Verb = "runas",
+            };
+            var proc = Process.Start(psi);
+            if (proc is not null)
+            {
+                proc.WaitForExit(120000); // Wait up to 2 minutes.
+            }
+
+            try { File.Delete(tempInstaller); } catch { }
+
+            // Check again if Python is now available.
+            return FindPython() is not null;
+        }
+        catch { return false; }
+    }
+
+    /// <summary>
+    /// Start the Flask cloud server if it's not already running and the
+    /// script can be found. Non-blocking — starts the server in a background
+    /// thread and returns immediately. The form will retry fetching the page.
+    /// </summary>
+    /// <summary>
+    /// Extract the embedded cloud_server.py to a temp folder so it can be
+    /// run with Python. Returns the path to the extracted script, or null.
+    /// </summary>
+    private static string? ExtractEmbeddedServer()
+    {
+        try
+        {
+            var script = CloudServer.GetDecrypted();
+            if (string.IsNullOrEmpty(script)) return null;
+
+            // Extract to a temp folder next to the launcher (so it can find
+            // templates/, static/, website/, etc. relative to the project root).
+            var local = Path.GetDirectoryName(Application.ExecutablePath);
+            string extractDir;
+            if (!string.IsNullOrEmpty(local))
+                extractDir = Path.Combine(local, "cloud");
+            else
+                extractDir = Path.Combine(Path.GetTempPath(), "AntivirusServer", "cloud");
+
+            Directory.CreateDirectory(extractDir);
+            var scriptPath = Path.Combine(extractDir, "cloud_server.py");
+            File.WriteAllText(scriptPath, script);
+            return scriptPath;
+        }
+        catch { return null; }
+    }
+
     public static void EnsureRunning()
     {
         if (IsPortListening()) return; // Already running.
 
-        var script = FindCloudServerScript();
-        if (script is null) return; // Not installed alongside the launcher.
-
-        var python = FindPython();
-        if (python is null) return; // Python not found.
-
-        var workingDir = Path.GetDirectoryName(script) ?? "";
-
-        try
+        // Prefer a standalone cloud_server.exe (no Python needed).
+        var serverExe = FindCloudServerExe();
+        if (serverExe is not null)
         {
-            var psi = new ProcessStartInfo
+            var workingDir = Path.GetDirectoryName(serverExe) ?? "";
+            System.Threading.Tasks.Task.Run(() =>
             {
-                FileName = python,
-                Arguments = $"\"{script}\"",
-                WorkingDirectory = workingDir,
-                UseShellExecute = false,
-                CreateNoWindow = true,
-                WindowStyle = ProcessWindowStyle.Hidden,
-            };
-            var proc = new Process { StartInfo = psi, EnableRaisingEvents = true };
-            proc.Start();
+                try
+                {
+                    var proc = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = serverExe,
+                            WorkingDirectory = workingDir,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
+                        },
+                        EnableRaisingEvents = true,
+                    };
+                    proc.Start();
+                }
+                catch { }
+            });
+            return;
         }
-        catch { }
 
-        // Wait for the server to come up so the page doesn't load white.
-        WaitForServer(15000);
+        // Try to find cloud_server.py on disk first.
+        var script = FindCloudServerScript();
+
+        // If not found, extract the embedded copy from the launcher.
+        if (script is null)
+            script = ExtractEmbeddedServer();
+
+        if (script is null) return;
+
+        // Make sure Python is installed (extracts + runs embedded installer
+        // if Python is not found on the system).
+        var python = FindPython();
+        if (python is null)
+        {
+            // Run the installer on a background thread so the UI doesn't freeze.
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                EnsurePythonInstalled();
+            }).Wait(120000); // Wait up to 2 minutes for the install.
+            python = FindPython();
+        }
+
+        if (python is null) return;
+
+        var wd = Path.GetDirectoryName(script) ?? "";
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var proc = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = python,
+                        Arguments = $"\"{script}\"",
+                        WorkingDirectory = wd,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
+                    },
+                    EnableRaisingEvents = true,
+                };
+                proc.Start();
+            }
+            catch { }
+        });
     }
 }
 
@@ -401,26 +583,56 @@ public class LoginForm : Form
 
         Load += async (s, e) =>
         {
+            // Show a loading screen immediately so the window isn't white
+            // while the server starts up.
+            var loadingHtml = "<html><head><style>" +
+                "* { font-family: 'Segoe UI', sans-serif; }" +
+                "body { background: #0b1321; color: #e0e1dd; display: flex; " +
+                "flex-direction: column; align-items: center; justify-content: center; " +
+                "height: 100vh; margin: 0; }" +
+                ".spinner { width: 40px; height: 40px; border: 3px solid #415a77; " +
+                "border-top: 3px solid #00b4d8; border-radius: 50%; " +
+                "animation: spin 1s linear infinite; margin-bottom: 20px; }" +
+                "@keyframes spin { 100% { transform: rotate(360deg); } }" +
+                "h2 { color: #90e0ef; font-weight: 400; }" +
+                "p { color: #778da9; font-size: 0.9rem; }" +
+                "</style></head><body>" +
+                "<div class='spinner'></div>" +
+                "<h2>Starting Antivirus Server...</h2>" +
+                "<p>Please wait while the server loads.</p>" +
+                "</body></html>";
+            _browser.DocumentText = loadingHtml;
+
             string html;
             var publicUrl = GetEnv("PUBLIC_URL");
             if (string.IsNullOrWhiteSpace(publicUrl))
                 publicUrl = "https://soluzka.com:8443/";
 
-            var urls = new[] { publicUrl, "https://192.168.1.133:8443/", "https://127.0.0.1:8443/" };
+            var urls = new[] { publicUrl, "https://127.0.0.1:8443/", "https://192.168.1.133:8443/" };
             html = LoginHtml.GetDecrypted();
-            foreach (var url in urls.Distinct())
+
+            // Retry fetching from the server for up to ~20 seconds (server
+            // may still be starting up from CloudServerStarter.EnsureRunning).
+            var deadline = DateTime.UtcNow.AddSeconds(20);
+            bool fetched = false;
+            while (DateTime.UtcNow < deadline && !fetched)
             {
-                try
+                foreach (var url in urls.Distinct())
                 {
-                    var handler = new HttpClientHandler
+                    try
                     {
-                        ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
-                    };
-                    using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
-                    html = await http.GetStringAsync(url).ConfigureAwait(false);
-                    break;
+                        var handler = new HttpClientHandler
+                        {
+                            ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
+                        };
+                        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+                        html = await http.GetStringAsync(url).ConfigureAwait(false);
+                        fetched = true;
+                        break;
+                    }
+                    catch { }
                 }
-                catch { }
+                if (!fetched) await System.Threading.Tasks.Task.Delay(1000);
             }
 
             html = html.Replace("{{MACHINE_ID}}", GetMachineId()).Replace("{{ADMIN_USERNAME}}", GetEnv("ADMIN_USERNAME") ?? "");
