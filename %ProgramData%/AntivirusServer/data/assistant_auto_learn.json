@@ -1,0 +1,212 @@
+[
+  {
+    "timestamp": "2026-08-20T05:19:32",
+    "type": "base_knowledge_seeded",
+    "data": {
+      "count": 23
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:19:34",
+    "type": "auto_yara_generated",
+    "data": {
+      "threat_type": "ransomware",
+      "path": "C:/Users/test/malware.exe",
+      "patterns": [
+        "ransomware"
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:19:34",
+    "type": "auto_yara_generated",
+    "data": {
+      "threat_type": "trojan",
+      "path": "C:/Users/test/trojan.dll",
+      "patterns": [
+        "trojan"
+      ]
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:20:16",
+    "type": "interaction",
+    "data": {
+      "question": "What have you improved in your own code?",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:20:16",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "medium",
+      "answer_length": 172,
+      "mentioned_threats": [
+        "ransomware"
+      ],
+      "mentioned_paths": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:21:30",
+    "type": "interaction",
+    "data": {
+      "question": "What have you improved in your own code?",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:21:30",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "medium",
+      "answer_length": 172,
+      "mentioned_threats": [
+        "ransomware"
+      ],
+      "mentioned_paths": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:22:22",
+    "type": "interaction",
+    "data": {
+      "question": "What do you know about ransomware?",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:22:22",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "medium",
+      "answer_length": 1454,
+      "mentioned_threats": [
+        "backdoor",
+        "keylogger",
+        "trojan",
+        "rootkit"
+      ],
+      "mentioned_paths": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:22:40",
+    "type": "interaction",
+    "data": {
+      "question": "What have you learned?",
+      "question_type": "training",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:22:40",
+    "type": "self_identified_threat_path",
+    "data": {
+      "path": "/windows/system32/notepad.exe"
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:22:40",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "training",
+      "confidence": "high",
+      "answer_length": 2371,
+      "mentioned_threats": [
+        "cryptominer",
+        "worm",
+        "keylogger",
+        "rootkit",
+        "backdoor",
+        "c2_beacon",
+        "ransomware",
+        "spyware",
+        "trojan",
+        "adware"
+      ],
+      "mentioned_paths": 1
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:07",
+    "type": "interaction",
+    "data": {
+      "question": "Prioritize the current findings by risk",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:07",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "high",
+      "answer_length": 1686,
+      "mentioned_threats": [
+        "backdoor",
+        "trojan",
+        "rootkit"
+      ],
+      "mentioned_paths": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:30",
+    "type": "interaction",
+    "data": {
+      "question": "Retrain model",
+      "question_type": "training",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:30",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "training",
+      "confidence": "medium",
+      "answer_length": 180,
+      "mentioned_threats": [],
+      "mentioned_paths": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:57",
+    "type": "interaction",
+    "data": {
+      "question": "Show rules",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T05:23:57",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "medium",
+      "answer_length": 251,
+      "mentioned_threats": [
+        "ransomware",
+        "trojan"
+      ],
+      "mentioned_paths": 0
+    }
+  }
+]

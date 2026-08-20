@@ -607,7 +607,15 @@ if (stopAutoUpdatesBtn) {
                     <button type="button" class="assistant-prompt" data-ai-question="Create an incident report from the current findings">Report</button>
                     <button type="button" class="assistant-prompt" data-ai-question="Extract all IOCs from the current findings">Extract IOCs</button>
                     <button type="button" class="assistant-prompt" data-ai-question="Prioritize the current findings by risk">Prioritize</button>
-                    <button type="button" class="assistant-prompt" data-ai-question="What is the administrator service status?">Service status</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Show all connected agents and their status">Agents</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="What are the agents thinking and doing right now?">Thoughts</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Any suspicious behavior or threats?">Threats</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="What have you learned?">Training</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Show rules">YARA Rules</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Improve rules from current findings">Improve</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="What have you improved in your own code?">Self-Improved</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="Retrain model">Retrain ML</button>
+                    <button type="button" class="assistant-prompt" data-ai-question="What do you know about ransomware?">Knowledge</button>
                     <button type="button" id="assistant_download_report">Download report</button>
                 </div>
                 <form id="assistant_form">
@@ -912,6 +920,10 @@ if (stopAutoUpdatesBtn) {
                     userLine.textContent = `You: ${message}`;
                     assistantMessages.appendChild(userLine);
                     assistantInput.value = '';
+                    const waitingLine = document.createElement('p');
+                    waitingLine.textContent = 'Assistant: Thinking...';
+                    assistantMessages.appendChild(waitingLine);
+                    assistantMessages.scrollTop = assistantMessages.scrollHeight;
                     try {
                         const response = await fetch('/api/assistant/chat', {
                             method: 'POST',
@@ -921,12 +933,53 @@ if (stopAutoUpdatesBtn) {
                         });
                         const data = await response.json();
                         if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
-                        const answerLine = document.createElement('p');
-                        answerLine.textContent = `Assistant (${data.mode}): ${data.answer}`;
-                        assistantMessages.appendChild(answerLine);
-                        assistantMode.textContent = `Mode: ${data.mode}`;
+                        // Async job — poll for result
+                        if (data.job_id) {
+                            const jobId = data.job_id;
+                            let polls = 0;
+                            const poll = async () => {
+                                polls++;
+                                if (polls > 120) { // ~2 min timeout
+                                    waitingLine.remove();
+                                    const errorLine = document.createElement('p');
+                                    errorLine.textContent = 'Assistant error: timed out waiting for response';
+                                    assistantMessages.appendChild(errorLine);
+                                    return;
+                                }
+                                try {
+                                    const sr = await fetch(`/api/assistant/status/${jobId}`, {credentials: 'include'});
+                                    const sd = await sr.json();
+                                    if (sd.status === 'done') {
+                                        waitingLine.remove();
+                                        const answerLine = document.createElement('p');
+                                        answerLine.textContent = `Assistant (${sd.mode}): ${sd.answer}`;
+                                        assistantMessages.appendChild(answerLine);
+                                        assistantMode.textContent = `Mode: ${sd.mode}`;
+                                        assistantMessages.scrollTop = assistantMessages.scrollHeight;
+                                    } else if (sd.status === 'error') {
+                                        waitingLine.remove();
+                                        const errorLine = document.createElement('p');
+                                        errorLine.textContent = `Assistant error: ${sd.error}`;
+                                        assistantMessages.appendChild(errorLine);
+                                    } else {
+                                        setTimeout(poll, 1000);
+                                    }
+                                } catch (e) {
+                                    setTimeout(poll, 1000);
+                                }
+                            };
+                            setTimeout(poll, 1000);
+                        } else {
+                            // Synchronous response (fallback)
+                            waitingLine.remove();
+                            const answerLine = document.createElement('p');
+                            answerLine.textContent = `Assistant (${data.mode}): ${data.answer}`;
+                            assistantMessages.appendChild(answerLine);
+                            assistantMode.textContent = `Mode: ${data.mode}`;
+                        }
                         assistantMessages.scrollTop = assistantMessages.scrollHeight;
                     } catch (error) {
+                        waitingLine.remove();
                         const errorLine = document.createElement('p');
                         errorLine.textContent = `Assistant error: ${error.message || error}`;
                         assistantMessages.appendChild(errorLine);
