@@ -118,5 +118,60 @@
     "timestamp": "2026-08-20T05:20:53",
     "topic": "suspicious_extensions",
     "content": "Double extensions (e.g., report.pdf.exe) are a classic malware trick. Other suspicious patterns include .exe.scr, .doc.exe, and files with Unicode characters in names. Also watch for .lnk files in unusual locations and .hta (HTML Application) files."
+  },
+  {
+    "timestamp": "2026-08-20T09:28:38",
+    "topic": "self_learned:keylogger",
+    "content": "Self-learned: - keylogger: A keylogger records keystrokes to capture passwords, credit card numbers, and other sensitive data"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:38",
+    "topic": "self_learned:rootkit",
+    "content": "Self-learned: - rootkit: A rootkit is malware designed to hide its presence (or other malware) on a system by operating at the kernel or firmware level Rootkits can intercept system calls, hide files and processes, and maintain persistent access"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:38",
+    "topic": "self_learned:backdoor",
+    "content": "Self-learned: Common types include backdoor trojans (remote access), banking trojans (steal financial data), and downloader trojans (install more malware)"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:38",
+    "topic": "self_learned:trojan",
+    "content": "Self-learned: From my training, I also know:\n  - trojan: A trojan is malware disguised as legitimate software Unlike viruses, trojans don't self-replicate — they rely on social engineering to trick users into running them"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:38",
+    "topic": "self_learned:remediation",
+    "content": "Self-learned remediation: Everything looks clean. No threats, no suspicious activity, no anomalies. Your agents are watching and nothing has triggered any alarms. If something comes up, I'll know about it."
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:ransomware",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence and 14 more\n\nGenerated YARA rules:\n  - learned_auto_ransomware"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:spyware",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:adware",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:worm",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence yar\n  - learned_test_worm"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:cryptominer",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence"
+  },
+  {
+    "timestamp": "2026-08-20T09:28:51",
+    "topic": "self_learned:c2_beacon",
+    "content": "Self-learned: Database learning stats:\n  - Findings recorded: 0\n  - Confirmed threats: 0\n  - Malware signatures: 0\n  - ML training samples: 0\n  - Learning events: 3\n  - Agent reports: 0\n  - Score adjustments: 0\n\nSelf-learning stats:\n  - Auto-learning events: 3\n  - YARA rules auto-generated: 0\n  - ML auto-training sessions: 0\n  - Good answers I gave: 0\n  - Bad answers (to improve): 0\n  - False positive candidates: 0\n\nKnowledge topics (29 total):\n  - ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine\n  - persistence"
   }
 ]
