@@ -5,6 +5,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- Self-contained single-file EXE — no .NET install needed -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -15,13 +16,22 @@
     <DebuggerSupport>false</DebuggerSupport>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
+    <!-- App metadata -->
     <AssemblyTitle>Antivirus Server Login</AssemblyTitle>
     <AssemblyProduct>Antivirus Server</AssemblyProduct>
     <AssemblyCompany>soluzka</AssemblyCompany>
     <Version>1.8.678.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
+
+  <!-- Python installer embedded for bootstrap fallback -->
   <ItemGroup>
     <EmbeddedResource Include="..\..\python-3.11.9-amd64.exe" LogicalName="python_installer.exe" />
+  </ItemGroup>
+
+  <!-- cloud_server.exe embedded so the launcher is fully self-contained -->
+  <!-- No .env embedded — launcher fetches config from the server at runtime -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\dist\cloud_server.exe" LogicalName="cloud_server_exe" />
   </ItemGroup>
 </Project>

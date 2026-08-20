@@ -54,6 +54,9 @@ wmi>=1.5.1; platform_system=="Windows"
 # Werkzeug for secure_filename (if used directly)
 Werkzeug>=3.1.6
 
+# Payments
+stripe>=7.0.0
+
 # Archive extraction support
 rarfile>=4.0
 

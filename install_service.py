@@ -100,7 +100,7 @@ def main():
     print(f"  - Start:  python cloud_service.py start")
     print(f"  - Remove: python cloud_service.py remove")
     print(f"\nLocal dashboard: https://127.0.0.1:8000/ (proxy mode) or https://127.0.0.1:8443/ (direct)")
-    print(f"Public via Caddy: https://soluzka.com/ (requires port 443 forwarding)")
+    print(f"Public via Caddy: https://isolation-bytes.com/ (requires port 443 forwarding)")
     print(f"Public via Cloudflare tunnel: check service.log for the trycloudflare URL")
 
 

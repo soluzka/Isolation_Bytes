@@ -138,19 +138,21 @@
                     padding: 20px;
                     margin: 14px 0;
                 ">
-                    <a href="#" onclick="doBuyNow(); return false;" style="
+                    <button id="lemonPayBtn" class="btn primary" style="
                         display: inline-block;
                         font-size: 18px;
                         line-height: 48px;
                         height: 48px;
                         color: #ffffff;
                         min-width: 212px;
-                        background-color: #006aff;
+                        background-color: #FFC233;
                         text-align: center;
-                        box-shadow: 0 0 0 1px rgba(0,0,0,.1) inset;
+                        border: none;
                         border-radius: 6px;
+                        cursor: pointer;
                         text-decoration: none;
-                    ">Buy now</a>
+                        font-weight: bold;
+                    " onclick="doBuyNow()">Buy with Lemon Squeezy</button>
                 </div>
                 <div class="btn-row">
                     <button class="btn" onclick="showPage('redeemPage')">I Already Paid</button>
@@ -165,10 +167,10 @@
             <div class="card">
                 <h2>Redeem Your Purchase</h2>
                 <p class="steps">
-                    Paste your Square payment or order ID below. If you forgot it, enter the email you used at checkout as a last resort. We will look up the payment and only activate if it was paid.
+                    After paying via Stripe, your license is created automatically and tied to your machine ID. If you need to redeem manually, enter your Stripe session ID or the email used at checkout.
                 </p>
-                <label for="redeemPaymentId">Square Payment / Order ID (optional if using email)</label>
-                <input id="redeemPaymentId" type="text" placeholder="Payment ID like sq0idp-... or Order ID like sq0g-...">
+                <label for="redeemPaymentId">Stripe Session/Order ID (optional if using email)</label>
+                <input id="redeemPaymentId" type="text" placeholder="cs_test_... or email lookup">
 
                 <label for="redeemUsername">Username</label>
                 <input id="redeemUsername" type="text" placeholder="admin">
@@ -196,24 +198,28 @@
             <div class="card">
                 <h2>Activate Antivirus Server</h2>
                 <div class="notice" style="background:#415a77; border-left: 4px solid #00b4d8; padding:12px; border-radius:6px; margin-bottom:16px;">
-                    Paste the license you received after purchase, then log in to launch the app.
+                    Enter the license key you received after purchase. It will be verified and tied to your machine.
                 </div>
 
                 <label for="machineId">Machine ID</label>
                 <input id="machineId" type="text" readonly>
 
-                <label for="license">License (base64 or .lic JSON)</label>
-                <textarea id="license" placeholder="Paste your license data here..."></textarea>
+                <label for="licenseKey">Lemon Squeezy License Key</label>
+                <input id="licenseKey" type="text" placeholder="Paste your license key here...">
 
                 <div class="btn-row">
-                    <button class="btn" onclick="loadLicense()">Load License</button>
+                    <button class="btn primary" onclick="doActivate()">Activate License</button>
                 </div>
 
+                <div id="activateResult" class="status"></div>
+
+                <hr style="border-color:#415a77; margin:20px 0;">
+
                 <label for="username">Username</label>
-                <input id="username" type="text" placeholder="Your license username">
+                <input id="username" type="text" placeholder="Choose a username">
 
                 <label for="password">Password</label>
-                <input id="password" type="password" placeholder="Your license password">
+                <input id="password" type="password" placeholder="Choose a password">
 
                 <div class="btn-row">
                     <button class="btn primary" onclick="doLogin()">Login</button>
@@ -221,11 +227,7 @@
                     <button class="btn" onclick="showPage('homePage')">Back</button>
                 </div>
 
-                <div class="btn-row" style="margin-top:10px;">
-                    <button class="btn" onclick="doForgotPassword()">Forgot password?</button>
-                </div>
-
-                <div id="status" class="status">Waiting for license...</div>
+                <div id="status" class="status">Enter your license key to activate.</div>
             </div>
         </div>
     </div>
@@ -301,7 +303,7 @@
             if (bases && bases.length > 0 && bases[0].href) {
                 return bases[0].href.split('?')[0].split('#')[0];
             }
-            return (window.location.href || 'https://soluzka.com:8443/').split('?')[0].split('#')[0];
+            return (window.location.href || 'https://isolation-bytes.com/').split('?')[0].split('#')[0];
         }
         function getMachineIdValue() {
             var ids = ['homeMachineId', 'purchaseMachineId', 'machineId', 'redeemMachineId'];
@@ -372,20 +374,34 @@
             if (pageIds[page]) { showPage(pageIds[page]); }
         }
 
-        function loadLicense() {
-            var data = document.getElementById('license').value;
-            if (!data) { setStatus('Paste your license first.', true); return; }
-            if (typeof window.SoluzkaHost !== 'undefined') {
-                try { window.SoluzkaHost.LoadLicense(data); }
-                catch (e) { setStatus('Error: ' + e.message, true); }
-            } else if (isNative()) {
-                try { window.external.LoadLicense(data); }
-                catch (e) { setStatus('Error: ' + e.message, true); }
-            } else { setStatus('Load the license in the Windows launcher app.', true); }
+        function doActivate() {
+            var licKey = document.getElementById('licenseKey').value.trim();
+            var mid = document.getElementById('machineId').value.trim();
+            var u = document.getElementById('username').value.trim();
+            if (!licKey) { setActivateResult('Enter your license key.', true); return; }
+            setActivateResult('Verifying license...', false);
+            fetch('/api/lemonsqueezy/validate-license', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({license_key: licKey, machine_id: mid, instance_name: u || mid})
+            }).then(function(r){ return r.json(); }).then(function(data){
+                if (data.ok) {
+                    setActivateResult('License activated! You can now log in below.', false);
+                    document.getElementById('launchBtn').disabled = false;
+                } else {
+                    setActivateResult('Activation failed: ' + (data.error || 'Invalid license'), true);
+                }
+            }).catch(function(){ setActivateResult('Activation failed: could not reach server.', true); });
+        }
+        function setActivateResult(msg, isError) {
+            var el = document.getElementById('activateResult');
+            if (el) { el.textContent = msg; el.className = 'status ' + (isError ? 'error' : 'ok'); }
         }
         function doLogin() {
             var u = document.getElementById('username').value;
             var p = document.getElementById('password').value;
+            var licKey = document.getElementById('licenseKey').value.trim();
+            var mid = document.getElementById('machineId').value.trim();
             if (!u || !p) { setStatus('Enter username and password.', true); return; }
             if (typeof window.SoluzkaHost !== 'undefined') {
                 try { window.SoluzkaHost.Login(u, p); }
@@ -393,7 +409,22 @@
             } else if (isNative()) {
                 try { window.external.Login(u, p); }
                 catch (e) { setStatus('Error: ' + e.message, true); }
-            } else { setStatus('Log in from the Windows launcher app.', true); }
+            } else {
+                // Web login — validate license with the server
+                if (!licKey) { setStatus('Activate your license first.', true); return; }
+                setStatus('Logging in...', false);
+                fetch('/api/user/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({license: licKey, username: u, password: p, machine_id: mid})
+                }).then(function(r){ return r.json(); }).then(function(data){
+                    if (data.ok && data.redirect) {
+                        window.location.href = data.redirect;
+                    } else {
+                        setStatus('Login failed: ' + (data.error || 'Invalid license or credentials'), true);
+                    }
+                }).catch(function(){ setStatus('Login failed: could not reach server.', true); });
+            }
         }
         function doForgotPassword() {
             if (typeof window.SoluzkaHost !== 'undefined') {
@@ -413,7 +444,7 @@
                 catch (e) { setStatus('Error: ' + e.message, true); }
             } else { setStatus('Launch is only available from the Windows app.', true); }
         }
-        var PAYMENT_URL = 'https://square.link/u/OHYaxv2v?src=embed';
+        var PAYMENT_URL = 'https://soluzka.lemonsqueezy.com/checkout/buy/19c84fba-cbd9-458e-80ba-8dfd2e5c11c0';
 
         function isNative() {
             if (IS_NATIVE_LAUNCHER) { return true; }
@@ -423,8 +454,11 @@
         }
 
         function buildPaymentUrl(mid) {
+            // Pass machine_id and username as Lemon Squeezy checkout custom data
+            // so the webhook receives them and ties the order to this machine
             var sep = PAYMENT_URL.indexOf('?') === -1 ? '?' : '&';
-            return PAYMENT_URL + sep + 'machine_id=' + encodeURIComponent(mid || '');
+            var url = PAYMENT_URL + sep + 'checkout[custom][machine_id]=' + encodeURIComponent(mid || '');
+            return url;
         }
         function doBuyNow() {
             var mid = document.getElementById('purchaseMachineId').value ||

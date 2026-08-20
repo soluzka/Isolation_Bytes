@@ -122,7 +122,7 @@ static class Program
             return form.TryLoadExistingLicense() ? 0 : 1;
         }
 
-        // Start the Flask cloud server (soluzka.com:8443) in the background
+        // Start the Flask cloud server (isolation-bytes.com) in the background
         // if it's not already running. Non-blocking — the form will retry
         // fetching the page until the server is ready.
         CloudServerStarter.EnsureRunning();
@@ -136,12 +136,12 @@ static class Program
 
 /// <summary>
 /// Finds and starts the Flask cloud server (cloud_server.py) so the website
-/// at soluzka.com:8443 is available. Does nothing if the server is already
-/// listening on port 8443.
+/// at isolation-bytes.com is available. Does nothing if the server is already
+/// listening on port 8000.
 /// </summary>
 internal static class CloudServerStarter
 {
-    private const int ServerPort = 8443;
+    private const int ServerPort = 8000;
 
     /// <summary>True if something is already listening on the server port.</summary>
     private static bool IsPortListening()
@@ -220,21 +220,24 @@ internal static class CloudServerStarter
         }
         catch { }
 
-        // Also check the embedded env for a runtime dir hint.
+        // Check service.cache for a runtime dir hint (no embedded env used)
         try
         {
-            var env = EnvData.GetDecrypted();
-            foreach (var line in env.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+            var envPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "AntivirusServer", "service.cache");
+            if (File.Exists(envPath))
             {
-                if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                foreach (var line in File.ReadAllLines(envPath))
                 {
-                    var runtimeDir = line.Substring("ANTIVIRUS_RUNTIME_DIR=".Length).Trim();
-                    if (!string.IsNullOrEmpty(runtimeDir))
+                    if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
                     {
-                        candidates.Insert(0, Path.Combine(runtimeDir, "cloud", "cloud_server.py"));
-                        candidates.Insert(1, Path.Combine(runtimeDir, "cloud_server.py"));
+                        var runtimeDir = line.Substring("ANTIVIRUS_RUNTIME_DIR=".Length).Trim();
+                        if (!string.IsNullOrEmpty(runtimeDir))
+                        {
+                            candidates.Insert(0, Path.Combine(runtimeDir, "cloud", "cloud_server.py"));
+                            candidates.Insert(1, Path.Combine(runtimeDir, "cloud_server.py"));
+                        }
+                        break;
                     }
-                    break;
                 }
             }
         }
@@ -429,12 +432,52 @@ internal static class CloudServerStarter
         catch { return null; }
     }
 
+    /// <summary>
+    /// Extract the embedded cloud_server.exe to a temp folder so it can be
+    /// run without any external files. Returns the path to the extracted EXE.
+    /// </summary>
+    private static string? ExtractEmbeddedCloudServerExe()
+    {
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            var resourceName = "cloud_server_exe";
+            using var stream = asm.GetManifestResourceStream(resourceName);
+            if (stream is null) return null;
+
+            // Extract to a temp folder next to the launcher
+            var local = Path.GetDirectoryName(Application.ExecutablePath);
+            string extractDir;
+            if (!string.IsNullOrEmpty(local))
+                extractDir = Path.Combine(local, "cloud");
+            else
+                extractDir = Path.Combine(Path.GetTempPath(), "AntivirusServer", "cloud");
+
+            Directory.CreateDirectory(extractDir);
+            var exePath = Path.Combine(extractDir, "cloud_server.exe");
+
+            // Only extract if it doesn't exist or is a different size
+            if (!File.Exists(exePath) || new FileInfo(exePath).Length != stream.Length)
+            {
+                using var fs = new FileStream(exePath, FileMode.Create, FileAccess.Write);
+                stream.CopyTo(fs);
+            }
+            return exePath;
+        }
+        catch { return null; }
+    }
+
     public static void EnsureRunning()
     {
         if (IsPortListening()) return; // Already running.
 
-        // Prefer a standalone cloud_server.exe (no Python needed).
+        // 1. Prefer a standalone cloud_server.exe on disk (no Python needed).
         var serverExe = FindCloudServerExe();
+
+        // 2. If not on disk, extract the embedded cloud_server.exe from the launcher.
+        if (serverExe is null)
+            serverExe = ExtractEmbeddedCloudServerExe();
+
         if (serverExe is not null)
         {
             var workingDir = Path.GetDirectoryName(serverExe) ?? "";
@@ -448,9 +491,9 @@ internal static class CloudServerStarter
                         {
                             FileName = serverExe,
                             WorkingDirectory = workingDir,
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                            WindowStyle = ProcessWindowStyle.Hidden,
+                            UseShellExecute = true,
+                            CreateNoWindow = false,
+                            WindowStyle = ProcessWindowStyle.Normal,
                         },
                         EnableRaisingEvents = true,
                     };
@@ -461,25 +504,24 @@ internal static class CloudServerStarter
             return;
         }
 
-        // Try to find cloud_server.py on disk first.
+        // 3. Fallback: try to find cloud_server.py on disk.
         var script = FindCloudServerScript();
 
-        // If not found, extract the embedded copy from the launcher.
+        // 4. If not found, extract the embedded copy from the launcher.
         if (script is null)
             script = ExtractEmbeddedServer();
 
         if (script is null) return;
 
-        // Make sure Python is installed (extracts + runs embedded installer
+        // 5. Make sure Python is installed (extracts + runs embedded installer
         // if Python is not found on the system).
         var python = FindPython();
         if (python is null)
         {
-            // Run the installer on a background thread so the UI doesn't freeze.
             System.Threading.Tasks.Task.Run(() =>
             {
                 EnsurePythonInstalled();
-            }).Wait(120000); // Wait up to 2 minutes for the install.
+            }).Wait(120000);
             python = FindPython();
         }
 
@@ -498,8 +540,8 @@ internal static class CloudServerStarter
                         Arguments = $"\"{script}\"",
                         WorkingDirectory = wd,
                         UseShellExecute = false,
-                        CreateNoWindow = true,
-                        WindowStyle = ProcessWindowStyle.Hidden,
+                        CreateNoWindow = false,
+                        WindowStyle = ProcessWindowStyle.Normal,
                     },
                     EnableRaisingEvents = true,
                 };
@@ -606,9 +648,9 @@ public class LoginForm : Form
             string html;
             var publicUrl = GetEnv("PUBLIC_URL");
             if (string.IsNullOrWhiteSpace(publicUrl))
-                publicUrl = "https://soluzka.com:8443/";
+                publicUrl = "https://isolation-bytes.com/";
 
-            var urls = new[] { publicUrl, "https://127.0.0.1:8443/", "https://192.168.1.133:8443/" };
+            var urls = new[] { publicUrl, "http://127.0.0.1:8000/", "http://192.168.1.133:8000/", "https://127.0.0.1:8443/" };
             html = LoginHtml.GetDecrypted();
 
             // Retry fetching from the server for up to ~20 seconds (server
@@ -638,7 +680,7 @@ public class LoginForm : Form
             html = html.Replace("{{MACHINE_ID}}", GetMachineId()).Replace("{{ADMIN_USERNAME}}", GetEnv("ADMIN_USERNAME") ?? "");
             var mid = GetMachineId().Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "");
             var admin = (GetEnv("ADMIN_USERNAME") ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "");
-            var siteUrl = (GetEnv("PUBLIC_URL") ?? "https://soluzka.com:8443/").TrimEnd('/');
+            var siteUrl = (GetEnv("PUBLIC_URL") ?? "https://isolation-bytes.com/").TrimEnd('/');
             var paymentUrl = (GetEnv("PAYMENT_URL") ?? "").Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"").Replace("\r", "").Replace("\n", "");
             var hostScript = "<script>" + "\n" +
                 "window.SoluzkaHost = {" + "\n" +
@@ -839,24 +881,19 @@ public class LoginForm : Form
             File.SetAttributes(envDir, File.GetAttributes(envDir) | FileAttributes.Hidden);
             var envPath = Path.Combine(envDir, "service.cache");
 
-            var env = EnvData.GetDecrypted();
+            // Only write the runtime dir — no embedded env, no admin credentials
             var runtime = Path.Combine(envDir);
-            var envLines = new List<string>();
-            bool found = false;
-            foreach (var line in env.Split(new[] { '\r', '\n' }, StringSplitOptions.None))
+            var envLines = new List<string> { $"ANTIVIRUS_RUNTIME_DIR={runtime}" };
+
+            // Preserve any existing lines that aren't ANTIVIRUS_RUNTIME_DIR
+            if (File.Exists(envPath))
             {
-                if (line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                foreach (var line in File.ReadAllLines(envPath))
                 {
-                    envLines.Add($"ANTIVIRUS_RUNTIME_DIR={runtime}");
-                    found = true;
-                }
-                else
-                {
-                    envLines.Add(line);
+                    if (!line.StartsWith("ANTIVIRUS_RUNTIME_DIR="))
+                        envLines.Add(line);
                 }
             }
-            if (!found)
-                envLines.Add($"ANTIVIRUS_RUNTIME_DIR={runtime}");
 
             File.WriteAllText(envPath, string.Join("\n", envLines));
             File.Encrypt(envPath);
@@ -865,18 +902,46 @@ public class LoginForm : Form
         catch { }
     }
 
+    // Cache config fetched from the server (admin-controlled .env)
+    private static Dictionary<string, string>? _serverConfig = null;
+    private static readonly object _configLock = new();
+
+    private static Dictionary<string, string> FetchServerConfig()
+    {
+        lock (_configLock)
+        {
+            if (_serverConfig != null) return _serverConfig;
+            var defaults = new Dictionary<string, string>
+            {
+                {"PUBLIC_URL", "https://isolation-bytes.com"},
+                {"LICENSE_SERVER", "https://isolation-bytes.com"},
+                {"PAYMENT_URL", ""},
+                {"PROXY_PORT", "8000"},
+                {"HTTPS_PORT", "443"},
+            };
+            // Try to fetch from the server's /api/config endpoint
+            try
+            {
+                using var client = new System.Net.Http.HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(3);
+                var resp = client.GetStringAsync("http://127.0.0.1:8000/api/config").Result;
+                var json = System.Text.Json.JsonDocument.Parse(resp);
+                foreach (var prop in json.RootElement.EnumerateObject())
+                {
+                    defaults[prop.Name.ToUpper()] = prop.Value.ToString();
+                }
+            }
+            catch { }
+            _serverConfig = defaults;
+            return _serverConfig;
+        }
+    }
+
     public string? GetEnv(string key)
     {
-        try
-        {
-            var env = EnvData.GetDecrypted();
-            foreach (var line in env.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
-            {
-                if (line.StartsWith(key + "="))
-                    return line.Substring(key.Length + 1).Trim();
-            }
-        }
-        catch { }
+        var config = FetchServerConfig();
+        if (config.TryGetValue(key.ToUpper(), out var val))
+            return val;
         return null;
     }
 
@@ -898,7 +963,7 @@ public class LoginForm : Form
     {
         var publicUrl = GetEnv("PUBLIC_URL");
         if (string.IsNullOrWhiteSpace(publicUrl))
-            publicUrl = "https://soluzka.com:8443/";
+            publicUrl = "https://isolation-bytes.com/";
 
         publicUrl = publicUrl.TrimEnd('/');
         var mid = string.IsNullOrWhiteSpace(machineId) ? GetMachineId() : machineId;
@@ -969,7 +1034,7 @@ public class LoginForm : Form
 
     public void ForgotPassword()
     {
-        var url = GetEnv("PUBLIC_URL") ?? "https://soluzka.com:8443/";
+        var url = GetEnv("PUBLIC_URL") ?? "https://isolation-bytes.com/";
         try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
         catch { }
     }

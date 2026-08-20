@@ -155,5 +155,30 @@
       "mentioned_threats": [],
       "mentioned_paths": 0
     }
+  },
+  {
+    "timestamp": "2026-08-20T09:54:23",
+    "type": "interaction",
+    "data": {
+      "question": "Prioritize the current findings by risk",
+      "question_type": "other",
+      "had_findings": false,
+      "agent_count": 0
+    }
+  },
+  {
+    "timestamp": "2026-08-20T09:54:23",
+    "type": "self_assessment",
+    "data": {
+      "question_type": "other",
+      "confidence": "high",
+      "answer_length": 1647,
+      "mentioned_threats": [
+        "trojan",
+        "backdoor",
+        "ransomware"
+      ],
+      "mentioned_paths": 0
+    }
   }
 ]

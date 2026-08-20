@@ -8,11 +8,11 @@ Usage:
 When proxy mode is enabled:
     - Server runs on 127.0.0.1:8000 without SSL
     - The reverse proxy (Caddy/nginx) handles SSL on port 443
-    - Users connect to https://soluzka.com/ (no port number needed)
+    - Users connect to https://isolation-bytes.com/ (no port number needed)
 
 When proxy mode is disabled:
     - Server runs on 0.0.0.0:8443 with SSL directly
-    - Users connect to https://soluzka.com:8443/
+    - Users connect to https://isolation-bytes.com:8443/
 """
 import os
 import sys
@@ -83,13 +83,13 @@ def enable_proxy(proxy_type):
         print(f"  2. Use the Caddyfile at: cloud/Caddyfile")
         print("  3. Run: caddy run")
         print("  4. Caddy auto-manages Let's Encrypt certs")
-        print("  5. Server will be at https://soluzka.com/ (no port needed)")
+        print("  5. Server will be at https://isolation-bytes.com/ (no port needed)")
     elif proxy_type == 'nginx':
         print("nginx setup:")
         print(f"  1. Copy cloud/nginx.conf to your nginx sites-enabled directory")
-        print("  2. Get SSL certs: sudo certbot --nginx -d soluzka.com")
+        print("  2. Get SSL certs: sudo certbot --nginx -d isolation-bytes.com")
         print("  3. Reload: sudo nginx -s reload")
-        print("  4. Server will be at https://soluzka.com/ (no port needed)")
+        print("  4. Server will be at https://isolation-bytes.com/ (no port needed)")
     print()
     print("Restart the server after this change.")
 
@@ -100,7 +100,7 @@ def disable_proxy():
     write_env(lines)
     print("Reverse proxy mode DISABLED.")
     print("Server will run directly on 0.0.0.0:8443 with SSL.")
-    print("Users connect to https://soluzka.com:8443/")
+    print("Users connect to https://isolation-bytes.com:8443/")
     print()
     print("Restart the server after this change.")
 

@@ -803,7 +803,7 @@ def login():
             return redirect(url_for('index'))
         
         flash('Invalid username or password')
-    return render_template('login.html')
+    return send_from_directory('website', 'login.html')
 
 @app.route('/yara_scanner.html')
 def yara_scanner_page():
@@ -1687,9 +1687,9 @@ def login():
             next_page = request.args.get('next')
             return redirect(next_page or url_for('index'))
         
-        return render_template('login.html', error='Invalid username or password')
+        return send_from_directory('website', 'login.html')
     
-    return render_template('login.html')
+    return send_from_directory('website', 'login.html')
 
 # Authentication functions
 def set_admin_credentials(username, password):

@@ -1494,10 +1494,10 @@ def login():
                     register_message = 'Password set. You can now log in as admin.'
                 except Exception as e:
                     register_error = str(e)
-            return render_template('login.html', error=error, register_error=register_error, register_message=register_message)
+            return send_from_directory('website', 'login.html')
 
         if _is_login_rate_limited(remote_addr):
-            return render_template('login.html', error='Too many login attempts. Please wait 5 minutes.'), 429
+            return send_from_directory('website', 'login.html'), 429
 
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
@@ -1517,7 +1517,7 @@ def login():
             next_page = request.form.get('next') or request.args.get('next') or url_for('index')
             return redirect(next_page)
         error = 'Invalid username or password'
-    return render_template('login.html', error=error, register_error=register_error, register_message=register_message)
+    return send_from_directory('website', 'login.html')
 
 
 @app.route('/register', methods=['GET', 'POST'])
