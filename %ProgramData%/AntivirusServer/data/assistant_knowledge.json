@@ -178,5 +178,15 @@
     "timestamp": "2026-08-20T05:22:40",
     "topic": "self_learned:adware",
     "content": "Self-learned: exe\n\nKnowledge topics (31 total):\n  - ransomware\n  - threat:custom_ransomware\n  - trojan\n  - rootkit\n  - keylogger\n  - spyware\n  - cryptominer\n  - adware\n  - backdoor\n  - c2_beacon\n  - worm\n  - yara\n  - ioc\n  - false_positive\n  - quarantine"
+  },
+  {
+    "timestamp": "2026-08-20T05:33:28",
+    "topic": "threat:test_worm",
+    "content": "A worm that spreads via SMB"
+  },
+  {
+    "timestamp": "2026-08-20T05:40:50",
+    "topic": "threat:ransomware",
+    "content": "Auto-learned: YARA rule matched: ai_improved_ransomware. Detected on C:\\Users\\bpier\\AppData\\Local\\Temp\\antivirus_server_build_r1dlzxr5\\antivirus_server\\Analysis-00.toc."
   }
 ]

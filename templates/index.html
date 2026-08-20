@@ -616,7 +616,26 @@ if (stopAutoUpdatesBtn) {
                     <button type="button" class="assistant-prompt" data-ai-question="What have you improved in your own code?">Self-Improved</button>
                     <button type="button" class="assistant-prompt" data-ai-question="Retrain model">Retrain ML</button>
                     <button type="button" class="assistant-prompt" data-ai-question="What do you know about ransomware?">Knowledge</button>
+                    <button type="button" id="assistant_learn_btn" style="background:#2d8f3c;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;">Learn From Me</button>
                     <button type="button" id="assistant_download_report">Download report</button>
+                </div>
+                <div id="assistant_learn_panel" style="display:none;background:#f0f7f0;border:1px solid #2d8f3c;border-radius:6px;padding:12px;margin-bottom:10px;">
+                    <h4 style="margin:0 0 8px 0;color:#2d8f3c;">Teach the Assistant</h4>
+                    <p style="font-size:0.85em;color:#555;margin:0 0 8px 0;">Share information and the assistant will learn from it — updating its knowledge, YARA rules, and ML model.</p>
+                    <select id="learn_type" style="width:100%;padding:6px;margin-bottom:6px;border-radius:4px;border:1px solid #ccc;">
+                        <option value="knowledge">General Knowledge (teach it a fact)</option>
+                        <option value="threat">Threat Pattern (teach it to detect something)</option>
+                        <option value="false_positive">False Positive (mark a file as safe)</option>
+                        <option value="signature">Malware Signature (hash + threat info)</option>
+                    </select>
+                    <input id="learn_topic" type="text" maxlength="200" placeholder="Topic or threat name (e.g. 'ransomware', 'my_custom_threat')" style="width:100%;padding:6px;margin-bottom:6px;border-radius:4px;border:1px solid #ccc;">
+                    <textarea id="learn_content" rows="3" maxlength="2000" placeholder="Details, patterns, or file path (one per line for patterns)" style="width:100%;padding:6px;margin-bottom:6px;border-radius:4px;border:1px solid #ccc;font-family:inherit;"></textarea>
+                    <input id="learn_hash" type="text" maxlength="64" placeholder="File hash (optional, for signatures)" style="width:100%;padding:6px;margin-bottom:6px;border-radius:4px;border:1px solid #ccc;">
+                    <div style="display:flex;gap:6px;">
+                        <button type="button" id="learn_submit" style="background:#2d8f3c;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">Submit Learning</button>
+                        <button type="button" id="learn_cancel" style="background:#888;color:#fff;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">Cancel</button>
+                    </div>
+                    <div id="learn_result" style="margin-top:8px;font-size:0.85em;"></div>
                 </div>
                 <form id="assistant_form">
                     <input id="assistant_input" type="text" maxlength="500" placeholder="Why was this file flagged?" style="width:75%;padding:8px;">
@@ -910,6 +929,72 @@ if (stopAutoUpdatesBtn) {
                     assistantForm?.requestSubmit();
                 });
             });
+
+            // Learn From Me panel
+            const learnBtn = document.getElementById('assistant_learn_btn');
+            const learnPanel = document.getElementById('assistant_learn_panel');
+            const learnCancel = document.getElementById('learn_cancel');
+            const learnSubmit = document.getElementById('learn_submit');
+            const learnResult = document.getElementById('learn_result');
+            if (learnBtn) {
+                learnBtn.addEventListener('click', () => {
+                    learnPanel.style.display = learnPanel.style.display === 'none' ? 'block' : 'none';
+                    learnResult.textContent = '';
+                });
+            }
+            if (learnCancel) {
+                learnCancel.addEventListener('click', () => { learnPanel.style.display = 'none'; });
+            }
+            if (learnSubmit) {
+                learnSubmit.addEventListener('click', async () => {
+                    const type = document.getElementById('learn_type').value;
+                    const topic = document.getElementById('learn_topic').value.trim();
+                    const content = document.getElementById('learn_content').value.trim();
+                    const hash = document.getElementById('learn_hash').value.trim();
+                    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+                    if (!topic && type !== 'false_positive') {
+                        learnResult.innerHTML = '<span style="color:#c0392b;">Please enter a topic or threat name.</span>';
+                        return;
+                    }
+                    if (!content && type !== 'false_positive') {
+                        learnResult.innerHTML = '<span style="color:#c0392b;">Please enter some content or patterns.</span>';
+                        return;
+                    }
+                    learnResult.textContent = 'Submitting...';
+                    try {
+                        let endpoint, body;
+                        if (type === 'knowledge') {
+                            endpoint = '/api/assistant/knowledge';
+                            body = {topic, content};
+                        } else if (type === 'threat') {
+                            // Parse patterns from content (one per line or comma-separated)
+                            const patterns = content.split(/[\n,]/).map(p => p.trim()).filter(p => p);
+                            endpoint = '/api/assistant/learn-threat';
+                            body = {threat_name: topic, patterns, severity: 'high', description: content};
+                        } else if (type === 'false_positive') {
+                            endpoint = '/api/assistant/false-positive';
+                            body = {path: topic || content, hash, reason: content};
+                        } else if (type === 'signature') {
+                            endpoint = '/api/assistant/learn-threat';
+                            body = {threat_name: topic, patterns: content.split(/[\n,]/).map(p => p.trim()).filter(p => p), severity: 'high', description: content, hash};
+                        }
+                        const response = await fetch(endpoint, {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken},
+                            body: JSON.stringify(body)
+                        });
+                        const data = await response.json();
+                        if (!response.ok) throw new Error(data.error || `Server returned ${response.status}`);
+                        learnResult.innerHTML = '<span style="color:#2d8f3c;">Learned! The assistant has stored this and will use it in future responses and scans.</span>';
+                        document.getElementById('learn_topic').value = '';
+                        document.getElementById('learn_content').value = '';
+                        document.getElementById('learn_hash').value = '';
+                    } catch (err) {
+                        learnResult.innerHTML = `<span style="color:#c0392b;">Error: ${err.message}</span>`;
+                    }
+                });
+            }
             if (assistantForm) {
                 assistantForm.addEventListener('submit', async function (event) {
                     event.preventDefault();

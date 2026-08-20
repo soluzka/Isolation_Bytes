@@ -1,0 +1,351 @@
+{
+  "yara_updates": [
+    {
+      "timestamp": "2026-08-20T05:33:28",
+      "threat_type": "test_worm",
+      "rule_name": "ai_improved_test_worm",
+      "patterns_added": 0,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_test_worm.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 2,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 1,
+      "total_patterns": 4,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 1,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 1,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "trojan",
+      "rule_name": "ai_improved_trojan",
+      "patterns_added": 3,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_trojan.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "trojan",
+      "rule_name": "ai_improved_trojan",
+      "patterns_added": 0,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_trojan.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 3,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 1,
+      "total_patterns": 4,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 1,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:49",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:49",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:49",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "ransomware",
+      "rule_name": "ai_improved_ransomware",
+      "patterns_added": 0,
+      "total_patterns": 6,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_ransomware.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "trojan",
+      "rule_name": "ai_improved_trojan",
+      "patterns_added": 0,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_trojan.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "trojan",
+      "rule_name": "ai_improved_trojan",
+      "patterns_added": 0,
+      "total_patterns": 3,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_trojan.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:22",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    },
+    {
+      "timestamp": "2026-08-20T05:41:23",
+      "threat_type": "yara_match",
+      "rule_name": "ai_improved_yara_match",
+      "patterns_added": 0,
+      "total_patterns": 5,
+      "rule_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\yara_rules\\ai_improved_yara_match.yar"
+    }
+  ],
+  "ml_features": [
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "feature_name": "ext_toc_risk",
+      "file_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\ai_learned_features.py"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "feature_name": "ext_cmd_risk",
+      "file_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\ai_learned_features.py"
+    },
+    {
+      "timestamp": "2026-08-20T05:40:48",
+      "feature_name": "ext_ps1_risk",
+      "file_path": "C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\security\\ai_learned_features.py"
+    }
+  ],
+  "scanner_rules": [],
+  "total_improvements": 44
+}

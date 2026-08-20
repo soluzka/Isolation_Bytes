@@ -1215,7 +1215,7 @@ rule {rule_name} : {severity}
         # Record the improvement
         improvements = self._load_improvements()
         improvements['yara_updates'].append({
-            'timestamp': self._now(),
+            'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
             'threat_type': threat_type,
             'rule_name': rule_name,
             'patterns_added': len(all_patterns) - len(existing_patterns),
@@ -1291,7 +1291,7 @@ import hashlib
         # Record the improvement
         improvements = self._load_improvements()
         improvements['ml_features'].append({
-            'timestamp': self._now(),
+            'timestamp': datetime.datetime.now().isoformat(timespec='seconds'),
             'feature_name': feature_name,
             'file_path': str(features_path),
         })
