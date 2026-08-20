@@ -3,6 +3,7 @@ malware_signatures.txt
 uploads/malware_signatures.txt
 yara_scanner.log
 AntivirusServer_Store.msix
+commit_msg.txt
 AntivirusServer_Test_Launcher.msix
 
 # Server-side quarantine key (DPAPI-encrypted, must never be committed)
