@@ -89,14 +89,19 @@ def main():
     print("  - Auto-start when the computer boots")
     print("  - Stay running even when no one is logged in")
     print("  - Automatically restart if it crashes")
-    print("  - Run the server, local agent, and AI assistant")
+    print("  - Run the server, local agent, AI assistant, Caddy, and Cloudflare tunnel")
+    print("\nComponents started by the service:")
+    print("  1. Flask antivirus server (port 8000 in proxy mode, or 8443 direct)")
+    print("  2. Caddy reverse proxy (port 443, if installed at C:\\caddy\\)")
+    print("  3. Cloudflare tunnel (provides public access without port forwarding)")
     print("\nManage it via:")
     print("  - services.msc (Windows Services Manager)")
     print(f"  - Stop:   python cloud_service.py stop")
     print(f"  - Start:  python cloud_service.py start")
     print(f"  - Remove: python cloud_service.py remove")
-    print(f"\nDashboard: https://127.0.0.1:8443/")
-    print(f"Public URL: https://soluzka.com:8443/")
+    print(f"\nLocal dashboard: https://127.0.0.1:8000/ (proxy mode) or https://127.0.0.1:8443/ (direct)")
+    print(f"Public via Caddy: https://soluzka.com/ (requires port 443 forwarding)")
+    print(f"Public via Cloudflare tunnel: check service.log for the trycloudflare URL")
 
 
 if __name__ == '__main__':

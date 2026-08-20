@@ -59,6 +59,8 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
         win32serviceutil.ServiceFramework.__init__(self, args)
         self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
         self._server_process = None
+        self._caddy_process = None
+        self._cloudflared_process = None
         self._stop_requested = False
         logging.basicConfig(
             filename=str(BASE_DIR / 'cloud' / 'service.log'),
@@ -72,6 +74,18 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
         self.log.info("Service stop requested")
         self._stop_requested = True
         self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+        # Kill the cloudflared tunnel
+        if self._cloudflared_process:
+            try:
+                self._cloudflared_process.terminate()
+            except Exception:
+                pass
+        # Kill Caddy
+        if self._caddy_process:
+            try:
+                self._caddy_process.terminate()
+            except Exception:
+                pass
         # Kill the server process
         if self._server_process:
             try:
@@ -91,9 +105,10 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
         self._run_server()
 
     def _run_server(self):
-        """Run the cloud server in a subprocess."""
+        """Run the cloud server, Caddy, and Cloudflare tunnel as subprocesses."""
         import subprocess
         import threading
+        import time
 
         server_script = str(BASE_DIR / 'cloud' / 'cloud_server.py')
         python_exe = sys.executable
@@ -106,15 +121,51 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             stderr=subprocess.STDOUT,
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
-
         self.log.info(f"Server started with PID {self._server_process.pid}")
 
-        # Monitor the process — restart if it crashes
+        # Wait for the server to be ready before starting proxies
+        time.sleep(5)
+
+        # Start Caddy reverse proxy (if installed and Caddyfile exists)
+        caddy_exe = r'C:\caddy\caddy.exe'
+        caddyfile = r'C:\caddy\Caddyfile'
+        if os.path.exists(caddy_exe) and os.path.exists(caddyfile):
+            try:
+                self._caddy_process = subprocess.Popen(
+                    [caddy_exe, 'run', '--config', caddyfile],
+                    cwd=r'C:\caddy',
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                self.log.info(f"Caddy started with PID {self._caddy_process.pid}")
+            except Exception as e:
+                self.log.warning(f"Failed to start Caddy: {e}")
+        else:
+            self.log.info("Caddy not found at C:\\caddy\\caddy.exe — skipping")
+
+        # Start Cloudflare tunnel (if installed) — provides access without port forwarding
+        cloudflared_exe = r'C:\caddy\cloudflared.exe'
+        if os.path.exists(cloudflared_exe):
+            try:
+                self._cloudflared_process = subprocess.Popen(
+                    [cloudflared_exe, 'tunnel', '--url', 'http://127.0.0.1:8000'],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                self.log.info(f"Cloudflare tunnel started with PID {self._cloudflared_process.pid}")
+            except Exception as e:
+                self.log.warning(f"Failed to start Cloudflare tunnel: {e}")
+        else:
+            self.log.info("cloudflared not found at C:\\caddy\\cloudflared.exe — skipping")
+
+        # Monitor all processes — restart if they crash
         while not self._stop_requested:
+            # Check server
             ret = self._server_process.poll()
             if ret is not None:
                 self.log.warning(f"Server process exited with code {ret}. Restarting in 5 seconds...")
-                import time
                 time.sleep(5)
                 if not self._stop_requested:
                     self.log.info("Restarting server...")
@@ -126,9 +177,38 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                         creationflags=subprocess.CREATE_NO_WINDOW,
                     )
                     self.log.info(f"Server restarted with PID {self._server_process.pid}")
-            else:
-                # Wait a bit before checking again
-                win32event.WaitForSingleObject(self.hWaitStop, 5000)
+
+            # Check Caddy
+            if self._caddy_process and self._caddy_process.poll() is not None:
+                if os.path.exists(caddy_exe) and os.path.exists(caddyfile) and not self._stop_requested:
+                    self.log.warning("Caddy exited. Restarting in 5 seconds...")
+                    time.sleep(5)
+                    if not self._stop_requested:
+                        self._caddy_process = subprocess.Popen(
+                            [caddy_exe, 'run', '--config', caddyfile],
+                            cwd=r'C:\caddy',
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                        self.log.info(f"Caddy restarted with PID {self._caddy_process.pid}")
+
+            # Check cloudflared
+            if self._cloudflared_process and self._cloudflared_process.poll() is not None:
+                if os.path.exists(cloudflared_exe) and not self._stop_requested:
+                    self.log.warning("Cloudflare tunnel exited. Restarting in 10 seconds...")
+                    time.sleep(10)
+                    if not self._stop_requested:
+                        self._cloudflared_process = subprocess.Popen(
+                            [cloudflared_exe, 'tunnel', '--url', 'http://127.0.0.1:8000'],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                        self.log.info(f"Cloudflare tunnel restarted with PID {self._cloudflared_process.pid}")
+
+            # Wait a bit before checking again
+            win32event.WaitForSingleObject(self.hWaitStop, 5000)
 
         self.log.info("Service stopped")
 
