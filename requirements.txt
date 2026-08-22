@@ -38,7 +38,7 @@ clamd>=1.0
 
 # For automated testing and dependency vulnerability scanning
 pytest>=9.0.3
-pip-audit>=2.8.0
+pip-audit>=2.10.1
 
 # For loading .env files
 python-dotenv>=1.2.2
