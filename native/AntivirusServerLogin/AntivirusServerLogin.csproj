@@ -20,6 +20,7 @@
     <AssemblyCompany>soluzka</AssemblyCompany>
     <Version>1.8.678.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <CloudflaredPath Condition="'$(CloudflaredPath)' == ''">C:\caddy\cloudflared.exe</CloudflaredPath>
   </PropertyGroup>
 
   <!-- Python installer embedded for bootstrap fallback -->
@@ -30,6 +31,9 @@
   <!-- cloud_server.exe embedded so the launcher is fully self-contained -->
   <!-- No .env embedded — launcher fetches config from the server at runtime -->
   <ItemGroup>
+    <Compile Remove="EnvData.g.cs" />
     <EmbeddedResource Include="..\..\dist\cloud_server.exe" LogicalName="cloud_server_exe" />
+    <EmbeddedResource Include="$(CloudflaredPath)" LogicalName="cloudflared_exe" Condition="Exists('$(CloudflaredPath)')" />
+    <EmbeddedResource Include="cloudflared.template.yml" LogicalName="cloudflared_config_template" />
   </ItemGroup>
 </Project>

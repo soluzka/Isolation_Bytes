@@ -104,25 +104,65 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
         )
         self._run_server()
 
+    def _wait_for_port(self, port, timeout=120):
+        """Wait for a port to be listening. Returns True if ready, False on timeout."""
+        import socket
+        import time
+        deadline = time.time() + timeout
+        while time.time() < deadline and not self._stop_requested:
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=2):
+                    return True
+            except (OSError, socket.error):
+                time.sleep(2)
+        return False
+
     def _run_server(self):
         """Run the cloud server, Caddy, and Cloudflare tunnel as subprocesses."""
         import subprocess
         import threading
         import time
+        import shutil
+        from dotenv import dotenv_values
 
-        # Prefer the built cloud_server.exe (self-contained, no Python needed)
-        server_exe = str(BASE_DIR / 'dist' / 'cloud_server.exe')
+        child_env = os.environ.copy()
+        for env_path in (BASE_DIR / '.env', BASE_DIR / 'cloud' / '.env', BASE_DIR / '.env.server'):
+            if env_path.exists():
+                for key, value in dotenv_values(env_path).items():
+                    if value is not None:
+                        child_env[key] = value
+
+        # Use a stable local directory outside OneDrive to avoid sync/permission issues
+        # when running as SYSTEM. Copy the EXE there on each start.
+        local_dir = r'C:\AntivirusServer'
+        os.makedirs(local_dir, exist_ok=True)
+
+        # Source EXE locations (check both)
+        source_exe = str(BASE_DIR / 'dist' / 'cloud_server.exe')
         server_script = str(BASE_DIR / 'cloud' / 'cloud_server.py')
         python_exe = sys.executable
 
-        if os.path.exists(server_exe):
+        # Copy the EXE to the stable local directory
+        local_exe = os.path.join(local_dir, 'cloud_server.exe')
+        if os.path.exists(source_exe):
+            try:
+                shutil.copy2(source_exe, local_exe)
+                self.log.info(f"Copied cloud_server.exe to {local_exe}")
+            except Exception as e:
+                self.log.warning(f"Failed to copy EXE to local dir: {e}, using source path")
+                local_exe = source_exe
+
+        server_exe_to_use = local_exe if os.path.exists(local_exe) else source_exe
+
+        if os.path.exists(server_exe_to_use):
             # Use the built EXE — it has everything bundled
             self._server_process = subprocess.Popen(
-                [server_exe],
-                cwd=str(BASE_DIR),
+                [server_exe_to_use],
+                cwd=local_dir if os.path.exists(local_exe) else str(BASE_DIR),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                env=child_env,
             )
             self.log.info(f"Server EXE started with PID {self._server_process.pid}")
         else:
@@ -133,11 +173,16 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
+                env=child_env,
             )
             self.log.info(f"Server (Python) started with PID {self._server_process.pid}")
 
-        # Wait for the server to be ready before starting proxies
-        time.sleep(5)
+        # Wait for the server to be ready (up to 120 seconds for large EXE extraction)
+        self.log.info("Waiting for server to be ready (up to 120s)...")
+        if self._wait_for_port(8000, timeout=120):
+            self.log.info("Server is ready on port 8000")
+        else:
+            self.log.warning("Server did not become ready in 120 seconds")
 
         # Start Caddy reverse proxy (if installed and Caddyfile exists)
         caddy_exe = r'C:\caddy\caddy.exe'
@@ -183,13 +228,20 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                 time.sleep(10)
                 if not self._stop_requested:
                     self.log.info("Restarting server...")
-                    if os.path.exists(server_exe):
+                    # Re-copy the EXE in case it was updated
+                    if os.path.exists(source_exe):
+                        try:
+                            shutil.copy2(source_exe, local_exe)
+                        except Exception:
+                            pass
+                    if os.path.exists(server_exe_to_use):
                         self._server_process = subprocess.Popen(
-                            [server_exe],
-                            cwd=str(BASE_DIR),
+                            [server_exe_to_use],
+                            cwd=local_dir if os.path.exists(local_exe) else str(BASE_DIR),
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
+                            env=child_env,
                         )
                     else:
                         self._server_process = subprocess.Popen(
@@ -198,8 +250,11 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
+                            env=child_env,
                         )
                     self.log.info(f"Server restarted with PID {self._server_process.pid}")
+                    # Wait for port to be ready after restart
+                    self._wait_for_port(8000, timeout=120)
 
             # Check Caddy
             if self._caddy_process and self._caddy_process.poll() is not None:

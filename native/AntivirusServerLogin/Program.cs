@@ -469,7 +469,11 @@ internal static class CloudServerStarter
 
     public static void EnsureRunning()
     {
-        if (IsPortListening()) return; // Already running.
+        if (IsPortListening())
+        {
+            StartCloudflareTunnel();
+            return;
+        }
 
         // 1. Prefer a standalone cloud_server.exe on disk (no Python needed).
         var serverExe = FindCloudServerExe();
@@ -557,62 +561,83 @@ internal static class CloudServerStarter
     /// <summary>
     /// Start the Cloudflare tunnel (cloudflared.exe) so the public URL
     /// (isolation-bytes.com) works alongside the local server.
-    /// Does nothing if cloudflared is not installed or already running.
+    /// Does nothing if protected external credentials are unavailable or it is already running.
     /// </summary>
+    private static string? ExtractCloudflaredResource(string resourceName, string fileName)
+    {
+        try
+        {
+            var runtimeDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "IsolationBytes", "cloudflared");
+            Directory.CreateDirectory(runtimeDir);
+            var outputPath = Path.Combine(runtimeDir, fileName);
+            using var stream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+            if (stream is null) return null;
+            if (!File.Exists(outputPath) || new FileInfo(outputPath).Length != stream.Length)
+            {
+                using var output = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                stream.CopyTo(output);
+            }
+            return outputPath;
+        }
+        catch { return null; }
+    }
+
+    private static string? FindCloudflareConfig()
+    {
+        var candidates = new[]
+        {
+            Environment.GetEnvironmentVariable("CLOUDFLARED_CONFIG"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".cloudflared", "config.yml"),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "IsolationBytes", "cloudflared", "config.yml"),
+        };
+
+        foreach (var candidate in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(candidate) || !File.Exists(candidate)) continue;
+            try
+            {
+                var lines = File.ReadAllLines(candidate);
+                var tunnel = lines.FirstOrDefault(line => line.TrimStart().StartsWith("tunnel:", StringComparison.OrdinalIgnoreCase));
+                var credential = lines.FirstOrDefault(line => line.TrimStart().StartsWith("credentials-file:", StringComparison.OrdinalIgnoreCase));
+                if (tunnel is null || credential is null || tunnel.Contains("YOUR_TUNNEL_ID", StringComparison.OrdinalIgnoreCase)) continue;
+                var credentialPath = credential[(credential.IndexOf(':') + 1)..].Trim().Trim('"', '\'');
+                credentialPath = Environment.ExpandEnvironmentVariables(credentialPath);
+                if (File.Exists(credentialPath)) return candidate;
+            }
+            catch { }
+        }
+        return null;
+    }
+
     private static void StartCloudflareTunnel()
     {
         try
         {
-            // Check if cloudflared is already running
-            var existing = System.Diagnostics.Process.GetProcessesByName("cloudflared");
-            if (existing != null && existing.Length > 0) return;
+            ExtractCloudflaredResource("cloudflared_config_template", "config.template.yml");
+            if (Process.GetProcessesByName("cloudflared").Length > 0) return;
 
-            var cloudflaredExe = @"C:\caddy\cloudflared.exe";
-            if (!File.Exists(cloudflaredExe)) return;
+            var cloudflaredConfig = FindCloudflareConfig();
+            if (cloudflaredConfig is null) return;
+
+            var cloudflaredExe = File.Exists(@"C:\caddy\cloudflared.exe")
+                ? @"C:\caddy\cloudflared.exe"
+                : ExtractCloudflaredResource("cloudflared_exe", "cloudflared.exe");
+            if (cloudflaredExe is null || !File.Exists(cloudflaredExe)) return;
 
             System.Threading.Tasks.Task.Run(() =>
             {
+                System.Threading.Thread.Sleep(5000);
                 try
                 {
-                    // Wait a few seconds for the server to start first
-                    System.Threading.Thread.Sleep(5000);
-
-                    var proc = new Process
+                    Process.Start(new ProcessStartInfo
                     {
-                        StartInfo = new ProcessStartInfo
-                        {
-                            FileName = cloudflaredExe,
-                            Arguments = "tunnel run isolation-bytes",
-                            UseShellExecute = false,
-                            CreateNoWindow = true,
-                        },
-                        EnableRaisingEvents = true,
-                    };
-                    proc.Start();
-
-                    // Monitor and restart if it crashes
-                    proc.Exited += (s, e) =>
-                    {
-                        if (proc.ExitCode != 0)
-                        {
-                            System.Threading.Thread.Sleep(10000);
-                            try
-                            {
-                                var restart = new Process
-                                {
-                                    StartInfo = new ProcessStartInfo
-                                    {
-                                        FileName = cloudflaredExe,
-                                        Arguments = "tunnel run isolation-bytes",
-                                        UseShellExecute = false,
-                                        CreateNoWindow = true,
-                                    },
-                                };
-                                restart.Start();
-                            }
-                            catch { }
-                        }
-                    };
+                        FileName = cloudflaredExe,
+                        Arguments = $"tunnel --config \"{cloudflaredConfig}\" run",
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    });
                 }
                 catch { }
             });

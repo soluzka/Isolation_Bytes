@@ -1,4 +1,4 @@
-"""Embed login.html and .env into the C# launcher with heavy obfuscation.
+"""Embed login.html and cloud_server.py into the C# launcher with heavy obfuscation.
 
 Pipeline: gzip -> PKCS7 padding -> byte permutation (scramble) ->
 AES-256-CBC -> double XOR -> C# byte arrays.
@@ -116,12 +116,10 @@ def _encrypt_one(name, plain_path, out_path):
 
 def main():
     login_html = BASE_DIR / 'website' / 'login.html'
-    dotenv = BASE_DIR / '.env'
     cloud_server = BASE_DIR / 'cloud' / 'cloud_server.py'
     out_dir = BASE_DIR / 'native' / 'AntivirusServerLogin'
 
     _encrypt_one('LoginHtml', login_html, out_dir / 'LoginHtml.g.cs')
-    _encrypt_one('EnvData', dotenv, out_dir / 'EnvData.g.cs')
     if cloud_server.exists():
         _encrypt_one('CloudServer', cloud_server, out_dir / 'CloudServer.g.cs')
         print('Embedded cloud_server.py into launcher.')

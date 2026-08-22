@@ -52,16 +52,25 @@ BUNDLED_DIRS = [
     "blocklists", "utils", "yara_rules",
 ]
 BUNDLED_FILES = [
-    ".env",
-    ".env.server",
-    "cloud/.env",
     "cloud/cert.pem",
-    "cloud/key.pem",
     "cloud/localhost.crt",
-    "cloud/localhost.key",
     "malware_signatures.json",
     "malware_signatures.txt",
 ]
+
+# ============================================================
+# ML MODELS — bundle all model files except assistant.gguf (1.6 GB, disabled in cloud mode)
+# ============================================================
+def _get_model_files():
+    """Return list of (filepath, 'models') tuples for all model files except assistant.gguf."""
+    models_dir = PROJECT_ROOT / "models"
+    model_files = []
+    if models_dir.is_dir():
+        for f in os.listdir(models_dir):
+            fp = models_dir / f
+            if fp.is_file() and f != "assistant.gguf":
+                model_files.append((str(fp), "models"))
+    return model_files
 
 # ============================================================
 # HIDDEN IMPORTS for PyInstaller
@@ -76,13 +85,18 @@ HIDDEN_IMPORTS = [
     "security.assistant_database", "security.local_agent",
     "quarantine_utils", "file_crypto", "utils.paths",
     "waitress", "json", "hashlib", "secrets", "webbrowser",
+    # ML/scanning libraries — needed for BODMAS, EMBER, sklearn models, YARA
+    "sklearn", "sklearn.ensemble", "sklearn.linear_model", "sklearn.svm",
+    "sklearn.tree", "sklearn.neural_network", "sklearn.preprocessing",
+    "sklearn.decomposition", "sklearn.pipeline", "sklearn.metrics",
+    "sklearn.model_selection",
+    "numpy", "scipy", "scipy.sparse", "onnxruntime", "yara",
+    "joblib", "pickle", "pandas", "pefile", "tlsh", "lief",
 ]
 
 EXCLUDED_IMPORTS = [
-    "tensorflow", "torch", "torchvision", "sklearn", "scipy",
-    "numpy", "onnxruntime", "lightgbm", "lief", "pyssdeep",
-    "yara", "tlsh", "pefile", "matplotlib", "pandas",
-    "IPython", "ipykernel", "notebook", "pytest",
+    "tensorflow", "torch", "torchvision",
+    "matplotlib", "IPython", "ipykernel", "notebook", "pytest",
 ]
 
 # ============================================================
@@ -116,6 +130,11 @@ def build_cloud_server():
             dst = os.path.dirname(f) or "."
             datas.append((str(src), dst))
 
+    # Add ML model files (except assistant.gguf which is 1.6 GB and disabled in cloud mode)
+    model_files = _get_model_files()
+    datas.extend(model_files)
+    print(f"  Bundling {len(model_files)} model files from models/")
+
     # Generate spec content
     spec_content = _generate_cloud_spec(datas)
     spec_path = PROJECT_ROOT / "cloud_server.spec"
@@ -129,16 +148,6 @@ def build_cloud_server():
     if result.returncode != 0:
         print("FAILED: cloud_server.exe build")
         return False
-
-    # Copy .env files next to EXE for runtime fallback
-    for f in [".env", ".env.server"]:
-        src = PROJECT_ROOT / f
-        if src.exists():
-            shutil.copy2(src, DIST_DIR / f)
-    cloud_env = PROJECT_ROOT / "cloud" / ".env"
-    if cloud_env.exists():
-        (DIST_DIR / "cloud").mkdir(parents=True, exist_ok=True)
-        shutil.copy2(cloud_env, DIST_DIR / "cloud" / ".env")
 
     exe = DIST_DIR / "cloud_server.exe"
     if not exe.exists():
@@ -204,7 +213,7 @@ def embed_resources():
     if result.returncode != 0:
         print("  FAILED: embed_resources.py")
         return False
-    print("  OK: Resources embedded (EnvData.g.cs, LoginHtml.g.cs, CloudServer.g.cs)")
+    print("  OK: Resources embedded (LoginHtml.g.cs, CloudServer.g.cs)")
     return True
 
 
@@ -238,6 +247,7 @@ def generate_csproj():
     <AssemblyCompany>soluzka</AssemblyCompany>
     <Version>1.8.678.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <CloudflaredPath Condition="'$(CloudflaredPath)' == ''">C:\\caddy\\cloudflared.exe</CloudflaredPath>
   </PropertyGroup>
 
   <!-- Python installer embedded for bootstrap fallback -->
@@ -248,7 +258,10 @@ def generate_csproj():
   <!-- cloud_server.exe embedded so the launcher is fully self-contained -->
   <!-- No .env embedded — launcher fetches config from the server at runtime -->
   <ItemGroup>
+    <Compile Remove="EnvData.g.cs" />
     <EmbeddedResource Include="{cloud_exe_rel}" LogicalName="cloud_server_exe" />
+    <EmbeddedResource Include="$(CloudflaredPath)" LogicalName="cloudflared_exe" Condition="Exists('$(CloudflaredPath)')" />
+    <EmbeddedResource Include="cloudflared.template.yml" LogicalName="cloudflared_config_template" />
   </ItemGroup>
 </Project>
 """
@@ -263,7 +276,7 @@ def generate_csproj():
 def build_launcher():
     print("\n[2/2] Building AntivirusServerLogin.exe (dotnet)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
-    print(f"  Embedded:      cloud_server.exe, .env, login.html, cloud_server.py")
+    print(f"  Embedded:      cloud_server.exe, cloudflared.exe, config template, login.html, cloud_server.py")
 
     # Check that cloud_server.exe exists (needed for embedding)
     cloud_exe = DIST_DIR / "cloud_server.exe"
@@ -272,7 +285,7 @@ def build_launcher():
         print(f"  Run: python buildconfig.py --cloud")
         return False
 
-    # Re-embed resources (regenerates EnvData.g.cs, LoginHtml.g.cs, CloudServer.g.cs)
+    # Re-embed resources (regenerates LoginHtml.g.cs and CloudServer.g.cs)
     if not embed_resources():
         return False
 
@@ -406,7 +419,7 @@ def main():
             print(f"  {f.name:40s} {f.stat().st_size / 1048576:>8.1f} MB")
         print(f"\n  AntivirusServerLogin.exe contains:")
         print(f"    - Embedded cloud_server.exe (extracts and runs on launch)")
-        print(f"    - Embedded .env config (URLs, keys, ports)")
+        print(f"    - No embedded secrets; .env is created beside the server EXE at runtime")
         print(f"    - Embedded login.html (website)")
         print(f"    - Embedded cloud_server.py (Python fallback)")
         print(f"    - Embedded Python 3.11 installer (fallback if no Python)")
