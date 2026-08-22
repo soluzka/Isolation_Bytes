@@ -122,6 +122,13 @@ static class Program
             return form.TryLoadExistingLicense() ? 0 : 1;
         }
 
+        // Install the Windows service (auto-start, survives logoff) if not
+        // already installed. Runs in the background — non-blocking.
+        System.Threading.Tasks.Task.Run(() => ServiceInstaller.EnsureInstalled());
+
+        // Ensure Caddy is installed (downloads if missing) — non-blocking.
+        System.Threading.Tasks.Task.Run(() => CaddyInstaller.EnsureInstalled());
+
         // Start the Flask cloud server (isolation-bytes.com) in the background
         // if it's not already running. Non-blocking — the form will retry
         // fetching the page until the server is ready.
@@ -131,6 +138,293 @@ static class Program
         Application.SetCompatibleTextRenderingDefault(false);
         Application.Run(new LoginForm());
         return 0;
+    }
+}
+
+/// <summary>
+/// Installs and starts the AntivirusCloudServer Windows service so the cloud
+/// server auto-starts on boot and survives logoff. Extracts the embedded
+/// cloud_service.py, ensures Python + pywin32 are available, then installs
+/// the service. All operations are best-effort and non-fatal — the launcher
+/// still works without the service (it just won't auto-start on boot).
+/// </summary>
+internal static class ServiceInstaller
+{
+    private const string ServiceName = "AntivirusCloudServer";
+
+    /// <summary>Check if the Windows service is installed.</summary>
+    private static bool IsServiceInstalled()
+    {
+        try
+        {
+            foreach (var line in RunCaptured("sc.exe", $"query {ServiceName}", 5000))
+            {
+                if (line.Contains("SERVICE_NAME", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>Check if the service is currently running.</summary>
+    private static bool IsServiceRunning()
+    {
+        try
+        {
+            foreach (var line in RunCaptured("sc.exe", $"query {ServiceName}", 5000))
+            {
+                if (line.Contains("STATE", StringComparison.OrdinalIgnoreCase) &&
+                    line.Contains("RUNNING", StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    /// <summary>Run a process and capture stdout+stderr lines.</summary>
+    private static List<string> RunCaptured(string fileName, string args, int timeoutMs)
+    {
+        var result = new List<string>();
+        var psi = new ProcessStartInfo
+        {
+            FileName = fileName,
+            Arguments = args,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+        using var p = Process.Start(psi);
+        if (p is null) return result;
+        while (!p.StandardOutput.EndOfStream) result.Add(p.StandardOutput.ReadLine() ?? "");
+        while (!p.StandardError.EndOfStream) result.Add(p.StandardError.ReadLine() ?? "");
+        p.WaitForExit(timeoutMs);
+        return result;
+    }
+
+    /// <summary>Run a command elevated (UAC prompt) and wait for it.</summary>
+    private static int RunElevated(string fileName, string args, int timeoutMs = 60000)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = fileName,
+                Arguments = args,
+                UseShellExecute = true,
+                Verb = "runas",
+                CreateNoWindow = true,
+                WindowStyle = ProcessWindowStyle.Hidden,
+            };
+            using var p = Process.Start(psi);
+            if (p is null) return -1;
+            p.WaitForExit(timeoutMs);
+            return p.ExitCode;
+        }
+        catch { return -1; }
+    }
+
+    /// <summary>Extract the embedded cloud_service.py to the runtime directory.</summary>
+    private static string? ExtractServiceScript()
+    {
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            using var stream = asm.GetManifestResourceStream("cloud_service_py");
+            if (stream is null) return null;
+
+            var runtimeDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "AntivirusServer");
+            Directory.CreateDirectory(runtimeDir);
+
+            var scriptPath = Path.Combine(runtimeDir, "cloud_service.py");
+            using var fs = new FileStream(scriptPath, FileMode.Create, FileAccess.Write);
+            stream.CopyTo(fs);
+            return scriptPath;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Extract the embedded cloud_server.exe to the runtime directory.</summary>
+    private static string? ExtractServerExe()
+    {
+        try
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            using var stream = asm.GetManifestResourceStream("cloud_server_exe");
+            if (stream is null) return null;
+
+            var runtimeDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
+                "AntivirusServer");
+            Directory.CreateDirectory(runtimeDir);
+
+            var exePath = Path.Combine(runtimeDir, "cloud_server.exe");
+            if (!File.Exists(exePath) || new FileInfo(exePath).Length != stream.Length)
+            {
+                using var fs = new FileStream(exePath, FileMode.Create, FileAccess.Write);
+                stream.CopyTo(fs);
+            }
+            return exePath;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Ensure pywin32 is installed for the given Python.</summary>
+    private static void EnsurePywin32(string python)
+    {
+        try
+        {
+            // Check if pywin32 is already installed
+            var lines = RunCaptured(python, "-c \"import win32serviceutil; print('ok')\"", 10000);
+            if (lines.Any(l => l.Contains("ok"))) return;
+
+            // Install pywin32
+            RunCaptured(python, "-m pip install pywin32", 120000);
+            // Run post-install to register DLLs
+            var scriptsDir = Path.Combine(Path.GetDirectoryName(python) ?? "", "Scripts");
+            var postInstall = Path.Combine(scriptsDir, "pywin32_postinstall.py");
+            if (File.Exists(postInstall))
+                RunElevated(python, $"\"{postInstall}\" -install", 30000);
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// Main entry: ensure the Windows service is installed and running.
+    /// Called in a background thread from Main — never throws.
+    /// </summary>
+    public static void EnsureInstalled()
+    {
+        // Already installed and running? Nothing to do.
+        if (IsServiceInstalled() && IsServiceRunning()) return;
+
+        // Extract the service script and server EXE to the runtime dir.
+        var scriptPath = ExtractServiceScript();
+        var serverExe = ExtractServerExe();
+        if (scriptPath is null) return;
+
+        // Find or install Python
+        var python = CloudServerStarter.FindPython();
+        if (python is null)
+        {
+            CloudServerStarter.EnsurePythonInstalled();
+            python = CloudServerStarter.FindPython();
+        }
+        if (python is null) return;
+
+        // Ensure pywin32 is available
+        EnsurePywin32(python);
+
+        // Install the service (elevated)
+        if (!IsServiceInstalled())
+        {
+            RunElevated(python, $"\"{scriptPath}\" install", 30000);
+            // Configure auto-start + crash recovery
+            RunElevated("sc.exe", $"config {ServiceName} start= auto", 10000);
+            RunElevated("sc.exe", $"failure {ServiceName} reset= 86400 actions= restart/5000/restart/10000/restart/30000", 10000);
+        }
+
+        // Start the service (elevated)
+        if (!IsServiceRunning())
+        {
+            RunElevated("sc.exe", $"start {ServiceName}", 30000);
+        }
+    }
+}
+
+/// <summary>
+/// Ensures Caddy reverse proxy is installed. Downloads the Caddy binary from
+/// GitHub releases if it's not already present on disk. Caddy is a single
+/// executable — no installer needed, just download and run.
+/// </summary>
+internal static class CaddyInstaller
+{
+    private const string CaddyVersion = "2.8.4";
+    private const string CaddyDownloadUrl =
+        "https://github.com/caddyserver/caddy/releases/download/v{0}/caddy_{0}_windows_amd64.zip";
+    private const string CaddyExeName = "caddy.exe";
+
+    /// <summary>Get the runtime directory where Caddy should live.</summary>
+    private static string GetCaddyDir()
+    {
+        var dir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "IsolationBytes", "caddy");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
+    /// <summary>Search known locations for an existing Caddy install.</summary>
+    private static string? FindExistingCaddy()
+    {
+        var candidates = new List<string>
+        {
+            Path.Combine(GetCaddyDir(), CaddyExeName),
+            @"C:\caddy\caddy.exe",
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "Caddy", CaddyExeName),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Caddy", CaddyExeName),
+        };
+        foreach (var c in candidates)
+        {
+            try { if (File.Exists(c)) return c; } catch { }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Download and extract Caddy to the runtime directory if not already
+    /// installed. Returns the path to caddy.exe, or null on failure.
+    /// </summary>
+    public static string? EnsureInstalled()
+    {
+        // Already installed?
+        var existing = FindExistingCaddy();
+        if (existing is not null) return existing;
+
+        try
+        {
+            var caddyDir = GetCaddyDir();
+            var exePath = Path.Combine(caddyDir, CaddyExeName);
+            if (File.Exists(exePath)) return exePath;
+
+            // Download Caddy zip from GitHub releases
+            var url = string.Format(CaddyDownloadUrl, CaddyVersion);
+            var zipPath = Path.Combine(Path.GetTempPath(), "caddy_download.zip");
+
+            using (var client = new HttpClient())
+            {
+                client.Timeout = TimeSpan.FromMinutes(3);
+                client.DefaultRequestHeaders.Add("User-Agent", "AntivirusServerLauncher");
+                var bytes = client.GetByteArrayAsync(url).Result;
+                File.WriteAllBytes(zipPath, bytes);
+            }
+
+            // Extract caddy.exe from the zip
+            System.IO.Compression.ZipFile.ExtractToDirectory(zipPath, caddyDir, overwriteFiles: true);
+            try { File.Delete(zipPath); } catch { }
+
+            // The zip contains caddy.exe at the root
+            if (File.Exists(exePath)) return exePath;
+
+            // Some versions put it in a subfolder — search for it
+            var found = Directory.GetFiles(caddyDir, CaddyExeName, SearchOption.AllDirectories);
+            if (found.Length > 0)
+            {
+                // Move it to the root of caddyDir
+                if (found[0] != exePath)
+                {
+                    try { File.Move(found[0], exePath, overwrite: true); } catch { }
+                }
+                if (File.Exists(exePath)) return exePath;
+                return found[0];
+            }
+            return null;
+        }
+        catch { return null; }
     }
 }
 
@@ -302,7 +596,7 @@ internal static class CloudServerStarter
     }
 
     /// <summary>Find the python executable to run the server with.</summary>
-    private static string? FindPython()
+    internal static string? FindPython()
     {
         var candidates = new List<string>
         {
@@ -353,7 +647,7 @@ internal static class CloudServerStarter
     /// install Python for all users. Returns true if Python is available
     /// after the install (or was already installed).
     /// </summary>
-    private static bool EnsurePythonInstalled()
+    internal static bool EnsurePythonInstalled()
     {
         // Already installed?
         if (FindPython() is not null) return true;
@@ -495,9 +789,9 @@ internal static class CloudServerStarter
                         {
                             FileName = serverExe,
                             WorkingDirectory = workingDir,
-                            UseShellExecute = true,
-                            CreateNoWindow = false,
-                            WindowStyle = ProcessWindowStyle.Normal,
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                            WindowStyle = ProcessWindowStyle.Hidden,
                         },
                         EnableRaisingEvents = true,
                     };
@@ -547,8 +841,8 @@ internal static class CloudServerStarter
                         Arguments = $"\"{script}\"",
                         WorkingDirectory = wd,
                         UseShellExecute = false,
-                        CreateNoWindow = false,
-                        WindowStyle = ProcessWindowStyle.Normal,
+                        CreateNoWindow = true,
+                        WindowStyle = ProcessWindowStyle.Hidden,
                     },
                     EnableRaisingEvents = true,
                 };
@@ -618,26 +912,55 @@ internal static class CloudServerStarter
             ExtractCloudflaredResource("cloudflared_config_template", "config.template.yml");
             if (Process.GetProcessesByName("cloudflared").Length > 0) return;
 
-            var cloudflaredConfig = FindCloudflareConfig();
-            if (cloudflaredConfig is null) return;
-
-            var cloudflaredExe = File.Exists(@"C:\caddy\cloudflared.exe")
-                ? @"C:\caddy\cloudflared.exe"
-                : ExtractCloudflaredResource("cloudflared_exe", "cloudflared.exe");
+            // Search portable locations for cloudflared.exe
+            var cloudflaredExe = ExtractCloudflaredResource("cloudflared_exe", "cloudflared.exe");
+            if (cloudflaredExe is null || !File.Exists(cloudflaredExe))
+            {
+                // Search known locations on disk
+                var candidates = new[]
+                {
+                    @"C:\caddy\cloudflared.exe",
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "IsolationBytes", "cloudflared", "cloudflared.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "cloudflared", "cloudflared.exe"),
+                    Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "cloudflared", "cloudflared.exe"),
+                };
+                foreach (var c in candidates)
+                {
+                    if (File.Exists(c)) { cloudflaredExe = c; break; }
+                }
+            }
             if (cloudflaredExe is null || !File.Exists(cloudflaredExe)) return;
+
+            var cloudflaredConfig = FindCloudflareConfig();
+            var tunnelName = Environment.GetEnvironmentVariable("CLOUDFLARED_TUNNEL_NAME") ?? "isolation-bytes";
 
             System.Threading.Tasks.Task.Run(() =>
             {
                 System.Threading.Thread.Sleep(5000);
                 try
                 {
-                    Process.Start(new ProcessStartInfo
+                    if (cloudflaredConfig is not null)
                     {
-                        FileName = cloudflaredExe,
-                        Arguments = $"tunnel --config \"{cloudflaredConfig}\" run",
-                        UseShellExecute = false,
-                        CreateNoWindow = true,
-                    });
+                        // Named tunnel with config + credentials
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = cloudflaredExe,
+                            Arguments = $"tunnel --config \"{cloudflaredConfig}\" run {tunnelName}",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                        });
+                    }
+                    else
+                    {
+                        // No credentials available — start a quick tunnel (temporary URL)
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = cloudflaredExe,
+                            Arguments = $"tunnel --url http://127.0.0.1:8000",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                        });
+                    }
                 }
                 catch { }
             });

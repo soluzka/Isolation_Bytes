@@ -46,6 +46,60 @@ except ImportError:
     print("pywin32 is required. Install it with: pip install pywin32")
 
 
+def _find_executable(name, candidates):
+    """Return the first existing candidate path for an executable, else None."""
+    for cand in candidates:
+        if cand and os.path.isfile(cand):
+            return cand
+    # Also check PATH as a fallback
+    try:
+        import shutil as _sh
+        on_path = _sh.which(name)
+        if on_path:
+            return on_path
+    except Exception:
+        pass
+    return None
+
+
+# User/profile paths (portable across PCs)
+_USERPROFILE = os.environ.get('USERPROFILE', os.path.expanduser('~'))
+_LOCALAPPDATA = os.environ.get('LOCALAPPDATA', os.path.join(_USERPROFILE, 'AppData', 'Local'))
+_PROGRAMFILES = os.environ.get('ProgramFiles', r'C:\Program Files')
+_PROGRAMFILES_X86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+
+# Known locations for cloudflared.exe (order = priority)
+CLOUDFLARED_CANDIDATES = [
+    r'C:\caddy\cloudflared.exe',
+    os.path.join(_LOCALAPPDATA, 'IsolationBytes', 'cloudflared', 'cloudflared.exe'),
+    os.path.join(_LOCALAPPDATA, 'Programs', 'cloudflared', 'cloudflared.exe'),
+    os.path.join(_PROGRAMFILES, 'cloudflared', 'cloudflared.exe'),
+    os.path.join(_PROGRAMFILES_X86, 'cloudflared', 'cloudflared.exe'),
+    os.path.join(_USERPROFILE, '.cloudflared', 'cloudflared.exe'),
+    str(BASE_DIR / 'cloud' / 'cloudflared.exe'),
+]
+
+# Known locations for caddy.exe
+CADDY_CANDIDATES = [
+    r'C:\caddy\caddy.exe',
+    os.path.join(_LOCALAPPDATA, 'IsolationBytes', 'caddy', 'caddy.exe'),
+    os.path.join(_PROGRAMFILES, 'Caddy', 'caddy.exe'),
+    os.path.join(_PROGRAMFILES_X86, 'Caddy', 'caddy.exe'),
+    str(BASE_DIR / 'cloud' / 'caddy.exe'),
+]
+
+CADDYFILE_CANDIDATES = [
+    r'C:\caddy\Caddyfile',
+    os.path.join(_LOCALAPPDATA, 'IsolationBytes', 'caddy', 'Caddyfile'),
+    str(BASE_DIR / 'cloud' / 'Caddyfile'),
+]
+
+CLOUDFLARED_CONFIG_CANDIDATES = [
+    os.path.join(_USERPROFILE, '.cloudflared', 'config.yml'),
+    str(BASE_DIR / 'cloud' / 'cloudflared.yml'),
+]
+
+
 class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else object):
     """Windows service that runs the cloud antivirus server 24/7."""
 
@@ -185,39 +239,43 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             self.log.warning("Server did not become ready in 120 seconds")
 
         # Start Caddy reverse proxy (if installed and Caddyfile exists)
-        caddy_exe = r'C:\caddy\caddy.exe'
-        caddyfile = r'C:\caddy\Caddyfile'
-        if os.path.exists(caddy_exe) and os.path.exists(caddyfile):
+        caddy_exe = _find_executable('caddy', CADDY_CANDIDATES)
+        caddyfile = next((p for p in CADDYFILE_CANDIDATES if p and os.path.exists(p)), None)
+        if caddy_exe and caddyfile:
             try:
                 self._caddy_process = subprocess.Popen(
                     [caddy_exe, 'run', '--config', caddyfile],
-                    cwd=r'C:\caddy',
+                    cwd=os.path.dirname(caddy_exe),
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
-                self.log.info(f"Caddy started with PID {self._caddy_process.pid}")
+                self.log.info(f"Caddy started with PID {self._caddy_process.pid} ({caddy_exe})")
             except Exception as e:
                 self.log.warning(f"Failed to start Caddy: {e}")
         else:
-            self.log.info("Caddy not found at C:\\caddy\\caddy.exe — skipping")
+            self.log.info(f"Caddy not found (searched {CADDY_CANDIDATES}) — skipping")
 
         # Start Cloudflare tunnel (if installed) — provides access without port forwarding
-        cloudflared_exe = r'C:\caddy\cloudflared.exe'
-        cloudflared_config = r'C:\Users\bpier\.cloudflared\config.yml'
-        if os.path.exists(cloudflared_exe):
+        cloudflared_exe = _find_executable('cloudflared', CLOUDFLARED_CANDIDATES)
+        cloudflared_config = next((p for p in CLOUDFLARED_CONFIG_CANDIDATES if p and os.path.exists(p)), None)
+        if cloudflared_exe:
             try:
+                cmd = [cloudflared_exe, 'tunnel']
+                if cloudflared_config:
+                    cmd += ['--config', cloudflared_config]
+                cmd += ['run', 'isolation-bytes']
                 self._cloudflared_process = subprocess.Popen(
-                    [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
+                    cmd,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
-                self.log.info(f"Cloudflare tunnel started with PID {self._cloudflared_process.pid}")
+                self.log.info(f"Cloudflare tunnel started with PID {self._cloudflared_process.pid} ({cloudflared_exe})")
             except Exception as e:
                 self.log.warning(f"Failed to start Cloudflare tunnel: {e}")
         else:
-            self.log.info("cloudflared not found at C:\\caddy\\cloudflared.exe — skipping")
+            self.log.info(f"cloudflared not found (searched {CLOUDFLARED_CANDIDATES}) — skipping")
 
         # Monitor all processes — restart if they crash
         while not self._stop_requested:
@@ -258,13 +316,13 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
 
             # Check Caddy
             if self._caddy_process and self._caddy_process.poll() is not None:
-                if os.path.exists(caddy_exe) and os.path.exists(caddyfile) and not self._stop_requested:
+                if caddy_exe and caddyfile and not self._stop_requested:
                     self.log.warning("Caddy exited. Restarting in 5 seconds...")
                     time.sleep(5)
                     if not self._stop_requested:
                         self._caddy_process = subprocess.Popen(
                             [caddy_exe, 'run', '--config', caddyfile],
-                            cwd=r'C:\caddy',
+                            cwd=os.path.dirname(caddy_exe),
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
@@ -273,12 +331,16 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
 
             # Check cloudflared
             if self._cloudflared_process and self._cloudflared_process.poll() is not None:
-                if os.path.exists(cloudflared_exe) and not self._stop_requested:
+                if cloudflared_exe and not self._stop_requested:
                     self.log.warning("Cloudflare tunnel exited. Restarting in 10 seconds...")
                     time.sleep(10)
                     if not self._stop_requested:
+                        cmd = [cloudflared_exe, 'tunnel']
+                        if cloudflared_config:
+                            cmd += ['--config', cloudflared_config]
+                        cmd += ['run', 'isolation-bytes']
                         self._cloudflared_process = subprocess.Popen(
-                            [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
+                            cmd,
                             stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,

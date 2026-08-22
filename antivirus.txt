@@ -2,8 +2,6 @@ Get-ChildItem -Path C:\ -Filter cloudflared.exe -Recurse -ErrorAction SilentlyCo
 
 Start-Process -FilePath "python" -ArgumentList "install_service.py" -Verb RunAs -Wait -WorkingDirectory "d:\antivirus-yara-rules-c" 2>&1; Start-Sleep 5; C:\Windows\System32\sc.exe query AntivirusCloudServer 2>&1
 
-Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force 2>&1; Start-Sleep 2; Start-Process -FilePath "C:\caddy\cloudflared.exe" -ArgumentList "tunnel", "run", "isolation-bytes" -WindowStyle Normal; Start-Sleep 8; Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
-
 powercfg /change standby-timeout-ac 0; powercfg /change hibernate-timeout-ac 0; powercfg /change disk-timeout-ac 0; powercfg /change monitor-timeout-ac 0; powercfg /change standby-timeout-dc 0; powercfg /change hibernate-timeout-dc 0; powercfg /change disk-timeout-dc 0; powercfg /change monitor-timeout-dc 0; Write-Output "Power settings applied"
 
 cd "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c"; python -c "import win32serviceutil; print('pywin32 OK')" 2>&1
