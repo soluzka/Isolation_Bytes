@@ -1,4 +1,5 @@
 import os
+import sys
 import math
 import logging
 import functools
@@ -7,6 +8,41 @@ from collections import Counter
 import joblib
 import numpy as np
 from sklearn.ensemble import IsolationForest
+
+
+def _find_models_dir():
+    """Find the models directory — works in dev mode and PyInstaller EXE mode."""
+    candidates = []
+    # 0. PyInstaller bundled location — check FIRST
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        candidates.append(os.path.join(meipass, 'models'))
+    # 1. Relative to this file (dev mode: security/detector.py -> ../models)
+    try:
+        basedir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        candidates.append(os.path.join(basedir, 'models'))
+    except Exception:
+        basedir = os.getcwd()
+        candidates.append(os.path.join(basedir, 'models'))
+    # 2. Next to the EXE
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, 'models'))
+        candidates.append(os.path.join(exe_dir, '..', 'models'))
+        candidates.append(os.path.join(exe_dir, '..', '..', 'models'))
+    # 3. CWD
+    candidates.append(os.path.join(os.getcwd(), 'models'))
+    # 4. ProgramData / Program Files
+    candidates.append(os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'), 'AntivirusServer', 'models'))
+    pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+    candidates.append(os.path.join(pf, 'Antivirus Server', 'models'))
+    for c in candidates:
+        try:
+            if os.path.isdir(c):
+                return c
+        except Exception:
+            pass
+    return os.path.join(basedir if 'basedir' in dir() else os.getcwd(), 'models')
 
 try:
     import pefile
@@ -111,10 +147,7 @@ class MalwareDetector:
         """Load the trained static-file classifier if available, falling
         back to an untrained placeholder model otherwise."""
         try:
-            model_path = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                'models', 'file_malware_classifier.pkl'
-            )
+            model_path = os.path.join(_find_models_dir(), 'file_malware_classifier.pkl')
             if os.path.exists(model_path):
                 bundle = joblib.load(model_path)
                 self.using_trained_model = True
@@ -237,9 +270,7 @@ class MalwareDetector:
         return np.array(features)
 
 
-_EMBER_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'ember_malware_model.txt'
-)
+_EMBER_MODEL_PATH = os.path.join(_find_models_dir(), 'ember_malware_model.txt')
 
 
 class EmberMalwareDetector:
@@ -305,12 +336,8 @@ class EmberMalwareDetector:
 ember_detector = EmberMalwareDetector()
 
 
-_BODMAS_CNN_MODEL_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'bodmas_cnn.onnx'
-)
-_BODMAS_CNN_SCALER_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'models', 'bodmas_cnn_scaler.pkl'
-)
+_BODMAS_CNN_MODEL_PATH = os.path.join(_find_models_dir(), 'bodmas_cnn.onnx')
+_BODMAS_CNN_SCALER_PATH = os.path.join(_find_models_dir(), 'bodmas_cnn_scaler.pkl')
 
 
 class BodmasCnnDetector:

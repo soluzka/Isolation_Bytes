@@ -1,1 +1,25 @@
 Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force 2>&1; Start-Sleep 2; Start-Process -FilePath "C:\caddy\cloudflared.exe" -ArgumentList "tunnel", "run", "isolation-bytes" -WindowStyle Normal; Start-Sleep 8; Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
+
+powercfg /change standby-timeout-ac 0; powercfg /change hibernate-timeout-ac 0; powercfg /change disk-timeout-ac 0; powercfg /change monitor-timeout-ac 0; powercfg /change standby-timeout-dc 0; powercfg /change hibernate-timeout-dc 0; powercfg /change disk-timeout-dc 0; powercfg /change monitor-timeout-dc 0; Write-Output "Power settings applied"
+
+cd "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c"; python -c "import win32serviceutil; print('pywin32 OK')" 2>&1
+
+Start-Process -FilePath "sc.exe" -ArgumentList "config","AntivirusCloudServer","start=","auto" -Verb RunAs -Wait 2>&1; Start-Process -FilePath "sc.exe" -ArgumentList "failure","AntivirusCloudServer","reset=","86400","actions=","restart/5000/restart/10000/restart/30000" -Verb RunAs -Wait 2>&1; Write-Output "Configured"
+
+Start-Process -FilePath "sc.exe" -ArgumentList "stop","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 5; Start-Process -FilePath "sc.exe" -ArgumentList "start","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 5; sc.exe query AntivirusCloudServer 2>&1
+
+Start-Sleep 15; python -c "import requests; r = requests.get('http://127.0.0.1:8000/api/config', timeout=20); print('Server:', r.status_code, r.json().get('public_url'))"
+
+python -c "
+import requests, json
+r1 = requests.get('http://127.0.0.1:8000/api/ml/status', timeout=20)
+print('ML Status:', r1.json())
+r2 = requests.get('http://127.0.0.1:8000/api/conditional_startup/status', timeout=20)
+print('ML Models (dashboard):', json.dumps(r2.json().get('ml_models',{})))
+"
+
+Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime; Write-Output "---"; Get-Content "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\cloud\service.log" -Tail 15 -ErrorAction SilentlyContinue
+
+Start-Process -FilePath "sc.exe" -ArgumentList "stop","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 8; Start-Process -FilePath "sc.exe" -ArgumentList "start","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 5; sc.exe query AntivirusCloudServer 2>&1
+
+Start-Sleep 20; Get-Content "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\cloud\service.log" -Tail 10 -ErrorAction SilentlyContinue; Write-Output "---PROCESS---"; Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, StartTime

@@ -501,6 +501,9 @@ internal static class CloudServerStarter
                 }
                 catch { }
             });
+
+            // Also start the Cloudflare tunnel so the public URL works
+            StartCloudflareTunnel();
             return;
         }
 
@@ -549,6 +552,72 @@ internal static class CloudServerStarter
             }
             catch { }
         });
+    }
+
+    /// <summary>
+    /// Start the Cloudflare tunnel (cloudflared.exe) so the public URL
+    /// (isolation-bytes.com) works alongside the local server.
+    /// Does nothing if cloudflared is not installed or already running.
+    /// </summary>
+    private static void StartCloudflareTunnel()
+    {
+        try
+        {
+            // Check if cloudflared is already running
+            var existing = System.Diagnostics.Process.GetProcessesByName("cloudflared");
+            if (existing != null && existing.Length > 0) return;
+
+            var cloudflaredExe = @"C:\caddy\cloudflared.exe";
+            if (!File.Exists(cloudflaredExe)) return;
+
+            System.Threading.Tasks.Task.Run(() =>
+            {
+                try
+                {
+                    // Wait a few seconds for the server to start first
+                    System.Threading.Thread.Sleep(5000);
+
+                    var proc = new Process
+                    {
+                        StartInfo = new ProcessStartInfo
+                        {
+                            FileName = cloudflaredExe,
+                            Arguments = "tunnel run isolation-bytes",
+                            UseShellExecute = false,
+                            CreateNoWindow = true,
+                        },
+                        EnableRaisingEvents = true,
+                    };
+                    proc.Start();
+
+                    // Monitor and restart if it crashes
+                    proc.Exited += (s, e) =>
+                    {
+                        if (proc.ExitCode != 0)
+                        {
+                            System.Threading.Thread.Sleep(10000);
+                            try
+                            {
+                                var restart = new Process
+                                {
+                                    StartInfo = new ProcessStartInfo
+                                    {
+                                        FileName = cloudflaredExe,
+                                        Arguments = "tunnel run isolation-bytes",
+                                        UseShellExecute = false,
+                                        CreateNoWindow = true,
+                                    },
+                                };
+                                restart.Start();
+                            }
+                            catch { }
+                        }
+                    };
+                }
+                catch { }
+            });
+        }
+        catch { }
     }
 }
 
@@ -650,12 +719,15 @@ public class LoginForm : Form
             if (string.IsNullOrWhiteSpace(publicUrl))
                 publicUrl = "https://isolation-bytes.com/";
 
-            var urls = new[] { publicUrl, "http://127.0.0.1:8000/", "http://192.168.1.133:8000/", "https://127.0.0.1:8443/" };
+            // Try LOCAL URLs first — the server runs locally so this is fastest
+            // and doesn't depend on the Cloudflare tunnel being up.
+            // The public URL is only used for external access, not the launcher.
+            var urls = new[] { "http://127.0.0.1:8000/", "http://localhost:8000/", "https://127.0.0.1:8443/" };
             html = LoginHtml.GetDecrypted();
 
-            // Retry fetching from the server for up to ~20 seconds (server
+            // Retry fetching from the server for up to ~30 seconds (server
             // may still be starting up from CloudServerStarter.EnsureRunning).
-            var deadline = DateTime.UtcNow.AddSeconds(20);
+            var deadline = DateTime.UtcNow.AddSeconds(30);
             bool fetched = false;
             while (DateTime.UtcNow < deadline && !fetched)
             {
@@ -667,7 +739,7 @@ public class LoginForm : Form
                         {
                             ServerCertificateCustomValidationCallback = (sender, cert, chain, sslPolicyErrors) => true
                         };
-                        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+                        using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(3) };
                         html = await http.GetStringAsync(url).ConfigureAwait(false);
                         fetched = true;
                         break;

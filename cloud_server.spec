@@ -20,7 +20,7 @@ datas = [
     ('C:\\Users\\bpier\\OneDrive\\Documents\\antivirus-yara-rules-c\\antivirus-yara-rules-c\\malware_signatures.txt', '.')
 ]
 binaries = []
-hiddenimports = ['flask', 'flask.sessions', 'flask_cors', 'flask_limiter', 'flask_wtf', 'werkzeug', 'werkzeug.middleware', 'werkzeug.middleware.proxy_fix', 'requests', 'psutil', 'ssl', 'dnslib', 'dns.resolver', 'dotenv', 'cryptography', 'cryptography.fernet', 'bcrypt', 'pyotp', 'stripe', 'stripe.error', 'stripe.webhook', 'stripe.checkout', 'stripe.Product', 'security.yara_scanner', 'security.c2_detector', 'security.secure_memory', 'security.local_assistant', 'security.assistant_trainer', 'security.assistant_database', 'security.local_agent', 'quarantine_utils', 'file_crypto', 'utils.paths', 'waitress', 'json', 'hashlib', 'secrets', 'webbrowser']
+hiddenimports = ['flask', 'flask.sessions', 'flask_cors', 'flask_limiter', 'flask_wtf', 'werkzeug', 'werkzeug.middleware', 'werkzeug.middleware.proxy_fix', 'requests', 'psutil', 'ssl', 'dnslib', 'dns.resolver', 'dotenv', 'cryptography', 'cryptography.fernet', 'bcrypt', 'pyotp', 'security.yara_scanner', 'security.c2_detector', 'security.secure_memory', 'security.local_assistant', 'security.assistant_trainer', 'security.assistant_database', 'security.local_agent', 'quarantine_utils', 'file_crypto', 'utils.paths', 'waitress', 'json', 'hashlib', 'secrets', 'webbrowser']
 excludes = ['tensorflow', 'torch', 'torchvision', 'sklearn', 'scipy', 'numpy', 'onnxruntime', 'lightgbm', 'lief', 'pyssdeep', 'yara', 'tlsh', 'pefile', 'matplotlib', 'pandas', 'IPython', 'ipykernel', 'notebook', 'pytest']
 
 a = Analysis(

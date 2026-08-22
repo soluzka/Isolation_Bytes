@@ -110,18 +110,31 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
         import threading
         import time
 
+        # Prefer the built cloud_server.exe (self-contained, no Python needed)
+        server_exe = str(BASE_DIR / 'dist' / 'cloud_server.exe')
         server_script = str(BASE_DIR / 'cloud' / 'cloud_server.py')
         python_exe = sys.executable
 
-        # Start the server in a subprocess so it runs independently
-        self._server_process = subprocess.Popen(
-            [python_exe, server_script],
-            cwd=str(BASE_DIR),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        self.log.info(f"Server started with PID {self._server_process.pid}")
+        if os.path.exists(server_exe):
+            # Use the built EXE — it has everything bundled
+            self._server_process = subprocess.Popen(
+                [server_exe],
+                cwd=str(BASE_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.log.info(f"Server EXE started with PID {self._server_process.pid}")
+        else:
+            # Fallback: run with Python
+            self._server_process = subprocess.Popen(
+                [python_exe, server_script],
+                cwd=str(BASE_DIR),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self.log.info(f"Server (Python) started with PID {self._server_process.pid}")
 
         # Wait for the server to be ready before starting proxies
         time.sleep(5)
@@ -146,10 +159,11 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
 
         # Start Cloudflare tunnel (if installed) — provides access without port forwarding
         cloudflared_exe = r'C:\caddy\cloudflared.exe'
+        cloudflared_config = r'C:\Users\bpier\.cloudflared\config.yml'
         if os.path.exists(cloudflared_exe):
             try:
                 self._cloudflared_process = subprocess.Popen(
-                    [cloudflared_exe, 'tunnel', '--url', 'http://127.0.0.1:8000'],
+                    [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
@@ -165,17 +179,26 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             # Check server
             ret = self._server_process.poll()
             if ret is not None:
-                self.log.warning(f"Server process exited with code {ret}. Restarting in 5 seconds...")
-                time.sleep(5)
+                self.log.warning(f"Server process exited with code {ret}. Restarting in 10 seconds...")
+                time.sleep(10)
                 if not self._stop_requested:
                     self.log.info("Restarting server...")
-                    self._server_process = subprocess.Popen(
-                        [python_exe, server_script],
-                        cwd=str(BASE_DIR),
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        creationflags=subprocess.CREATE_NO_WINDOW,
-                    )
+                    if os.path.exists(server_exe):
+                        self._server_process = subprocess.Popen(
+                            [server_exe],
+                            cwd=str(BASE_DIR),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
+                    else:
+                        self._server_process = subprocess.Popen(
+                            [python_exe, server_script],
+                            cwd=str(BASE_DIR),
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                        )
                     self.log.info(f"Server restarted with PID {self._server_process.pid}")
 
             # Check Caddy
@@ -200,7 +223,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                     time.sleep(10)
                     if not self._stop_requested:
                         self._cloudflared_process = subprocess.Popen(
-                            [cloudflared_exe, 'tunnel', '--url', 'http://127.0.0.1:8000'],
+                            [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
                             stdout=subprocess.PIPE,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,

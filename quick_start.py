@@ -1314,10 +1314,46 @@ def run_conditional_startup_background():
             record_conditional_startup_run(error=e, duration=time.time() - start_time)
 
 
+def _find_models_dir():
+    """Find the models directory — works both in dev mode and when running
+    from a PyInstaller EXE (where __file__ points to a temp folder)."""
+    candidates = []
+    # 0. PyInstaller bundled location — check FIRST (sys._MEIPASS is where data files are extracted)
+    meipass = getattr(sys, '_MEIPASS', None)
+    if meipass:
+        candidates.append(os.path.join(meipass, 'models'))
+    # 1. Next to this script (dev mode)
+    try:
+        basedir = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(basedir, 'models'))
+    except Exception:
+        basedir = os.getcwd()
+        candidates.append(os.path.join(basedir, 'models'))
+    # 2. Next to the EXE (PyInstaller mode)
+    if getattr(sys, 'frozen', False):
+        exe_dir = os.path.dirname(sys.executable)
+        candidates.append(os.path.join(exe_dir, 'models'))
+        candidates.append(os.path.join(exe_dir, '..', 'models'))
+        candidates.append(os.path.join(exe_dir, '..', '..', 'models'))
+    # 3. Common install locations
+    candidates.append(os.path.join(os.getcwd(), 'models'))
+    pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+    candidates.append(os.path.join(pf, 'Antivirus Server', 'models'))
+    candidates.append(os.path.join(pf, 'AntivirusServer', 'models'))
+    # 4. ProgramData
+    candidates.append(os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'), 'AntivirusServer', 'models'))
+    for c in candidates:
+        try:
+            if os.path.isdir(c):
+                return c
+        except Exception:
+            pass
+    return os.path.join(basedir if 'basedir' in dir() else os.getcwd(), 'models')
+
+
 def _ml_model_status():
     """Return which malware-ML models are present/available."""
-    basedir = os.path.dirname(os.path.abspath(__file__))
-    models_dir = os.path.join(basedir, 'models')
+    models_dir = _find_models_dir()
     return {
         'bodmas_cnn': (
             os.path.exists(os.path.join(models_dir, 'bodmas_cnn.onnx')) and

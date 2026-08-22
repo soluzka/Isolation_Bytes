@@ -1460,7 +1460,9 @@ NETWORK_RULES = {
 
 def _get_best_ml_score(file_path):
     """Return a (score, model_name) tuple using the best available malware
-    detector. Tries BODMAS CNN, then EMBER, then the synthetic detector."""
+    detector. Tries local models first (BODMAS CNN, EMBER, sklearn),
+    then falls back to the server's ML API if local models aren't available."""
+    # 1. Try local models first
     try:
         from security.detector import bodmas_cnn_detector, ember_detector, detector as _detector
 
@@ -1475,8 +1477,42 @@ def _get_best_ml_score(file_path):
         pred = _detector.predict([file_path])
         return _detector.get_anomaly_score(file_path), 'synthetic'
     except Exception as e:
-        logger.debug(f"ML scoring failed for {file_path}: {e}")
-        return None, None
+        logger.debug(f"Local ML scoring failed for {file_path}: {e}")
+
+    # 2. Fall back to server ML API (models run on the server, not locally)
+    try:
+        import hashlib as _hashlib
+        file_hash = ''
+        file_size = 0
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+                file_hash = _hashlib.sha256(data).hexdigest()
+                file_size = len(data)
+        except Exception:
+            pass
+
+        license_key = _clean_val(os.environ.get('LICENSE_KEY') or '')
+        if not license_key:
+            return None, None
+
+        server_url = _clean_val(os.environ.get('LICENSE_SERVER') or 'https://isolation-bytes.com')
+        resp = requests.post(
+            f'{server_url.rstrip("/")}/api/ml/score',
+            json={'hash': file_hash, 'size': file_size, 'file_path': file_path},
+            headers={'X-License-Key': license_key},
+            timeout=15
+        )
+        if resp.status_code == 200:
+            result = resp.json()
+            best_score = result.get('best_score')
+            best_model = result.get('best_model')
+            if best_score is not None:
+                return float(best_score), best_model or 'server_ml'
+    except Exception as e:
+        logger.debug(f"Server ML scoring failed for {file_path}: {e}")
+
+    return None, None
 
 
 def perform_yara_scan():

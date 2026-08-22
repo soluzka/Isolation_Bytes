@@ -5,7 +5,6 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <!-- Self-contained single-file EXE — no .NET install needed -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
@@ -16,7 +15,6 @@
     <DebuggerSupport>false</DebuggerSupport>
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
-    <!-- App metadata -->
     <AssemblyTitle>Antivirus Server Login</AssemblyTitle>
     <AssemblyProduct>Antivirus Server</AssemblyProduct>
     <AssemblyCompany>soluzka</AssemblyCompany>
