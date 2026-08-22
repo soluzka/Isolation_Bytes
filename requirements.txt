@@ -52,7 +52,7 @@ pywin32-ctypes>=0.2.0
 wmi>=1.5.1; platform_system=="Windows"
 
 # Werkzeug for secure_filename (if used directly)
-Werkzeug>=3.1.6
+Werkzeug>=3.1.8
 
 # Payments
 stripe>=7.0.0

@@ -50,7 +50,7 @@ python-dotenv>=1.2.2
 pywin32-ctypes>=0.2.0
 
 # Werkzeug for secure_filename
-Werkzeug>=3.1.6
+Werkzeug>=3.1.8
 
 # Archive extraction support
 rarfile>=4.0
