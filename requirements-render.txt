@@ -19,7 +19,7 @@ Jinja2
 cryptography>=50.0.0
 
 # Requests for HTTP file download
-requests
+requests>=2.34.2
 
 # Watchdog for real-time folder monitoring
 watchdog
@@ -72,7 +72,7 @@ dnspython>=2.7.0
 
 # Machine Learning dependencies
 joblib<1.3.0
-requests>=2.33.0
+requests>=2.34.2>=2.33.0
 psutil>=5.9.0
 
 # Network monitoring and analysis
@@ -90,7 +90,7 @@ python-magic>=0.4.27
 pefile>=2022.5.30
 
 # For VirusTotal API integration
-# (requests already included)
+# (requests>=2.34.2 already included)
 
 # For inspecting file metadata
 pefile>=2023.2.7

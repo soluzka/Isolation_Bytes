@@ -17,7 +17,7 @@ cffi>=2.1.1
 cryptography>=50.0.0
 
 # Requests for HTTP file download
-requests
+requests>=2.34.2
 
 # Watchdog for real-time folder monitoring
 watchdog
@@ -86,7 +86,7 @@ dnspython>=2.8.0
 # YARA for advanced malware scanning
 scikit-learn>=1.3.0
 joblib<1.3.0
-requests>=2.33.0
+requests>=2.34.2>=2.33.0
 psutil>=7.2.2
 
 # Network monitoring and analysis
@@ -105,7 +105,7 @@ python-magic-bin>=0.4.14 ; platform_system=="Windows"
 pefile>=2022.5.30
 
 # For VirusTotal API integration
-# (requests already included)
+# (requests>=2.34.2 already included)
 
 # For logging rotation
 # (logging is stdlib, but logging.handlers is used)
