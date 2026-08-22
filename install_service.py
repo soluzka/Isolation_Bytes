@@ -63,7 +63,7 @@ def main():
 
     # Stop existing service if running
     print("\nStopping existing service if running...")
-    run('sc stop AntivirusCloudServer', check=False)
+    run(r'C:\Windows\System32\sc.exe stop AntivirusCloudServer', check=False)
 
     # Remove existing service if installed
     print("\nRemoving existing service if installed...")
@@ -77,11 +77,11 @@ def main():
 
     # Set to auto-start
     print("\nSetting service to auto-start on boot...")
-    run('sc config AntivirusCloudServer start= auto')
+    run(r'C:\Windows\System32\sc.exe config AntivirusCloudServer start= auto')
 
     # Start the service
     print("\nStarting service...")
-    run('sc start AntivirusCloudServer')
+    run(r'C:\Windows\System32\sc.exe start AntivirusCloudServer')
 
     print("\n=== Installation Complete ===")
     print("\nThe Antivirus Cloud Server is now running as a Windows service.")

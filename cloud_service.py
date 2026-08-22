@@ -159,7 +159,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             self._server_process = subprocess.Popen(
                 [server_exe_to_use],
                 cwd=local_dir if os.path.exists(local_exe) else str(BASE_DIR),
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 env=child_env,
@@ -170,7 +170,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             self._server_process = subprocess.Popen(
                 [python_exe, server_script],
                 cwd=str(BASE_DIR),
-                stdout=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW,
                 env=child_env,
@@ -192,7 +192,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                 self._caddy_process = subprocess.Popen(
                     [caddy_exe, 'run', '--config', caddyfile],
                     cwd=r'C:\caddy',
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
@@ -209,7 +209,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
             try:
                 self._cloudflared_process = subprocess.Popen(
                     [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
-                    stdout=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
                     stderr=subprocess.STDOUT,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
@@ -238,7 +238,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                         self._server_process = subprocess.Popen(
                             [server_exe_to_use],
                             cwd=local_dir if os.path.exists(local_exe) else str(BASE_DIR),
-                            stdout=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
                             env=child_env,
@@ -247,7 +247,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                         self._server_process = subprocess.Popen(
                             [python_exe, server_script],
                             cwd=str(BASE_DIR),
-                            stdout=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
                             env=child_env,
@@ -265,7 +265,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                         self._caddy_process = subprocess.Popen(
                             [caddy_exe, 'run', '--config', caddyfile],
                             cwd=r'C:\caddy',
-                            stdout=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
                         )
@@ -279,7 +279,7 @@ class CloudServerService(win32serviceutil.ServiceFramework if HAS_WIN32 else obj
                     if not self._stop_requested:
                         self._cloudflared_process = subprocess.Popen(
                             [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', 'isolation-bytes'],
-                            stdout=subprocess.PIPE,
+                            stdout=subprocess.DEVNULL,
                             stderr=subprocess.STDOUT,
                             creationflags=subprocess.CREATE_NO_WINDOW,
                         )

@@ -263,6 +263,10 @@ def generate_csproj():
     <EmbeddedResource Include="$(CloudflaredPath)" LogicalName="cloudflared_exe" Condition="Exists('$(CloudflaredPath)')" />
     <EmbeddedResource Include="cloudflared.template.yml" LogicalName="cloudflared_config_template" />
   </ItemGroup>
+
+  <Target Name="CopyFriendlyLauncherName" AfterTargets="Publish">
+    <Copy SourceFiles="$(PublishDir)AntivirusServerLogin.exe" DestinationFiles="$(PublishDir)Antivirus Server Login.exe" />
+  </Target>
 </Project>
 """
     csproj_path.write_text(content, encoding="utf-8")

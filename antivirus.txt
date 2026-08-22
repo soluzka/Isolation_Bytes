@@ -1,3 +1,7 @@
+Get-ChildItem -Path C:\ -Filter cloudflared.exe -Recurse -ErrorAction SilentlyContinue -Depth 4 | Select-Object FullName; Write-Output "---SERVICES---"; C:\Windows\System32\sc.exe query state= all 2>&1 | Select-String -Pattern "Antivirus|cloud" -SimpleMatch
+
+Start-Process -FilePath "python" -ArgumentList "install_service.py" -Verb RunAs -Wait -WorkingDirectory "d:\antivirus-yara-rules-c" 2>&1; Start-Sleep 5; C:\Windows\System32\sc.exe query AntivirusCloudServer 2>&1
+
 Get-Process cloudflared -ErrorAction SilentlyContinue | Stop-Process -Force 2>&1; Start-Sleep 2; Start-Process -FilePath "C:\caddy\cloudflared.exe" -ArgumentList "tunnel", "run", "isolation-bytes" -WindowStyle Normal; Start-Sleep 8; Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, ProcessName
 
 powercfg /change standby-timeout-ac 0; powercfg /change hibernate-timeout-ac 0; powercfg /change disk-timeout-ac 0; powercfg /change monitor-timeout-ac 0; powercfg /change standby-timeout-dc 0; powercfg /change hibernate-timeout-dc 0; powercfg /change disk-timeout-dc 0; powercfg /change monitor-timeout-dc 0; Write-Output "Power settings applied"
@@ -20,6 +24,6 @@ print('ML Models (dashboard):', json.dumps(r2.json().get('ml_models',{})))
 
 Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, StartTime; Write-Output "---"; Get-Content "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\cloud\service.log" -Tail 15 -ErrorAction SilentlyContinue
 
-Start-Process -FilePath "sc.exe" -ArgumentList "stop","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 8; Start-Process -FilePath "sc.exe" -ArgumentList "start","AntivirusCloudServer" -Verb RunAs -Wait 2>&1; Start-Sleep 5; sc.exe query AntivirusCloudServer 2>&1
+Start-Process -FilePath "sc.exe" -ArgumentList "start","AntivirusCloudServer" -Verb RunAs -Wait; Write-Output "Service start requested"; Start-Sleep 45; sc.exe query AntivirusCloudServer 2>&1; Write-Output "---PROCESSES---"; Get-Process cloud_server,cloudflared -ErrorAction SilentlyContinue | Select-Object Id,ProcessName; Write-Output "---LOCAL---"; try { (Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:8000/api/config" -TimeoutSec 20).StatusCode } catch { $_.Exception.Message }; Write-Output "---PUBLIC---"; try { (Invoke-WebRequest -UseBasicParsing -Uri "https://isolation-bytes.com/" -TimeoutSec 30).StatusCode } catch { $_.Exception.Message }
 
 Start-Sleep 20; Get-Content "C:\Users\bpier\OneDrive\Documents\antivirus-yara-rules-c\antivirus-yara-rules-c\cloud\service.log" -Tail 10 -ErrorAction SilentlyContinue; Write-Output "---PROCESS---"; Get-Process cloudflared -ErrorAction SilentlyContinue | Select-Object Id, StartTime
