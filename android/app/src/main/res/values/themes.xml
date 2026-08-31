@@ -1,0 +1,9 @@
+<resources>
+    <style name="Theme.AntivirusServer" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#1a5276</item>
+        <item name="colorPrimaryVariant">#154360</item>
+        <item name="colorOnPrimary">#ffffff</item>
+        <item name="colorSecondary">#2ecc71</item>
+        <item name="colorOnSecondary">#000000</item>
+    </style>
+</resources>

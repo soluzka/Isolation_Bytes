@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="Antivirus Server"
+           Language="1033"
+           Version="1.0.0"
+           Manufacturer="Antivirus"
+           UpgradeCode="B3A0C0F1-2E5D-4F3E-9A1B-2C3D4E5F6A7C">
+    <Package InstallerVersion="200"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Description="Antivirus Server"
+             InstallPrivileges="elevated" />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="Antivirus Server" />
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Antivirus Server" />
+      </Directory>
+      <Directory Id="DesktopFolder" />
+    </Directory>
+
+    <Feature Id="ProductFeature" Title="Antivirus Server" Level="1">
+      <ComponentGroupRef Id="ProductComponents" />
+      <ComponentRef Id="StartMenuShortcuts" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <Icon Id="AppIcon.ico" SourceFile="static\favicon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+  </Product>
+
+  <Fragment>
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="StartMenuShortcuts" Guid="*" DiskId="1">
+        <Shortcut Id="ApplicationStartMenuShortcut"
+                  Name="Antivirus Server"
+                  Target="[INSTALLFOLDER]antivirus_server.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="ConditionalAdminStartMenuShortcut"
+                  Name="Start Conditional Antivirus (Administrator)"
+                  Target="[INSTALLFOLDER]AntivirusServer_AdminHelper.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="YaraAdminStartMenuShortcut"
+                  Name="Start YARA Scanner (Administrator)"
+                  Target="[INSTALLFOLDER]AntivirusServer_AdminHelper.exe"
+                  Arguments="--open-yara"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RemoveFolder Id="RemoveApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Antivirus\AntivirusServer"
+                       Name="installed"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+
+  <Fragment>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="*" DiskId="1">
+        <Shortcut Id="ApplicationDesktopShortcut"
+                  Name="Antivirus Server"
+                  Target="[INSTALLFOLDER]antivirus_server.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="ConditionalAdminDesktopShortcut"
+                  Name="Start Conditional Antivirus (Administrator)"
+                  Target="[INSTALLFOLDER]AntivirusServer_AdminHelper.exe"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="YaraAdminDesktopShortcut"
+                  Name="Start YARA Scanner (Administrator)"
+                  Target="[INSTALLFOLDER]AntivirusServer_AdminHelper.exe"
+                  Arguments="--open-yara"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU"
+                       Key="Software\Antivirus\AntivirusServer"
+                       Name="desktop"
+                       Type="integer"
+                       Value="1"
+                       KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Fragment>
+</Wix>

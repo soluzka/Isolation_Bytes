@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>Antivirus Logs</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        body { max-width: 700px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        pre { background: #eee; padding: 1em; border-radius: 6px; }
+        nav a { margin-right: 1em; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h2>Antivirus Event Log</h2>
+    <pre>{{ log_content }}</pre>
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/quarantine">Manage Quarantine</a>
+    </nav>
+</body>
+</html>

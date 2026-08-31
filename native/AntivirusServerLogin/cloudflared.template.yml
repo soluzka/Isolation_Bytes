@@ -1,0 +1,9 @@
+tunnel: YOUR_TUNNEL_ID
+credentials-file: C:\ProgramData\IsolationBytes\cloudflared\YOUR_TUNNEL_ID.json
+
+ingress:
+  - hostname: isolation-bytes.com
+    service: http://127.0.0.1:8000
+  - hostname: www.isolation-bytes.com
+    service: http://127.0.0.1:8000
+  - service: http_status:404

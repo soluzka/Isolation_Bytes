@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>IsolationBytes</AssemblyName>
+    <AssemblyTitle>Isolation Bytes</AssemblyTitle>
+    <AssemblyProduct>Isolation Bytes</AssemblyProduct>
+    <AssemblyCompany>soluzka</AssemblyCompany>
+    <Version>1.8.944.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!-- MSIX packaging settings -->
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <GenerateAppxPackage>True</GenerateAppxPackage>
+    <AppxManifest>Package.appxmanifest</AppxManifest>
+    <AppxPackageDir>$(MSBuildProjectDirectory)\msix</AppxPackageDir>
+    <AppxPackageSigningEnabled>True</AppxPackageSigningEnabled>
+    <AppxPackageSigningTimestampServerUrl>http://timestamp.digicert.com</AppxPackageSigningTimestampServerUrl>
+    <PackageCertificateKeyFile>IsolationBytes.pfx</PackageCertificateKeyFile>
+    <PackageCertificatePassword>$(ISOLATION_BYTES_PFX_PASSWORD)</PackageCertificatePassword>
+    <AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+    <AppxSymbolPackageExtension>appxsym</AppxSymbolPackageExtension>
+    <GenerateAppInstallerFile>True</GenerateAppInstallerFile>
+    <AppInstallerUri>https://isolation-bytes.com/downloads/IsolationBytes.appinstaller</AppInstallerUri>
+    <AppInstallerUpdateFrequencyInHours>6</AppInstallerUpdateFrequencyInHours>
+    <AppInstallerCheckForUpdateFrequency>OnLaunch</AppInstallerCheckForUpdateFrequency>
+    <HoursBetweenUpdateChecks>6</HoursBetweenUpdateChecks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2792.45" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="app.manifest">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <Resource Include="Assets\StoreLogo.png" />
+    <Resource Include="Assets\Square150x150Logo.png" />
+    <Resource Include="Assets\Square44x44Logo.png" />
+    <Resource Include="Assets\Wide310x150Logo.png" />
+    <Resource Include="Assets\LockScreenLogo.png" />
+    <None Include="Assets\StoreLogo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Assets\Square150x150Logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Assets\Square44x44Logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Assets\Wide310x150Logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Include="Assets\LockScreenLogo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>

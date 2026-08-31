@@ -1,0 +1,12 @@
+# Default directories to monitor for malware scanning
+# These paths will be expanded using os.path.expanduser and os.path.expandvars
+#
+# NOTE: System-wide directories (%PROGRAMFILES%, %APPDATA%, %LOCALAPPDATA%, %TEMP%, etc.)
+# were intentionally removed from the defaults below. Scanning those recursively can
+# involve hundreds of thousands of files and make the conditional startup scan take an
+# extremely long time to complete. Add them back individually if you need broader
+# coverage and are fine with longer scan times.
+
+~/Downloads
+~/Documents
+~/Desktop

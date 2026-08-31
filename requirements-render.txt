@@ -1,0 +1,104 @@
+# Core deployment requirements
+cffi>=1.15.1
+wheel>=0.37.1
+setuptools>=83.0.0
+altgraph>=0.17.5
+
+# Flask web framework
+Flask>=3.1.3
+flask-cors
+flask-sqlalchemy
+Flask-Login>=0.6.3
+Flask-WTF
+markupsafe
+itsdangerous
+click>=8.3.3
+Jinja2
+
+# Cryptography for file encryption/decryption
+cryptography>=50.0.0
+
+# Requests for HTTP file download
+requests
+
+# Watchdog for real-time folder monitoring
+watchdog
+
+# psutil for process management
+psutil
+
+# Data analysis
+pandas
+matplotlib
+seaborn
+numpy>=2.0.0,<2.3.0
+scipy<1.13.0
+scikit-learn>=1.7.0
+
+# Optional: clamd for ClamAV integration on Linux/macOS
+clamd>=1.0
+
+# For automated testing and dependency vulnerability scanning
+pytest>=9.0.3
+pip-audit>=2.8.0
+
+# For loading .env files
+python-dotenv>=1.2.2
+
+# These Windows-specific packages won't be used on Render (Linux) but included for completeness
+# pywin32 and wmi are Windows-only and will be skipped on Linux
+pywin32-ctypes>=0.2.0
+
+# Werkzeug for secure_filename
+Werkzeug>=3.1.6
+
+# Archive extraction support
+rarfile>=4.0
+
+# YARA for signature scanning
+yara-python>=4.0
+
+dnslib>=0.9.26
+
+# For secure password hashing
+bcrypt>=4.0
+
+# For TOTP-based 2FA
+pyotp>=2.9
+py7zr>=1.1.3
+
+# For DNS-based reputation services
+dnspython>=2.7.0
+
+# Machine Learning dependencies
+joblib<1.3.0
+requests>=2.33.0
+psutil>=5.9.0
+
+# Network monitoring and analysis
+flask-limiter<4.0
+limits<6.0
+ordered-set<4.2
+rich<14.0
+pygments<3.0
+typing_extensions>=4.14.1
+wrapt<1.18
+markdown-it-py<3.1
+mdurl<0.3
+yara-python
+python-magic>=0.4.27
+pefile>=2022.5.30
+
+# For VirusTotal API integration
+# (requests already included)
+
+# For inspecting file metadata
+pefile>=2023.2.7
+redis>=5.0.1
+
+# Let's Encrypt certificate automation
+certbot>=5.7.0
+certbot-dns-godaddy>=2.8.0
+
+# UPnP client for auto port forwarding
+upnpclient>=2.0.3

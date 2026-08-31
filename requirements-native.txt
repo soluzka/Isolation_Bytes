@@ -1,0 +1,25 @@
+# =============================================================================
+# Isolation Bytes — Native-build dependencies (desktop agents only)
+# -----------------------------------------------------------------------------
+# These packages have NO prebuilt wheels and require a C/C++ compiler.
+# The cloud server does NOT need them.
+#
+# SYSTEM PACKAGES REQUIRED FIRST:
+#   Debian/Ubuntu:  apt install -y build-essential gcc g++ make python3-dev pkg-config libyara-dev libfuzzy-dev
+#   Fedora/RHEL:    dnf install -y gcc gcc-c++ make python3-devel pkgconfig yara-devel ssdeep-devel
+#   macOS:          brew install yara ssdeep
+#
+# Install with:
+#   pip install -r requirements-native.txt
+# =============================================================================
+
+# YARA for signature scanning (needs libyara-dev)
+yara-python==4.5.4
+
+# Fuzzy hashing (needs build-essential)
+py-tlsh==5.0.0
+pyssdeep==1.0.0
+ssdeep==3.4; platform_system!='Windows'
+
+# Local llama.cpp backend for the findings assistant (needs g++ / CMake)
+llama-cpp-python==0.3.34
