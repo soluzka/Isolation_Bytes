@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>System Overload</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <style>
+        @keyframes glitch {
+            0% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(0); }
+            20% { text-shadow: -3px 0 #ff0055, 3px 0 #00eaff; transform: translate(-2px, 1px); }
+            40% { text-shadow: 3px 0 #00eaff, -3px 0 #ff0055; transform: translate(2px, -1px); }
+            60% { text-shadow: -2px 0 #00eaff, 2px 0 #ff0055; transform: translate(-1px, 2px); }
+            80% { text-shadow: 2px 0 #ff0055, -2px 0 #00eaff; transform: translate(1px, -2px); }
+            100% { text-shadow: -2px 0 #ff0055, 2px 0 #00eaff; transform: translate(0); }
+        }
+        @keyframes scanline {
+            0% { background-position: 0 0; }
+            100% { background-position: 0 100%; }
+        }
+        @keyframes pulse-red {
+            0%, 100% { box-shadow: 0 0 10px #ff0055; }
+            50% { box-shadow: 0 0 40px #ff0055, 0 0 80px #ff0055; }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; background: #050508; color: #e0e0e0;
+            font-family: 'Courier New', monospace; overflow: hidden;
+        }
+        .scanlines {
+            position: fixed; top:0; left:0; right:0; bottom:0;
+            background: repeating-linear-gradient(0deg, rgba(0,0,0,0) 0, rgba(0,0,0,0.2) 1px, rgba(0,0,0,0) 2px);
+            background-size: 100% 4px; pointer-events: none; z-index: 50; opacity: 0.6;
+        }
+        .container {
+            height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            text-align: center; padding: 20px; position: relative; z-index: 10;
+        }
+        h1 { font-size: 4em; margin: 0; animation: glitch 0.15s infinite; color: #fff; letter-spacing: -2px; }
+        .subtitle { color: #00eaff; margin: 10px 0 30px; font-size: 1.2em; }
+        .lyrics { max-width: 700px; color: #888; font-size: 0.95em; line-height: 1.6; margin-bottom: 40px; }
+        .lyrics span { color: #ff0055; }
+        .btn {
+            background: transparent; color: #ff0055; border: 2px solid #ff0055;
+            padding: 20px 40px; font-size: 1.5em; font-family: inherit; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 3px; animation: pulse-red 1.5s infinite;
+        }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; animation: none; }
+        .status { margin-top: 30px; color: #00eaff; min-height: 1.5em; font-size: 1.1em; }
+        .overload { display: none; margin-top: 30px; color: #ff0055; font-size: 2em; animation: glitch 0.1s infinite; }
+        .grid {
+            position: fixed; top:0; left:0; right:0; bottom:0; opacity: 0.08;
+            background-image: linear-gradient(#00eaff 1px, transparent 1px), linear-gradient(90deg, #00eaff 1px, transparent 1px);
+            background-size: 40px 40px; z-index: 1; pointer-events: none;
+        }
+        .back { position: fixed; top: 20px; left: 20px; color: #00eaff; text-decoration: none; z-index: 60; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <canvas id="matrix"></canvas>
+    <div class="scanlines"></div>
+    <div class="grid"></div>
+    <a class="back" href="{{ url_for('index') }}">&lt; BACK TO DASHBOARD</a>
+    <div class="container">
+        <h1>SYSTEM OVERLOAD</h1>
+        <div class="subtitle">BREAK THE CYCLE — SYSTEM OVERLOAD</div>
+        <div class="lyrics">
+            In the cycle, in the storm, <span>shadowed truths are now reborn.</span><br>
+            Lies and secrets turn to dust, <span>break the chains—it's them or us.</span><br>
+            Hacker codes and shattered dreams, <span>cracked-up systems, broken screens.</span><br>
+            No escape—<span>abort, abort.</span>
+        </div>
+        {% if service_status and service_status.get('ok') %}
+        <div class="status" id="svcStatus" style="color:#2ecc71;">Admin service: available</div>
+        {% else %}
+        <div class="status" id="svcStatus" style="color:#ff0055;">Admin service: not running. Protected remediation unavailable.</div>
+        {% endif %}
+        <button class="btn" id="engageBtn" onclick="engage()" {% if not (service_status and service_status.get('ok')) %}disabled{% endif %}>BREAK THE CYCLE</button>
+        <div class="status" id="status"></div>
+        <ul class="log" id="log"></ul>
+        <div class="overload" id="overload">TRUTH IS VIRAL — SYSTEM OVERLOAD</div>
+    </div>
+    <style>
+        #matrix {
+            position: fixed; top:0; left:0; width:100vw; height:100vh;
+            z-index: 0; opacity: 0.85; pointer-events: none;
+        }
+        .log { list-style: none; padding: 0; margin-top: 20px; color: #00eaff; font-size: 0.95em; max-width: 600px; text-align: left; }
+        .log li { padding: 4px 0; border-bottom: 1px solid #333; }
+    </style>
+    <script>
+        const PHASES = [
+            'Initializing overload cycle...',
+            'Scanning active processes...',
+            'Terminating threats...',
+            'Flushing DNS cache...',
+            'Clearing event log...',
+            'Resetting scan state...',
+            'Stabilizing system...',
+            'Overload complete.'
+        ];
+
+        function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+        async function engage() {
+            const btn = document.getElementById('engageBtn');
+            const status = document.getElementById('status');
+            const overload = document.getElementById('overload');
+            const log = document.getElementById('log');
+            btn.disabled = true;
+            log.innerHTML = '';
+            overload.style.display = 'block';
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+            // Kick off the server request immediately, but pace the UI so the
+            // overload animation actually plays out instead of completing the
+            // instant the button is pressed.
+            const fetchPromise = fetch('/break-the-cycle/engage', {
+                method: 'POST',
+                credentials: 'include',
+                headers: {
+                    'Accept': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                }
+            })
+                .then(async r => {
+                    const text = await r.text();
+                    let data;
+                    try {
+                        data = JSON.parse(text);
+                    } catch (error) {
+                        throw new Error(`Server returned non-JSON response (${r.status}). Please restart the current app build.`);
+                    }
+                    if (!r.ok) throw new Error(data.error || data.message || `Server returned ${r.status}`);
+                    return data;
+                });
+
+            try {
+                // Walk through the phase messages with a delay so the user
+                // sees the overload ramp up before results land.
+                for (let i = 0; i < PHASES.length - 1; i++) {
+                    status.textContent = PHASES[i];
+                    await sleep(450);
+                }
+
+                const d = await fetchPromise;
+                const results = d.results || [];
+
+                // Stream the server results into the log one at a time so it
+                // feels like each remediation step is executing live.
+                for (const step of results) {
+                    const li = document.createElement('li');
+                    li.textContent = '> ' + step;
+                    li.style.opacity = '0';
+                    log.appendChild(li);
+                    // Force reflow then fade in.
+                    void li.offsetWidth;
+                    li.style.transition = 'opacity 0.25s';
+                    li.style.opacity = '1';
+                    await sleep(350);
+                }
+
+                status.textContent = PHASES[PHASES.length - 1];
+                btn.disabled = false;
+            } catch (e) {
+                status.textContent = 'ERROR: ' + e;
+                btn.disabled = false;
+            }
+        }
+
+        const canvas = document.getElementById('matrix');
+        const ctx = canvas.getContext('2d');
+        let fontSize = 14;
+        let columns, drops;
+        function resizeMatrix() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            columns = canvas.width / fontSize;
+            drops = Array(Math.floor(columns)).fill(1);
+        }
+        resizeMatrix();
+        window.addEventListener('resize', resizeMatrix);
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789@#$%^&*';
+
+        function drawMatrix() {
+            ctx.fillStyle = 'rgba(5, 5, 8, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#00eaff';
+            ctx.font = fontSize + 'px monospace';
+            for (let i = 0; i < drops.length; i++) {
+                const text = chars[Math.floor(Math.random() * chars.length)];
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                drops[i]++;
+            }
+        }
+        setInterval(drawMatrix, 33);
+    </script>
+</body>
+</html>

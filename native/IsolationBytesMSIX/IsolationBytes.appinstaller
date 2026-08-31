@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AppInstaller
+    xmlns="http://schemas.microsoft.com/appx/appinstaller/2018"
+    Version="1.8.890.0"
+    Uri="https://isolation-bytes.com/download/IsolationBytes.appinstaller" >
+    <MainPackage
+        Name="soluzka.IsolationBytes"
+        Publisher="CN=soluzka, O=soluzka, C=US"
+        Version="1.8.890.0"
+        ProcessorArchitecture="x64"
+        Uri="https://isolation-bytes.com/download/IsolationBytes.msix" />
+    <UpdateSettings>
+        <OnLaunch HoursBetweenUpdateChecks="6" ShowPrompt="true" UpdateBlocksActivation="true" />
+        <AutomaticBackgroundTask />
+    </UpdateSettings>
+    <OptionalPackages>
+    </OptionalPackages>
+    <RelatedPackages>
+    </RelatedPackages>
+    <Dependencies>
+    </Dependencies>
+</AppInstaller>

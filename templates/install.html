@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Install Isolation Bytes</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0b1321">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js').catch(function(){});
+        }
+    </script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', -apple-system, sans-serif; }
+        body { background: #0b1321; color: #e0e1dd; margin: 0; padding: 20px; min-height: 100vh; }
+        .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+        h1 { color: #90e0ef; text-align: center; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #778da9; margin-bottom: 30px; }
+
+        /* Big install button */
+        .install-hero { text-align: center; background: #1b263b; border: 1px solid #415a77;
+                        border-radius: 14px; padding: 40px 20px; margin-bottom: 30px; }
+        .install-hero h2 { color: #90e0ef; margin: 0 0 6px 0; font-size: 1.4rem; }
+        .install-hero p { color: #778da9; margin: 0 0 20px 0; }
+        .install-btn { display: inline-block; padding: 18px 48px; font-size: 1.3rem; font-weight: bold;
+                       background: #00b4d8; color: #0b1321; border: none; border-radius: 10px;
+                       cursor: pointer; text-decoration: none; transition: all 0.2s;
+                       box-shadow: 0 4px 15px rgba(0,180,216,0.3); }
+        .install-btn:hover { background: #0096c7; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(0,180,216,0.4); }
+        .install-btn:active { transform: translateY(0); }
+        .install-btn.installed { background: #27ae60; color: #fff; }
+        .platform-name { display: block; margin-top: 12px; color: #778da9; font-size: 0.9rem; }
+        .platform-name strong { color: #90e0ef; }
+
+        /* iOS instructions overlay */
+        .ios-guide { display: none; background: #0d1b2a; border: 1px solid #415a77; border-radius: 10px;
+                     padding: 24px; margin-top: 20px; text-align: left; }
+        .ios-guide h3 { color: #90e0ef; margin: 0 0 12px 0; text-align: center; }
+        .ios-guide ol { color: #a0a8b8; padding-left: 20px; line-height: 1.8; }
+        .ios-guide ol li { margin: 8px 0; }
+        .ios-guide code { background: #1b263b; padding: 2px 8px; border-radius: 4px; color: #00b4d8; }
+
+        /* Manual download cards */
+        .section-title { color: #778da9; font-size: 0.9rem; text-transform: uppercase;
+                         letter-spacing: 1px; margin: 30px 0 10px 0; text-align: center; }
+        .platform-card { background: #1b263b; border: 1px solid #415a77; border-radius: 10px;
+                         padding: 16px; margin: 8px 0; }
+        .platform-card h3 { color: #00b4d8; margin: 0 0 6px 0; font-size: 1rem; display: flex; align-items: center; gap: 6px; }
+        .platform-card p { color: #778da9; margin: 4px 0; font-size: 0.85rem; }
+        .btn { display: inline-block; padding: 8px 16px; margin: 4px 4px 0 0; background: #00b4d8;
+               color: #0b1321; border: none; border-radius: 6px; font-weight: bold; cursor: pointer;
+               text-decoration: none; font-size: 0.85rem; }
+        .btn:hover { background: #0096c7; }
+        .btn.secondary { background: #415a77; color: #e0e1dd; }
+        .btn.secondary:hover { background: #5a7a9a; }
+        .detected { border-color: #00b4d8; }
+        .detected-badge { display: inline-block; background: #00b4d8; color: #0b1321;
+                          padding: 2px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: bold; }
+        .instructions { background: #0d1b2a; border-radius: 6px; padding: 10px; margin-top: 8px;
+                        font-size: 0.8rem; color: #a0a8b8; }
+        .instructions code { background: #1b263b; padding: 2px 6px; border-radius: 4px; color: #90e0ef; }
+        .footer { text-align: center; margin-top: 30px; color: #415a77; font-size: 0.8rem; }
+        details summary { cursor: pointer; color: #778da9; text-align: center; padding: 10px; }
+        details summary:hover { color: #90e0ef; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Install Isolation Bytes</h1>
+        <p class="subtitle">One click — installs on any device</p>
+
+        <!-- Big universal install button -->
+        <div class="install-hero">
+            <h2>Install Now</h2>
+            <p>Automatically detects your device and installs the right version</p>
+            <button class="install-btn" id="universalInstallBtn" onclick="universalInstall()">
+                Install Isolation Bytes
+            </button>
+            <span class="platform-name" id="detectedPlatform">Detecting your device...</span>
+
+            <!-- Universal Python launcher — works on any OS with Python 3.8+ -->
+            <div style="margin-top:20px;padding:14px;background:#0d1b2a;border-radius:8px;border:1px solid #415a77">
+                <p style="margin:0 0 10px 0;color:#90e0ef;font-size:0.9rem;font-weight:bold">
+                    Runs on any system (Windows, macOS, Linux, ChromeOS)
+                </p>
+                <p style="margin:0 0 10px 0;color:#778da9;font-size:0.8rem">
+                    Download the universal launcher (requires Python 3.8+):<br>
+                    <code style="color:#00b4d8">python universal_launcher.py</code> — auto-detects your OS, installs, and launches
+                </p>
+                <a class="btn" href="/download/universal_launcher.py" download style="font-size:0.9rem">
+                    Download Universal Launcher (.py)
+                </a>
+            </div>
+
+            <!-- iOS guide (shown only on iOS) -->
+            <div class="ios-guide" id="iosGuide">
+                <h3>Install on iOS / iPadOS</h3>
+                <ol>
+                    <li>Tap the <strong>Share</strong> button (square with up arrow) in Safari's toolbar</li>
+                    <li>Scroll down and tap <strong>Add to Home Screen</strong></li>
+                    <li>Tap <strong>Add</strong></li>
+                    <li>Isolation Bytes will appear on your home screen with its own icon</li>
+                </ol>
+                <p style="text-align:center;color:#778da9;font-size:0.85rem;margin-top:12px">
+                    It works like a native app — fullscreen, offline cache, and push notifications.
+                </p>
+                <div style="text-align:center;margin-top:16px">
+                    <a class="btn" href="/download/install-ios.mobileconfig" download style="font-size:1.05rem;padding:12px 24px">
+                        Install via Configuration Profile
+                    </a>
+                </div>
+                <p style="text-align:center;color:#778da9;font-size:0.8rem;margin-top:8px">
+                    Downloads a profile that adds Isolation Bytes to your home screen automatically. Open Settings &gt; Profile Downloaded to install.
+                </p>
+                <div style="background:#1b263b;border-radius:6px;padding:10px;margin-top:12px;font-size:0.8rem;color:#a0a8b8;text-align:left">
+                    <strong style="color:#90e0ef">Startup Apps:</strong> iOS does not allow third-party apps to auto-launch at boot.
+                    Pin Isolation Bytes to your home screen or Dock for one-tap access, and enable notifications for security alerts.
+                </div>
+            </div>
+
+            <!-- Windows one-click guide (shown only on Windows) -->
+            <div class="ios-guide" id="windowsGuide">
+                <h3>Install on Windows</h3>
+                <p style="text-align:center;color:#a0a8b8;margin-bottom:16px">
+                    Download and run the installer — it automatically trusts the certificate and installs Isolation Bytes with auto-updates.
+                </p>
+                <div style="text-align:center">
+                    <a class="btn" href="/download/install-windows.bat" download style="font-size:1.1rem;padding:14px 28px">Download Installer (.bat)</a>
+                </div>
+                <div style="margin-top:20px">
+                    <p style="color:#778da9;font-size:0.85rem;text-align:center;margin-bottom:8px">Or run from PowerShell:</p>
+                    <div style="background:#1b263b;border-radius:6px;padding:12px;word-break:break-all">
+                        <code id="psCommand" style="font-size:0.8rem;color:#00b4d8">iwr https://isolation-bytes.com/download/install-windows.ps1 -UseBasicParsing | iex</code>
+                    </div>
+                    <button class="btn" onclick="copyPsCommand()" style="margin-top:4px">Copy Command</button>
+                </div>
+                <p style="text-align:center;margin-top:12px">
+                    <a class="btn secondary" href="/download/IsolationBytes.appinstaller" target="_blank">Or use AppInstaller</a>
+                </p>
+            </div>
+        </div>
+
+        <!-- Manual downloads (collapsible) -->
+        <details>
+            <summary>Or choose your platform manually</summary>
+            <div id="platforms" style="margin-top:12px"></div>
+        </details>
+
+        <p class="footer">Isolation Bytes Antivirus &copy; 2026 soluzka</p>
+    </div>
+
+    <script>
+    // ─── Platform detection ──────────────────────────────────────────────
+    var ua = navigator.userAgent.toLowerCase();
+    var platform = navigator.platform.toLowerCase();
+
+    var isAndroid = ua.indexOf('android') >= 0;
+    var isIOS = ua.indexOf('iphone') >= 0 || ua.indexOf('ipad') >= 0 || ua.indexOf('ipod') >= 0;
+    // iPadOS 13+ reports as Mac, so check for touch + Mac
+    var isIPadOS = platform.indexOf('mac') >= 0 && ('ontouchend' in document) && !isIOS;
+    var isIOSOrIPad = isIOS || isIPadOS;
+    var isWindowsPhone = ua.indexOf('windows phone') >= 0;
+    var isWindows = platform.indexOf('win') >= 0 && !isWindowsPhone;
+    var isMac = platform.indexOf('mac') >= 0 && !isIOSOrIPad;
+    var isLinux = platform.indexOf('linux') >= 0 && !isAndroid;
+    var isChromeOS = ua.indexOf('cros') >= 0;
+
+    // Determine the detected platform label and primary download
+    var detectedLabel = 'Unknown';
+    var primaryDownload = null;
+
+    if (isWindows) {
+        detectedLabel = 'Windows';
+        primaryDownload = '/download/IsolationBytes.appinstaller';
+    } else if (isAndroid) {
+        detectedLabel = 'Android';
+        primaryDownload = '/download/IsolationBytes.apk';
+    } else if (isIOSOrIPad) {
+        detectedLabel = 'iOS / iPadOS';
+        primaryDownload = null; // PWA — no download
+    } else if (isMac) {
+        detectedLabel = 'macOS';
+        primaryDownload = '/download/install-macos.sh';
+    } else if (isChromeOS) {
+        detectedLabel = 'ChromeOS';
+        primaryDownload = null; // PWA install prompt
+    } else if (isLinux) {
+        detectedLabel = 'Linux';
+        primaryDownload = '/download/install-linux.sh';
+    } else {
+        detectedLabel = platform || 'Unknown';
+        primaryDownload = null;
+    }
+
+    document.getElementById('detectedPlatform').innerHTML =
+        'Detected: <strong>' + detectedLabel + '</strong>';
+
+    // ─── PWA install prompt (Chrome/Edge/ChromeOS) ───────────────────────
+    var deferredPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        // Update button text to indicate PWA install is available
+        var btn = document.getElementById('universalInstallBtn');
+        if (btn) btn.textContent = 'Install App';
+    });
+
+    window.addEventListener('appinstalled', function() {
+        var btn = document.getElementById('universalInstallBtn');
+        btn.textContent = 'Installed!';
+        btn.classList.add('installed');
+        btn.onclick = null;
+        deferredPrompt = null;
+    });
+
+    // ─── Universal install function ──────────────────────────────────────
+    function universalInstall() {
+        var btn = document.getElementById('universalInstallBtn');
+
+        // 1. If browser supports PWA install prompt (Chrome/Edge/ChromeOS/Android Chrome)
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then(function(choice) {
+                if (choice.outcome === 'accepted') {
+                    btn.textContent = 'Installing...';
+                }
+                deferredPrompt = null;
+            });
+            return;
+        }
+
+        // 2. iOS / iPadOS — show the Add to Home Screen guide
+        if (isIOSOrIPad) {
+            var guide = document.getElementById('iosGuide');
+            guide.style.display = 'block';
+            guide.scrollIntoView({ behavior: 'smooth' });
+            btn.textContent = 'Follow steps below';
+            return;
+        }
+
+        // 3. Windows — show the one-click PowerShell guide
+        if (isWindows) {
+            var guide = document.getElementById('windowsGuide');
+            guide.style.display = 'block';
+            guide.scrollIntoView({ behavior: 'smooth' });
+            btn.textContent = 'Follow steps below';
+            return;
+        }
+
+        // 4. Android (non-Chrome browser) — download APK
+        if (isAndroid) {
+            window.location.href = '/download/IsolationBytes.apk';
+            btn.textContent = 'Downloading APK...';
+            return;
+        }
+
+        // 5. macOS — download installer script
+        if (isMac) {
+            window.location.href = '/download/install-macos.sh';
+            btn.textContent = 'Downloading installer...';
+            return;
+        }
+
+        // 6. Linux — download installer script
+        if (isLinux) {
+            window.location.href = '/download/install-linux.sh';
+            btn.textContent = 'Downloading installer...';
+            return;
+        }
+
+        // 7. Unknown platform — try PWA prompt, fallback to opening the app
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+        } else {
+            window.location.href = 'https://isolation-bytes.com/';
+        }
+    }
+
+    // ─── Copy PowerShell command ─────────────────────────────────────────
+    function copyPsCommand() {
+        var cmd = document.getElementById('psCommand').textContent;
+        navigator.clipboard.writeText(cmd).then(function() {
+            alert('Copied! Paste it into PowerShell and press Enter.');
+        }).catch(function() {
+            // Fallback for older browsers
+            var ta = document.createElement('textarea');
+            ta.value = cmd;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            alert('Copied! Paste it into PowerShell and press Enter.');
+        });
+    }
+
+    // ─── Manual download cards ───────────────────────────────────────────
+    var platforms = [
+        {
+            name: 'Windows', icon: '🪟', detected: isWindows, desc: 'Windows 10/11 (x64)',
+            buttons: [
+                { text: 'Universal Launcher', url: '/download/IsolationBytesLauncher.exe', primary: true },
+                { text: 'SFX Installer', url: '/download/Install_AntivirusServer_SFX.exe', primary: false },
+                { text: 'Download Installer', url: '/download/install-windows.bat', primary: false },
+                { text: 'PowerShell Script', url: '/download/install-windows.ps1', primary: false },
+                { text: 'AppInstaller', url: '/download/IsolationBytes.appinstaller', primary: false },
+                { text: 'MSIX Package', url: '/download/IsolationBytes.msix', primary: false },
+                { text: 'Certificate', url: '/download/IsolationBytes.cer', primary: false }
+            ],
+            instructions: '<strong>Universal Launcher (recommended):</strong> Download and run — detects your system, installs the MSIX, trusts the certificate, and launches the app. Works from any console. <strong>Or use the .bat installer:</strong> Double-click to run. <strong>Manual:</strong> Download the .cer, install to "Trusted People", then open the .msix.'
+        },
+        {
+            name: 'Android', icon: '🤖', detected: isAndroid, desc: 'Android 7.0+ (APK + Termux Agent)',
+            buttons: [
+                { text: 'Download APK', url: '/download/IsolationBytes.apk', primary: true },
+                { text: 'Agent (Termux)', url: '/download/install-android.sh', primary: false }
+            ],
+            instructions: '<strong>App:</strong> Download the APK, then open it. Enable "Install from unknown sources" in Settings > Security if prompted. <strong>Agent (network monitoring):</strong> Install Termux from F-Droid, run <code>pkg install python</code>, then <code>bash install-android.sh</code>. Monitors connections, processes, and local network devices with auto-start on boot.'
+        },
+        {
+            name: 'iOS / iPadOS', icon: '📱', detected: isIOSOrIPad, desc: 'iPhone & iPad (PWA + Profile)',
+            buttons: [
+                { text: 'Open in Safari', url: 'https://isolation-bytes.com/', primary: true },
+                { text: 'Config Profile', url: '/download/install-ios.mobileconfig', primary: false }
+            ],
+            instructions: 'Open in Safari, tap Share > Add to Home Screen. Or download the Configuration Profile and install via Settings > Profile Downloaded for a fullscreen web app with its own icon.'
+        },
+        {
+            name: 'macOS', icon: '🍎', detected: isMac, desc: 'macOS 10.13+ (Intel & Apple Silicon)',
+            buttons: [
+                { text: 'Download Installer', url: '/download/install-macos.sh', primary: true },
+                { text: 'Universal Installer', url: '/download/install-universal.sh', primary: false },
+                { text: 'Open in Browser', url: 'https://isolation-bytes.com/', primary: false }
+            ],
+            instructions: 'Run <code>bash install-macos.sh</code> in Terminal. Creates a .app bundle in /Applications. <strong>Universal Installer:</strong> Auto-installs Python 3.11+ if missing, then installs everything.'
+        },
+        {
+            name: 'Linux', icon: '🐧', detected: isLinux, desc: 'Ubuntu, Fedora, Arch, Raspberry Pi',
+            buttons: [
+                { text: 'Download Installer', url: '/download/install-linux.sh', primary: true },
+                { text: 'Universal Installer', url: '/download/install-universal.sh', primary: false },
+                { text: 'Open in Browser', url: 'https://isolation-bytes.com/', primary: false }
+            ],
+            instructions: 'Run <code>bash install-linux.sh</code> in a terminal. Auto-detects Chromium, Firefox, Epiphany, Midori, Falkon. <strong>Universal Installer:</strong> Auto-installs Python 3.11+ if missing, then installs everything.'
+        },
+        {
+            name: 'ChromeOS', icon: '💻', detected: isChromeOS, desc: 'Chromebook & Chromebox (PWA + Linux Agent)',
+            buttons: [
+                { text: 'Install as PWA', url: 'https://isolation-bytes.com/', primary: true },
+                { text: 'Chrome Extension', url: '/download/chromeos-extension.zip', primary: false },
+                { text: 'Agent (Linux)', url: '/download/install-chromeos.sh', primary: false }
+            ],
+            instructions: '<strong>PWA:</strong> Click the install icon in Chrome\'s address bar. <strong>Agent (network monitoring):</strong> Enable Linux development environment in Settings, open Terminal, run <code>bash install-chromeos.sh</code>. Monitors container processes and network connections with systemd auto-start.'
+        },
+        {
+            name: 'Any Device (PWA)', icon: '🌐', detected: false, desc: 'Download the PWA package for any platform',
+            buttons: [
+                { text: 'Download PWA Package', url: '/download/IsolationBytes-PWA.zip', primary: true },
+                { text: 'Install from Web', url: 'https://isolation-bytes.com/', primary: false }
+            ],
+            instructions: 'Download the PWA zip to get all files (manifest, service worker, icons, JS, CSS). Host on your own server over HTTPS, or just install directly from the web.'
+        }
+    ];
+
+    var container = document.getElementById('platforms');
+    platforms.sort(function(a, b) { return (b.detected ? 1 : 0) - (a.detected ? 1 : 0); });
+
+    platforms.forEach(function(p) {
+        var card = document.createElement('div');
+        card.className = 'platform-card' + (p.detected ? ' detected' : '');
+        var html = '<h3>' + p.icon + ' ' + p.name;
+        if (p.detected) html += ' <span class="detected-badge">YOUR DEVICE</span>';
+        html += '</h3><p>' + p.desc + '</p>';
+        p.buttons.forEach(function(b) {
+            html += '<a class="btn' + (b.primary ? '' : ' secondary') + '" href="' + b.url + '" target="_blank">' + b.text + '</a>';
+        });
+        if (p.instructions) html += '<div class="instructions">' + p.instructions + '</div>';
+        card.innerHTML = html;
+        container.appendChild(card);
+    });
+    </script>
+</body>
+</html>

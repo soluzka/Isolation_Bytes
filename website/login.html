@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta charset="UTF-8">
+    <title>Antivirus Server</title>
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="theme-color" content="#0b1321">
+    <link rel="apple-touch-icon" href="/static/icon-192.png">
+    <link rel="icon" type="image/png" href="/static/icon-192.png">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/static/sw.js').catch(function(){});
+        }
+    </script>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { margin: 0; padding: 0; background: #0b1321; color: #e0e1dd; }
+        .container { width: 760px; max-width: 100%; margin: 0 auto; padding: 24px; }
+        .hero {
+            background: linear-gradient(135deg, #1b263b 0%, #0d1b2a 100%);
+            border: 1px solid #415a77;
+            border-radius: 14px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 24px;
+        }
+        h1 { color: #90e0ef; margin: 0 0 10px; font-size: 2.2rem; }
+        .tagline { font-size: 1.1rem; color: #bde0fe; }
+        .card {
+            background: #1b263b;
+            border: 1px solid #415a77;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .card h2 { color: #90e0ef; margin-top: 0; }
+        .feature { display: inline-block; width: 48%; padding: 8px; vertical-align: top; }
+        .feature strong { color: #90e0ef; }
+        .price { font-size: 2rem; color: #90e0ef; margin: 10px 0; }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            background: #415a77;
+            color: #e0e1dd;
+            margin: 6px 4px 0 0;
+        }
+        .btn.primary { background: #00b4d8; color: #0b1321; font-weight: bold; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        label { display: block; margin: 14px 0 4px; font-size: 0.9rem; }
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #778da9;
+            border-radius: 6px;
+            background: #0b1321;
+            color: #e0e1dd;
+            font-size: 0.95rem;
+        }
+        textarea { height: 80px; resize: none; }
+        input[readonly] { background: #1b263b; }
+        .status {
+            margin-top: 14px;
+            min-height: 24px;
+            font-size: 0.95rem;
+        }
+        .status.error { color: #ff6b6b; }
+        .status.ok { color: #6be; }
+        .page { display: none; }
+        .page.active { display: block; }
+        .steps { font-size: 0.95rem; line-height: 1.6; margin: 12px 0; }
+        .machine-box { background: #0b1321; border: 1px solid #415a77; padding: 12px; border-radius: 6px; margin: 12px 0; }
+        body.native .hide-native { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- WEBSITE HOME / PRODUCT -->
+        <div id="homePage" class="page active">
+            <div class="hero">
+                <h1>Antivirus Server</h1>
+                <div class="tagline">Advanced Windows protection with YARA, machine-learning detection, and real-time monitoring.</div>
+            </div>
+
+            <div class="card">
+                <h2>Features</h2>
+                <div class="feature"><strong>YARA Scanning</strong><br>Custom rule-based malware detection.</div>
+                <div class="feature"><strong>Hash/Signature Scan</strong><br>Known-bad file identification.</div>
+                <div class="feature"><strong>ML Detection</strong><br>Behavioral threat classification.</div>
+                <div class="feature"><strong>Real-Time Monitoring</strong><br>Process and network watching.</div>
+                <div class="feature"><strong>Encrypted Quarantine</strong><br>Safe threat isolation.</div>
+                <div class="feature"><strong>Flask Dashboard</strong><br>Central web management.</div>
+            </div>
+
+            <div class="card">
+                <div class="machine-box">
+                    <label for="homeMachineId">Your Machine ID (copy this for checkout)</label>
+                    <input id="homeMachineId" type="text" readonly>
+                    <button class="btn" onclick="copyMachineId('homeMachineId')">Copy</button>
+                </div>
+                <div class="btn-row">
+                    <button class="btn primary" onclick="openPublicPage('purchase')">Purchase</button>
+                    <button class="btn" onclick="openPublicPage('activate')">Activate / Login</button>
+                    <a class="btn" href="/install" target="_blank">Install</a>
+                    <a class="btn" href="/login" target="_blank">Admin</a>
+                    <button class="btn" onclick="showPage('adminLicensePage')">Manage Licenses</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- PURCHASE PAGE -->
+        <div id="purchasePage" class="page">
+            <div class="card">
+                <h2>Purchase Antivirus Server</h2>
+                <p class="price">$9.99 one-time purchase — permanent license</p>
+                <p class="steps">
+                    Pay $9.99 once for a permanent license tied to your machine. No subscriptions, no renewals, no recurring charges.
+                </p>
+                <p class="steps" style="background:#0d1b2a; padding:12px; border-radius:6px; border:1px solid #415a77;">
+                    <strong style="color:#90e0ef;">How it works:</strong><br>
+                    1. Click Buy Now — you'll be redirected to Stripe's secure checkout.<br>
+                    2. After payment, Stripe redirects back here and your <code style="color:#00b4d8;">IB-...</code> license key is generated automatically.<br>
+                    3. Copy the key, go to Activate / Login, paste it, and you're protected.
+                </p>
+                <div class="machine-box">
+                    <label for="purchaseMachineId">Your Machine ID</label>
+                    <input id="purchaseMachineId" type="text" readonly>
+                    <button class="btn" onclick="copyMachineId('purchaseMachineId')">Copy</button>
+                </div>
+                <div style="
+                    overflow: auto;
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: flex-end;
+                    align-items: center;
+                    width: 259px;
+                    background: #FFFFFF;
+                    border: 1px solid rgba(0, 0, 0, 0.1);
+                    border-radius: 10px;
+                    padding: 20px;
+                    margin: 14px 0;
+                ">
+                    <button id="buyNowBtn" class="btn primary" style="
+                        display: inline-block;
+                        font-size: 18px;
+                        line-height: 48px;
+                        height: 48px;
+                        color: #ffffff;
+                        min-width: 212px;
+                        background-color: #FFC233;
+                        text-align: center;
+                        border: none;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        text-decoration: none;
+                        font-weight: bold;
+                    " onclick="doBuyNow()">Buy Now</button>
+                </div>
+                <div class="btn-row">
+                    <button class="btn" onclick="showPage('activatePage')">Activate / Login</button>
+                    <button class="btn" onclick="showPage('homePage')">Back</button>
+                </div>
+                <div id="purchaseStatus" class="status"></div>
+            </div>
+        </div>
+
+        <!-- ACTIVATE / LOGIN PAGE -->
+        <div id="activatePage" class="page">
+            <div class="card">
+                <h2>Activate Antivirus Server</h2>
+                <div class="notice" style="background:#415a77; border-left: 4px solid #00b4d8; padding:12px; border-radius:6px; margin-bottom:16px;">
+                    Enter the <strong>IB-</strong> license key you received after purchase. It will be verified and tied to your machine.
+                </div>
+
+                <label for="machineId">Machine ID</label>
+                <input id="machineId" type="text" readonly>
+
+                <label for="licenseKey">License Key</label>
+                <input id="licenseKey" type="text" placeholder="IB-xxxxx.xxxxx">
+
+                <div class="btn-row">
+                    <button class="btn primary" onclick="doActivate()">Activate License</button>
+                </div>
+
+                <div id="activateResult" class="status"></div>
+
+                <hr style="border-color:#415a77; margin:20px 0;">
+
+                <label for="username">Username</label>
+                <input id="username" type="text" placeholder="Choose a username">
+
+                <label for="password">Password</label>
+                <input id="password" type="password" placeholder="Choose a password">
+
+                <div class="btn-row">
+                    <button class="btn primary" onclick="doLogin()">Login</button>
+                    <button id="launchBtn" class="btn primary" onclick="doLaunch()" disabled>Launch Antivirus Server</button>
+                    <button class="btn" onclick="showPage('homePage')">Back</button>
+                </div>
+
+                <div id="status" class="status">Enter your license key to activate.</div>
+            </div>
+        </div>
+
+        <!-- ADMIN LICENSE MANAGEMENT PAGE -->
+        <div id="adminLicensePage" class="page">
+            <div class="card">
+                <h2>License Management (Admin)</h2>
+                <p style="color:#bde0fe;">View, revoke, and delete self-hosted license keys.</p>
+                <p style="color:#ffd166;font-size:0.85rem;">License keys are generated automatically after Stripe payment. Manual generation is disabled.</p>
+
+                <div class="btn-row" style="margin-top:12px;">
+                    <button class="btn primary" onclick="adminLoadLicenses()">Refresh List</button>
+                    <button class="btn" onclick="showPage('homePage')">Back</button>
+                </div>
+                <div id="genResult" class="status"></div>
+            </div>
+
+            <div class="card">
+                <h3 style="color:#90e0ef;">All Licenses</h3>
+                <div id="licenseListContainer" style="margin-top:12px;">
+                    <p style="color:#778da9;">Click "Refresh List" to load licenses.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        var PRELOADED_MACHINE_ID = '{{MACHINE_ID}}';
+        var PRELOADED_ADMIN_USERNAME = '{{ADMIN_USERNAME}}';
+        var IS_NATIVE_LAUNCHER = (PRELOADED_MACHINE_ID && PRELOADED_MACHINE_ID !== '{{MACHINE_ID}}');
+
+        function setStatus(msg, isError) {
+            var s = document.getElementById('status');
+            s.textContent = msg;
+            s.className = 'status ' + (isError ? 'error' : 'ok');
+        }
+        function setPurchaseStatus(msg, isError) {
+            var s = document.getElementById('purchaseStatus');
+            s.textContent = msg;
+            s.className = 'status ' + (isError ? 'error' : 'ok');
+        }
+        function setLaunchEnabled(enabled) {
+            document.getElementById('launchBtn').disabled = !enabled;
+        }
+        function copyMachineId(elementId) {
+            var el = document.getElementById(elementId);
+            if (!el || !el.value) { alert('No Machine ID to copy.'); return; }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(el.value).then(function() {
+                    alert('Machine ID copied: ' + el.value);
+                }).catch(function() {
+                    fallbackCopy(el);
+                });
+            } else {
+                fallbackCopy(el);
+            }
+        }
+        function fallbackCopy(el) {
+            try {
+                el.select();
+                document.execCommand('copy');
+                alert('Machine ID copied: ' + el.value);
+            } catch (e) {
+                prompt('Copy your Machine ID manually:', el.value);
+            }
+        }
+        function downloadLicense(filename, b64) {
+            var a = document.createElement('a');
+            a.href = 'data:application/octet-stream;base64,' + b64;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+        function showPage(pageId) {
+            var ids = ['homePage','purchasePage','activatePage','adminLicensePage'];
+            for (var i = 0; i < ids.length; i++) {
+                var el = document.getElementById(ids[i]);
+                if (el) { el.className = 'page'; }
+            }
+            var target = document.getElementById(pageId);
+            if (target) { target.className = 'page active'; }
+        }
+        function getQueryParam(name) {
+            var match = new RegExp('[?&]' + name + '=([^&]*)', 'i').exec(window.location.search);
+            return match ? decodeURIComponent(match[1].replace(/\+/g, ' ')) : '';
+        }
+        function getBaseUrl() {
+            var bases = document.getElementsByTagName('base');
+            if (bases && bases.length > 0 && bases[0].href) {
+                return bases[0].href.split('?')[0].split('#')[0];
+            }
+            return (window.location.href || 'https://isolation-bytes.com/').split('?')[0].split('#')[0];
+        }
+        function getMachineIdValue() {
+            var ids = ['homeMachineId', 'purchaseMachineId', 'machineId'];
+            for (var i = 0; i < ids.length; i++) {
+                var el = document.getElementById(ids[i]);
+                if (el && el.value) { return el.value; }
+            }
+            return '';
+        }
+        function publicPageUrl(page) {
+            var baseUrl = getBaseUrl();
+            var mid = getMachineIdValue();
+            return baseUrl + '?page=' + encodeURIComponent(page) +
+                   (mid ? '&machine_id=' + encodeURIComponent(mid) : '');
+        }
+        function openPublicPage(page) {
+            var mid = getMachineIdValue();
+            var url = publicPageUrl(page);
+
+            if (typeof window.external !== 'undefined' && window.external !== null && typeof window.external.OpenPublicPage === 'function') {
+                try { window.external.OpenPublicPage(page, mid); return; } catch (e) {}
+            }
+            if (typeof window.external !== 'undefined' && window.external !== null && typeof window.external.OpenUrl === 'function') {
+                try { window.external.OpenUrl(url); return; } catch (e) {}
+            }
+            if (typeof window.SoluzkaHost !== 'undefined' && window.SoluzkaHost !== null) {
+                if (typeof window.SoluzkaHost.OpenPublicPage === 'function') {
+                    try { window.SoluzkaHost.OpenPublicPage(page, mid); return; } catch (e) {}
+                }
+                if (typeof window.SoluzkaHost.OpenUrl === 'function') {
+                    try { window.SoluzkaHost.OpenUrl(url); return; } catch (e) {}
+                }
+            }
+            if (isNative()) {
+                window.location.href = 'app:openpage?page=' + encodeURIComponent(page) + '&m=' + encodeURIComponent(mid);
+                return;
+            }
+
+            var pageIds = {
+                purchase: 'purchasePage',
+                buy: 'purchasePage',
+                activate: 'activatePage',
+                login: 'activatePage'
+            };
+            if (pageIds[page]) {
+                showPage(pageIds[page]);
+                try {
+                    if (window.history && window.history.pushState) {
+                        window.history.pushState(null, '', url);
+                    }
+                } catch (e) {}
+            } else {
+                window.open(url, '_blank');
+            }
+        }
+        function showRequestedPage() {
+            var page = (getQueryParam('page') || getQueryParam('tab') || '').toLowerCase();
+            var pageIds = {
+                purchase: 'purchasePage',
+                buy: 'purchasePage',
+                activate: 'activatePage',
+                login: 'activatePage'
+            };
+            if (pageIds[page]) { showPage(pageIds[page]); }
+        }
+
+        function doActivate() {
+            var licKey = document.getElementById('licenseKey').value.trim();
+            var mid = document.getElementById('machineId').value.trim();
+            var u = document.getElementById('username').value.trim();
+            if (!licKey) { setActivateResult('Enter your license key.', true); return; }
+            if (!licKey.startsWith('IB-')) { setActivateResult('License keys start with "IB-". Please check your key.', true); return; }
+            setActivateResult('Activating license...', false);
+
+            // Try server-side activation first
+            fetch('/api/license/activate', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({license_key: licKey, machine_id: mid, instance_name: u || mid})
+            }).then(function(r){ return r.json(); }).then(function(data){
+                if (data.ok) {
+                    var msg = 'License activated! Tier: ' + (data.tier || 'pro') + '. ';
+                    msg += data.already_activated ? 'This device was already activated.' : 'Device registered.';
+                    msg += ' (' + data.activations_used + '/' + data.max_devices + ' devices used)';
+                    setActivateResult(msg, false);
+                    document.getElementById('launchBtn').disabled = false;
+                    // Also pass to native host for offline use
+                    if (typeof window.SoluzkaHost !== 'undefined') {
+                        try { window.SoluzkaHost.LoadLicense(JSON.stringify(data)); } catch(e) {}
+                    }
+                } else {
+                    setActivateResult('Activation failed: ' + (data.error || 'Invalid license'), true);
+                }
+            }).catch(function(){
+                // Server unreachable — try native host offline activation
+                if (typeof window.SoluzkaHost !== 'undefined') {
+                    try {
+                        window.SoluzkaHost.LoadLicense(licKey);
+                        setActivateResult('License loaded offline. Enter username and password and click Login.', false);
+                        document.getElementById('launchBtn').disabled = false;
+                        return;
+                    } catch(e) {
+                        setActivateResult('Offline activation failed: ' + e, true);
+                        return;
+                    }
+                }
+                // No native host — check if we can verify the key format at least
+                setActivateResult('Could not reach server. If you have the launcher running, use the Activate button in the launcher instead.', true);
+            });
+        }
+        function setActivateResult(msg, isError) {
+            var el = document.getElementById('activateResult');
+            if (el) { el.textContent = msg; el.className = 'status ' + (isError ? 'error' : 'ok'); }
+        }
+        function doLogin() {
+            var u = document.getElementById('username').value;
+            var p = document.getElementById('password').value;
+            var licKey = document.getElementById('licenseKey').value.trim();
+            var mid = document.getElementById('machineId').value.trim();
+            if (!u || !p) { setStatus('Enter username and password.', true); return; }
+            if (typeof window.SoluzkaHost !== 'undefined') {
+                try { window.SoluzkaHost.Login(u, p); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else if (isNative()) {
+                try { window.external.Login(u, p); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else {
+                // Web login — validate license with the server
+                if (!licKey) { setStatus('Activate your license first.', true); return; }
+                setStatus('Logging in...', false);
+                fetch('/api/user/login', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({license: licKey, username: u, password: p, machine_id: mid})
+                }).then(function(r){ return r.json(); }).then(function(data){
+                    if (data.ok && data.redirect) {
+                        window.location.href = data.redirect;
+                    } else {
+                        setStatus('Login failed: ' + (data.error || 'Invalid license or credentials'), true);
+                    }
+                }).catch(function(){ setStatus('Login failed: could not reach server.', true); });
+            }
+        }
+        function doForgotPassword() {
+            if (typeof window.SoluzkaHost !== 'undefined') {
+                try { window.SoluzkaHost.ForgotPassword(); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else if (isNative()) {
+                try { window.external.ForgotPassword(); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else { setStatus('Use the Windows launcher to reset your password.', true); }
+        }
+        function doLaunch() {
+            if (typeof window.SoluzkaHost !== 'undefined') {
+                try { window.SoluzkaHost.Launch(); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else if (isNative()) {
+                try { window.external.Launch(); }
+                catch (e) { setStatus('Error: ' + e.message, true); }
+            } else { setStatus('Launch is only available from the Windows app.', true); }
+        }
+        // PAYMENT_URL is fetched from the server's /api/config endpoint so
+        // any store owner can set their own checkout URL via PAYMENT_URL in
+        // their .env — no hardcoded store-specific URLs.
+        var PAYMENT_URL = '';
+        fetch('/api/config').then(function(r){ return r.json(); }).then(function(cfg){
+            if (cfg && cfg.payment_url) { PAYMENT_URL = cfg.payment_url; }
+        }).catch(function(){});
+
+        function isNative() {
+            if (IS_NATIVE_LAUNCHER) { return true; }
+            return (typeof window.external !== 'undefined' &&
+                    window.external !== null &&
+                    typeof window.external.GetMachineId !== 'undefined');
+        }
+
+        function buildPaymentUrl(mid) {
+            // Pass machine_id as a Stripe checkout custom field so it comes
+            // back in the redirect URL after payment. The server's
+            // /purchase-success endpoint uses it to auto-activate the license.
+            if (!PAYMENT_URL) return '';
+            var sep = PAYMENT_URL.indexOf('?') === -1 ? '?' : '&';
+            var url = PAYMENT_URL + sep + 'checkout[custom][machine_id]=' + encodeURIComponent(mid || '');
+            // Stripe Payment Links support client_reference_id and prefilled
+            // custom fields. The redirect after payment goes to the success_url
+            // configured in the Stripe dashboard, which should be:
+            //   https://isolation-bytes.com/purchase-success
+            return url;
+        }
+        function doBuyNow() {
+            var mid = document.getElementById('purchaseMachineId').value ||
+                      document.getElementById('homeMachineId').value ||
+                      document.getElementById('machineId').value || '';
+            if (typeof window.SoluzkaHost !== 'undefined') {
+                try { window.SoluzkaHost.Purchase(mid); }
+                catch (e) { setPurchaseStatus('Error: ' + e.message, true); }
+            } else if (isNative()) {
+                try { window.external.Purchase(mid); }
+                catch (e) { setPurchaseStatus('Error: ' + e.message, true); }
+            } else {
+                if (!PAYMENT_URL) { setPurchaseStatus('No payment URL configured on this server.', true); return; }
+                window.open(buildPaymentUrl(mid), '_blank');
+                setPurchaseStatus('Stripe checkout opened in a new tab. After payment, you\'ll be redirected back with your license key.', false);
+            }
+        }
+
+    </script>
+    <script>
+        function getStorageItem(key) {
+            try {
+                if (typeof localStorage !== 'undefined' && localStorage !== null) {
+                    return localStorage.getItem(key);
+                }
+            } catch (e) {}
+            return null;
+        }
+        function setStorageItem(key, val) {
+            try {
+                if (typeof localStorage !== 'undefined' && localStorage !== null && val) {
+                    localStorage.setItem(key, val);
+                }
+            } catch (e) {}
+        }
+
+        // ---- Admin license management ----
+        function escapeHtml(s) {
+            return String(s == null ? '' : s).replace(/[&<>"']/g, function(m) {
+                return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m];
+            });
+        }
+        function adminLoadLicenses() {
+            var container = document.getElementById('licenseListContainer');
+            container.innerHTML = '<p style="color:#778da9;">Loading...</p>';
+            fetch('/api/license/list').then(function(r){
+                if (r.status === 401) { container.innerHTML = '<p style="color:#ff6b6b;">Admin login required. <a href="/login" style="color:#00b4d8;">Login here</a></p>'; return null; }
+                return r.json();
+            }).then(function(data){
+                if (!data) return;
+                var licenses = data.licenses || [];
+                if (licenses.length === 0) {
+                    container.innerHTML = '<p style="color:#778da9;">No licenses generated yet.</p>';
+                    return;
+                }
+                var html = '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">';
+                html += '<tr style="border-bottom:1px solid #415a77;color:#90e0ef;text-align:left;">';
+                html += '<th style="padding:6px;">ID</th><th>Tier</th><th>Customer</th><th>Devices</th><th>Revoked</th><th>Actions</th></tr>';
+                for (var i = 0; i < licenses.length; i++) {
+                    var lic = licenses[i];
+                    var revoked = lic.revoked ? 'Yes' : 'No';
+                    var action = lic.revoked ? 'unrevoke' : 'revoke';
+                    var revokeBtn = '<button class="btn lic-action" data-action="' + action + '" data-id="' + escapeHtml(lic.license_id) + '" style="padding:4px 10px;font-size:0.8rem;">' + (lic.revoked ? 'Unrevoke' : 'Revoke') + '</button>';
+                    html += '<tr style="border-bottom:1px solid #1b263b;">';
+                    html += '<td style="padding:6px;font-family:monospace;font-size:0.75rem;">' + escapeHtml(lic.license_id.substring(0,20)) + '...</td>';
+                    html += '<td>' + escapeHtml(lic.tier) + '</td>';
+                    html += '<td>' + escapeHtml(lic.customer || 'N/A') + '</td>';
+                    html += '<td>' + escapeHtml(lic.activations_count || 0) + '/' + escapeHtml(lic.max_devices || 1) + '</td>';
+                    html += '<td style="color:' + (lic.revoked ? '#ff6b6b' : '#6be') + ';">' + escapeHtml(revoked) + '</td>';
+                    html += '<td>' + revokeBtn +
+                        ' <button class="btn lic-action" data-action="delete" data-id="' + escapeHtml(lic.license_id) + '" style="padding:4px 10px;font-size:0.8rem;color:#ff6b6b;">Delete</button></td>';
+                    html += '</tr>';
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            }).catch(function(){ container.innerHTML = '<p style="color:#ff6b6b;">Could not load licenses.</p>'; });
+        }
+
+        function adminRevokeLicense(id) {
+            if (!confirm('Revoke this license? It will stop working immediately.')) return;
+            fetch('/api/license/' + id + '/revoke', {method: 'POST'}).then(function(r){ return r.json(); }).then(function(){ adminLoadLicenses(); });
+        }
+        function adminUnrevokeLicense(id) {
+            fetch('/api/license/' + id + '/unrevoke', {method: 'POST'}).then(function(r){ return r.json(); }).then(function(){ adminLoadLicenses(); });
+        }
+        function adminDeleteLicense(id) {
+            if (!confirm('Permanently delete this license? This cannot be undone.')) return;
+            fetch('/api/license/' + id, {method: 'DELETE'}).then(function(r){ return r.json(); }).then(function(){ adminLoadLicenses(); });
+        }
+        document.addEventListener('click', function(e) {
+            var btn = e.target;
+            if (!btn || !btn.classList || !btn.classList.contains('lic-action')) return;
+            var id = btn.getAttribute('data-id');
+            var action = btn.getAttribute('data-action');
+            if (!id || !action) return;
+            if (action === 'revoke') adminRevokeLicense(id);
+            else if (action === 'unrevoke') adminUnrevokeLicense(id);
+            else if (action === 'delete') adminDeleteLicense(id);
+        });
+
+        function initPage() {
+            var mid = null;
+            var adminUser = null;
+            if (PRELOADED_MACHINE_ID && PRELOADED_MACHINE_ID !== '{{MACHINE_ID}}') {
+                mid = PRELOADED_MACHINE_ID;
+                adminUser = (PRELOADED_ADMIN_USERNAME && PRELOADED_ADMIN_USERNAME !== '{{ADMIN_USERNAME}}') ? PRELOADED_ADMIN_USERNAME : null;
+            } else if (typeof window.SoluzkaHost !== 'undefined') {
+                try {
+                    mid = window.SoluzkaHost.GetMachineId();
+                    adminUser = window.SoluzkaHost.GetEnv('ADMIN_USERNAME');
+                } catch (e) { setTimeout(initPage, 100); return; }
+            } else if (isNative()) {
+                try {
+                    mid = window.external.GetMachineId();
+                    adminUser = window.external.GetEnv('ADMIN_USERNAME');
+                } catch (e) { setTimeout(initPage, 100); return; }
+            } else {
+                var requestedMachineId = getQueryParam('machine_id') || getQueryParam('m') || getQueryParam('mid');
+                var stored = getStorageItem('soluzka_machine_id');
+                var hasCrypto = (typeof crypto !== 'undefined' && crypto.randomUUID);
+                mid = requestedMachineId || stored || (hasCrypto ? crypto.randomUUID() : 'web-' + Math.random().toString(36).substr(2, 16));
+                if (requestedMachineId) {
+                    setStorageItem('soluzka_machine_id', requestedMachineId);
+                } else if (!stored) {
+                    setStorageItem('soluzka_machine_id', mid);
+                }
+                var m1 = document.getElementById('machineId'); if (m1) m1.removeAttribute('readonly');
+                var m2 = document.getElementById('homeMachineId'); if (m2) m2.removeAttribute('readonly');
+                var m3 = document.getElementById('purchaseMachineId'); if (m3) m3.removeAttribute('readonly');
+            }
+            if (mid) {
+                var el1 = document.getElementById('machineId'); if (el1) el1.value = mid;
+                var el2 = document.getElementById('homeMachineId'); if (el2) el2.value = mid;
+                var el3 = document.getElementById('purchaseMachineId'); if (el3) el3.value = mid;
+            }
+            if (typeof window.SoluzkaHost !== 'undefined' || isNative() || (PRELOADED_MACHINE_ID && PRELOADED_MACHINE_ID !== '{{MACHINE_ID}}')) {
+                if (document.body.className.indexOf('native') === -1) {
+                    document.body.className += ' native';
+                }
+            }
+            if (adminUser) {
+                var u1 = document.getElementById('username'); if (u1) u1.value = adminUser;
+            }
+            showRequestedPage();
+        }
+        initPage();
+        if (document.readyState !== 'complete') {
+            if (window.addEventListener) { window.addEventListener('load', initPage); }
+            else if (window.attachEvent) { window.attachEvent('onload', initPage); }
+            else { window.onload = initPage; }
+        }
+    </script>
+</body>
+</html>

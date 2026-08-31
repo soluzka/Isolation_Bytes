@@ -1,0 +1,10 @@
+{
+	"folders": [
+		{
+			"name": "antivirus-yara-rules-c",
+			"path": "."
+		}
+	],
+	"settings": {},
+	"workbenchMode": "windsurf-agent-window"
+}

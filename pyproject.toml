@@ -1,0 +1,5 @@
+[tool.pylint.messages_control]
+disable = ["E0102"]
+
+[tool.flake8]
+ignore = ["F811"]

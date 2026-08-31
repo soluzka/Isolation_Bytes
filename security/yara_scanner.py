@@ -1,0 +1,938 @@
+import yara as yara_module
+import os
+import logging
+import sys
+import time
+import functools
+import warnings
+import re
+from yara import Error as YaraError, TimeoutError as YaraTimeoutError
+
+def get_basedir():
+    """Get the base directory of the project."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    security_dir = os.path.dirname(current_dir)
+    base_dir = os.path.dirname(security_dir)
+    return base_dir
+
+# Default values for YARA external variables used by some rules (e.g.
+# generic_anomalies.yar's filename/extension/filetype based conditions).
+# Real per-file values are supplied at match time in scan_file_with_yara().
+_YARA_EXTERNALS_DEFAULTS = {
+    'extension': '',
+    'filename': '',
+    'filepath': '',
+    'filetype': '',
+}
+
+# Minimum YARA match severity to log. Defaults to 'medium' to reduce noise.
+# Can be overridden with the YARA_LOG_MIN_SEVERITY environment variable.
+YARA_LOG_MIN_SEVERITY = os.environ.get('YARA_LOG_MIN_SEVERITY', 'medium').lower().strip()
+
+# Hard-coded list of noisy/broad YARA rules that are known to false-positive
+# on normal system files and common legitimate software.
+# Hard-coded list of noisy/broad YARA rules that are known to false-positive
+# on normal system files and common legitimate software.
+NOISY_RULE_NAMES = {
+    # Broad synthetic rules in the main yara_rules.yar / index files
+    'AIInferenceAttack',
+    'AIModelTheft',
+    'AISpoofingAttack',
+    'AISupplyChainAttack',
+    'AdvancedAntiAnalysis',
+    'AdvancedCodeReuseAttack',
+    'AdvancedFirmwareAttack',
+    'AdvancedHeapExploit',
+    'AdvancedMemoryCorruption',
+    'AdvancedPersistence',
+    'AdvancedSwarmAttack',
+    'AdversarialAttack',
+    'AirGapAttackIndicators',
+    'AntiDebugCheck',
+    'AntiVMCheck',
+    'ApiGatewayBypass',
+    'AsyncRAT',
+    'BiocomputingExploit',
+    'BionicSecurityBypass',
+    'BlockchainNodeAttack',
+    'BootkitTechniques',
+    'China_Chopper_Webshell',
+    'CloudAPIAbuse',
+    'CloudConfigTampering',
+    'CloudCredentialAccess',
+    'CloudDataExfil',
+    'CloudPersistence',
+    'CloudSupplyChain',
+    'ContainerEscape',
+    'CovertChannels',
+    'CryptoSignature',
+    'CustomShellcodePatterns',
+    'DevOpsToolchainAttack',
+    'Dropper_Indicators',
+    'EdgeComputingAttack',
+    'EdgeComputingExploit',
+    'EventStreamingAttack',
+    'FirmwareManipulation',
+    'FormBook_Stealer_Strict',
+    'Generic_Ransomware_Indicators',
+    'GraphQLInjection',
+    'HardwareManipulation',
+    'HardwareSecurityBypass',
+    'HeapFungibility',
+    'HeapSprayPattern',
+    'HolographicAttack',
+    'InfraAsCodeAttack',
+    'InjectionTechniques',
+    'KernelMemoryDisclosure',
+    'KernelModeExploit',
+    'KernelPoolOverflow',
+    'KubernetesAttack',
+    'MLModelAttack',
+    'Malicious_Office_Macro',
+    'Malicious_PDF_JavaScript',
+    'MemoryDebuggingAbuse',
+    'MemoryDisclosure',
+    'MemoryMappingExploit',
+    'MetaverseExploitation',
+    'MicroservicesAttack',
+    'ModelPoisoningAttack',
+    'MolecularComputingExploit',
+    'NeuroTechnologyAttack',
+    'NeuromorphicExploit',
+    'Office_Macro_Malware',
+    'OpticalComputingAttack',
+    'PDF_Exploit_Indicators',
+    'PE_Suspicious_Imports',
+    'PageTableManipulation',
+    'ProcessInjectionAdvanced',
+    'ProtocolManipulation',
+    'QuantumChannelAttack',
+    'QuantumComputeAttack',
+    'QuantumComputingAttack',
+    'QuantumResistanceAttack',
+    'RTF_Exploit_Indicators',
+    'ReturnOrientedProgramming',
+    'ServerlessAttack',
+    'ServerlessAttackPattern',
+    'ServiceAccountAbuse',
+    'ServiceMeshAttack',
+    'ServiceMeshExploit',
+    'ShackAttackIndicators',
+    'Shellcode_Injection_Indicators',
+    'SideChannelAttackTools',
+    'SmartDustAttack',
+    'SpintronicsAttack',
+    'StackCanaryBypass',
+    'StackCookieBypasses',
+    'StackPivotDetection',
+    'SupplyChainAttack',
+    'Suspicious_PE_API_Imports',
+    'Suspicious_PowerShell',
+    'Suspicious_Registry_Persistence',
+    'ThreadContextManipulation',
+    'TrustedExecutionBypass',
+    'UseAfterFreePattern',
+    'VirtualizationEscape',
+    'ZeroTrustBypass',
+    'cobalt_strike_tmp01925d3f',
+}
+
+# Rule-name keywords that indicate a known malware family or definitive malware
+# class.  If one of these matches a rule whose metadata severity is "high", the
+# severity is promoted to "critical" so it is treated as an automatic quarantine
+# candidate (unless it is also in NOISY_RULE_NAMES).
+DEFINITIVE_MALWARE_KEYWORDS = (
+    'malware', 'ransomware', 'trojan', 'stealer', 'backdoor', 'miner',
+    'rat', 'apt', 'webshell', 'phishing', 'rootkit', 'botnet', 'cobalt',
+    'emotet', 'trickbot', 'trickbot', 'dridex', 'zeus', 'qakbot', 'darkside',
+    'gandcrab', 'lockbit', 'maze', 'netwalker', 'revil', 'ryuk', 'wannacry',
+    'xmrig', 'agenttesla', 'redline', 'remcos', 'njrat', 'asyncrat', 'plugx',
+    'fin7', 'turla', 'carbanak', 'cobaltkitty',
+    # Additional families, tools, and common C2 frameworks
+    'lokibot', 'azorult', 'smokeloader', 'icedid', 'bokbot', 'vjw0rm', 'persistence',
+    'nanocore', 'netwire', 'formbook', 'luminositylink', 'revenge',
+    'cryptowall', 'petya', 'notpetya', 'blackcat', 'alphv',
+    'sliver', 'metasploit', 'mimikatz', 'bloodhound', 'cobaltstrike',
+    # More common RATs, stealers, loaders, and ransomware families
+    'darkcomet', 'plugx', 'poisonivy', 'swrort', 'terminator', 'xtremrat',
+    'cerberus', 'blackshades', 'jrat', 'qbot', 'bumblebee',
+    'amadey', 'colibri', 'danabot', 'darkgate', 'eternity', 'lu0bot',
+    'matanbuchus', 'nymaim', 'phorpiex', 'raccoon', 'recordbreaker',
+    'socgholish', 'tofsee', 'vidar', 'xworm', 'avemaria', 'hawkeye',
+    'oski', 'zeppelin', 'mars', 'cryptotec', 'medusalocker',
+    # Additional widespread malware families
+    'andromeda', 'aridviper', 'bedep', 'betabot', 'blackenergy',
+    'blockbuster', 'chanitor', 'cheshire', 'chisburg', 'coredn',
+    'cridex', 'cryptolocker', 'cryptowall', 'cutwail', 'diamondfox',
+    'dircrypt', 'dofoil', 'dyre', 'ekans', 'energeticbear',
+    'evilbunny', 'fareit', 'ficker', 'flokibot', 'formgrae',
+    'gamaredon', 'geodo', 'glupteba', 'gozi', 'grandoreiro',
+    'hancitor', 'hermes', 'hiloti', 'horus', 'ismdoor',
+    'kronos', 'lampion', 'latenbot', 'lemonduck', 'lojax',
+    'maas', 'macoute', 'magecart', 'makop', 'marap',
+    'memucod', 'menta', 'merus', 'minidionis', 'molerats',
+    'morto', 'mosquito', 'neurevt', 'nitol', 'nivdort',
+    'nuclear', 'oceansalt', 'odin', 'olympicdestroyer', 'parallax',
+    'pegasus', 'pikabot', 'pony', 'poweliks', 'prolock',
+    'pushdo', 'pykspa', 'ramnit', 'reactorbot', 'retefe',
+    'righthook', 'rovnix', 'sakula', 'sality', 'scarab',
+    'sedreco', 'shifu', 'skidmap', 'snifula', 'sodbuster',
+    'solarmarker', 'statik', 'strongpity', 'sunburst', 'supremo',
+    'teslacrypt', 'tinba', 'torpig', 'troldesh', 'udpos',
+    'urlzone', 'valak', 'vawtrak', 'veil', 'virut',
+    'waledac', 'wannamine', 'wauchos', 'xagent', 'yakes',
+    'zaccess', 'zbot', 'zloader', 'zusy',
+    # Specific families found in the local rule set
+    'clickfix', 'clandestine',
+)
+
+def _classify_filetype(filepath):
+    '''Best-effort filetype string for YARA external variables.
+
+    Tries to identify the file by magic bytes first, then falls back to the
+    file extension. Returns an empty string if the type cannot be determined.
+    '''
+    ext = os.path.splitext(filepath)[1].lower()
+    ext_type_map = {
+        '.vbs': 'VBS', '.wsf': 'VBS',
+        '.php': 'PHP',
+        '.jsp': 'JSP',
+        '.py': 'Python', '.pyc': 'Python',
+        '.asp': 'ASP', '.aspx': 'ASP',
+        '.bat': 'BATCH', '.cmd': 'BATCH',
+        '.rtf': 'RTF',
+        '.mdmp': 'MDMP',
+        '.ps1': 'PowerShell', '.psm1': 'PowerShell', '.psd1': 'PowerShell',
+        '.sh': 'Shell', '.bash': 'Shell',
+        '.pl': 'Perl', '.pm': 'Perl',
+        '.rb': 'Ruby',
+        '.lua': 'Lua',
+        '.ts': 'TypeScript',
+        '.html': 'HTML', '.htm': 'HTML',
+        '.xml': 'XML',
+        '.json': 'JSON',
+        '.csv': 'CSV',
+        '.md': 'Markdown',
+        '.eml': 'Email', '.msg': 'Email',
+        '.doc': 'Office', '.docx': 'Office', '.xls': 'Office', '.xlsx': 'Office',
+        '.ppt': 'Office', '.pptx': 'Office', '.odt': 'Office', '.ods': 'Office', '.odp': 'Office',
+        '.zip': 'ZIP', '.jar': 'ZIP', '.war': 'ZIP', '.ear': 'ZIP',
+        '.rar': 'RAR',
+        '.7z': '7Z',
+        '.gz': 'GZIP', '.tgz': 'GZIP',
+        '.tar': 'TAR',
+        '.jpg': 'JPEG', '.jpeg': 'JPEG',
+        '.png': 'PNG',
+        '.gif': 'GIF',
+        '.bmp': 'BMP',
+        '.tiff': 'TIFF', '.tif': 'TIFF',
+        '.webp': 'WEBP',
+        '.db': 'SQLite', '.sqlite': 'SQLite', '.sqlite3': 'SQLite',
+        '.class': 'JavaClass',
+        '.lnk': 'LNK',
+        # High-risk Windows executable and script extensions
+        '.exe': 'EXE', '.dll': 'EXE', '.com': 'EXE', '.scr': 'EXE', '.pif': 'EXE', '.sys': 'EXE',
+        '.vbe': 'VBS', '.wsh': 'WScript',
+        '.hta': 'HTA',
+        '.js': 'JS',
+        '.reg': 'Registry',
+        '.msi': 'MSI',
+        '.jnlp': 'JavaWebStart',
+        '.inf': 'INF',
+    }
+    if ext in ext_type_map:
+        return ext_type_map[ext]
+
+    try:
+        with open(filepath, 'rb') as f:
+            header = f.read(16)
+    except (OSError, IOError):
+        return ''
+
+    if not header:
+        return ''
+
+    # PE / Windows executable
+    if header[:2] == b'MZ':
+        return 'EXE'
+    # ELF
+    if header[:4] == b'\x7fELF':
+        return 'ELF'
+    # Mach-O (little- and big-endian, 32- and 64-bit) and fat binaries
+    if header[:4] in (b'\xcf\xfa\xed\xfe', b'\xcf\xfa\xed\xff',
+                      b'\xfe\xed\xfa\xcf', b'\xfe\xed\xfa\xff',
+                      b'\xca\xfe\xba\xbe', b'\xbe\xba\xfe\xca'):
+        return 'MACH-O'
+    # Java class
+    if header[:4] == b'\xca\xfe\xba\xbe':
+        return 'JavaClass'
+    # PDF
+    if header[:4] == b'%PDF':
+        return 'PDF'
+    # JPEG
+    if header[:3] == b'\xff\xd8\xff':
+        return 'JPEG'
+    # PNG
+    if header[:4] == b'\x89PNG':
+        return 'PNG'
+    # GIF
+    if header[:4] == b'GIF8':
+        return 'GIF'
+    # BMP
+    if header[:2] == b'BM':
+        return 'BMP'
+    # WEBP
+    if len(header) >= 12 and header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+        return 'WEBP'
+    # ZIP / OOXML / JAR
+    if header[:2] == b'PK':
+        return 'ZIP'
+    # RAR
+    if header[:4] == b'Rar!':
+        return 'RAR'
+    # 7Z
+    if header[:2] == b'7z':
+        return '7Z'
+    # GZIP
+    if header[:2] == b'\x1f\x8b':
+        return 'GZIP'
+    # SQLite
+    if header[:16] == b'SQLite format 3\x00':
+        return 'SQLite'
+    # OLE2 / old Office
+    if header[:4] == b'\xd0\xcf\x11\xe0':
+        return 'Office'
+
+    return ''
+
+@functools.lru_cache(maxsize=None)
+def load_yara_rules():
+    """Load YARA rules from the rules directory structure or create basic rules if none exist."""
+    # Create a fallback rule to ensure we have at least one rule available
+    # NOTE: This fallback is only used if no external .yar rule files are found.
+    # It is compiled here so it's ready to append if needed, but it is NOT
+    # appended to compiled_rules when real rule files are loaded successfully.
+    fallback_rule = None
+    try:
+        fallback_rule = yara_module.compile(source='''
+        rule SuspiciousFile {
+            meta:
+                description = "Basic detection for potentially suspicious files"
+                severity = "medium"
+            strings:
+                $s1 = "CreateRemoteThread" ascii
+                $s2 = "VirtualAllocEx" ascii
+                $s3 = "WriteProcessMemory" ascii
+                $s4 = "mimikatz" ascii wide nocase
+                $s5 = "lsass.dmp" ascii wide nocase
+                $s6 = "sekurlsa::logonpasswords" ascii wide nocase
+            condition:
+                3 of them and uint16(0) == 0x5A4D
+        }
+
+        rule AntiDebugCheck {
+            meta:
+                description = "Detect anti-debugging code"
+            strings:
+                $a1 = "IsDebuggerPresent" ascii
+                $a2 = "CheckRemoteDebuggerPresent" ascii
+                $a3 = "OutputDebugString" ascii
+            condition:
+                2 of them and uint16(0) == 0x5A4D
+        }
+
+        rule AntiVMCheck {
+            meta:
+                description = "Detect anti-VM code"
+            strings:
+                $vm1 = "vmware" ascii nocase
+                $vm2 = "virtualbox" ascii nocase
+                $vm3 = "qemu" ascii nocase
+            condition:
+                2 of them and uint16(0) == 0x5A4D
+        }
+        ''')
+        logging.info("Created in-memory fallback YARA rules")
+    except YaraError as e:
+        logging.error(f"Failed to create fallback YARA rule: {e}")
+    
+    # Find the YARA rules directory
+    security_dir = os.path.dirname(os.path.abspath(__file__))
+    rules_dir = os.path.join(security_dir, 'yara_rules')
+    
+    # Check if rules directory exists
+    if not os.path.exists(rules_dir):
+        logging.warning(f"No YARA rules directory found at: {rules_dir}")
+        if fallback_rule:
+            return [fallback_rule]
+        return []
+    
+    # First try to load from normal rule files
+    try:
+        # Compile all rules we can find
+        # NOTE: Do NOT append fallback_rule here — it should only be used
+        # if NO external rule files are found. Appending it alongside real
+        # rules causes the fallback's generic SuspiciousFile rule (which
+        # matches on strings like "password", "hack", etc.) to produce
+        # false positives on legitimate text files.
+        compiled_rules = []
+            
+        # Get all rule files
+        rule_files = []
+        for root, _, files in os.walk(rules_dir):
+            for file in files:
+                if file.endswith(('.yar', '.yara')):
+                    rule_files.append(os.path.join(root, file))
+        
+        logging.info(f"Found {len(rule_files)} YARA rule files in {rules_dir}")
+        
+        # Track which rules were problematic for better debugging
+        skipped_rules = []
+        failed_rules = []
+        successful_rules = []
+        
+        # Compile each rule file individually, using the source filename as the
+        # rule namespace so matches can be grouped by rule family later.
+        for rule_path in rule_files:
+            file_name = os.path.basename(rule_path)
+            try:
+                # NOTE: generic_anomalies.yar, CVE-2010-0805.yar, and yara_rules.yar
+                # used to be unconditionally skipped here as "known problematic".
+                # generic_anomalies.yar was missing `import "pe"`/`import "math"`
+                # and used an invalid pe.entropy field; yara_rules.yar had a rule
+                # with a missing header (orphaned strings:/condition: block) and
+                # a triplicated rule name; CVE-2010-0805.yar compiled fine on its
+                # own and had no evident reason to be excluded. All three are
+                # fixed now (see the .yar files themselves), so they go through
+                # the normal compile-with-fallback path below like everything else.
+
+                # Try to compile the rule with more detailed error handling
+                try:
+                    # First attempt with includes (which might reference other files).
+                    # externals declares variables some rules (e.g. generic_anomalies.yar's
+                    # extension/filename/filepath/filetype conditions) reference but that
+                    # aren't YARA builtins -- the real per-file values are supplied at match
+                    # time in scan_file_with_yara(); these defaults just let them compile.
+                    rule = yara_module.compile(filepaths={file_name: rule_path}, includes=True,
+                                                error_on_warning=False, externals=_YARA_EXTERNALS_DEFAULTS)
+                    compiled_rules.append(rule)
+                    successful_rules.append(file_name)
+                    logging.info(f"Successfully loaded YARA rule: {file_name}")
+                except YaraError as include_error:
+                    # If includes fail, try again without them as a fallback
+                    logging.warning(f"Failed to load YARA rule with includes, trying without: {file_name}. Error: {include_error}")
+                    try:
+                        rule = yara_module.compile(filepaths={file_name: rule_path}, includes=False,
+                                                    error_on_warning=False, externals=_YARA_EXTERNALS_DEFAULTS)
+                        compiled_rules.append(rule)
+                        successful_rules.append(file_name)
+                        logging.info(f"Successfully loaded YARA rule (without includes): {file_name}")
+                    except YaraError as error:
+                        # Both attempts failed
+                        raise error
+            except YaraError as e:
+                logging.error(f"Failed to load YARA rule '{file_name}': {e}")
+                failed_rules.append(file_name)
+                continue
+            except Exception as e:
+                logging.error(f"Unexpected error loading rule '{file_name}': {e}")
+                failed_rules.append(file_name)
+                continue
+        
+        # Summary logging for better visibility
+        logging.info(f"YARA rules summary: {len(successful_rules)} loaded, {len(skipped_rules)} skipped, {len(failed_rules)} failed")
+        
+        if not compiled_rules and fallback_rule:
+            logging.warning("No rules could be compiled, using fallback rule only")
+            return [fallback_rule]
+            
+        return compiled_rules
+    
+    # Create our own basic rule as a fallback if all rules fail
+    except Exception as e:
+        logging.error(f"Error loading YARA rules from directory: {e}")
+        if fallback_rule:
+            return [fallback_rule]
+        return []
+
+def scan_file_with_yara(filepath, timeout=2):
+    """
+    Scan a file using all available YARA rules. 
+    Returns a list of match objects if suspicious, or an empty list if not suspicious.
+    Each match object has attributes like: rule, namespace, tags, meta, strings
+    
+    Args:
+        filepath (str): Path to the file to scan
+        timeout (int): Maximum time in seconds to wait for a YARA scan to complete
+    """
+    # Skip files that don't exist
+    if not os.path.isfile(filepath):
+        logging.warning(f"File does not exist: {filepath}")
+        return []
+    
+    file_size = 0
+    try:
+        file_size = os.path.getsize(filepath)
+    except Exception as e:
+        logging.error(f"Error checking file size: {str(e)}")
+    
+    ext = os.path.splitext(filepath)[1].lower()
+    if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico'}:
+        return []
+
+    # Skip log, event, and crash files that are not useful for YARA malware matching
+    if ext in {'.log', '.evtx', '.evt', '.etl', '.dmp', '.mdmp', '.wer', '.cab'}:
+        logging.debug(f"Skipping non-malware log/crash file: {filepath}")
+        return []
+
+    # Skip common Windows log/crash directories (Panther, Logs, Minidump, etc.)
+    lower_path = filepath.lower()
+    if any(skip in lower_path for skip in {'\\logs\\', '\\panther\\', '\\minidump', '\\crashdumps', '\\diagtrack'}):
+        logging.debug(f"Skipping log/crash directory file: {filepath}")
+        return []
+
+
+
+    # Load the YARA rules
+    try:
+        rules = load_yara_rules()
+        if not rules:
+            logging.warning(f"No YARA rules available to scan {filepath}")
+            return []
+        
+        logging.info(f"Scanning file with {len(rules)} YARA rule sets: {filepath}")
+        
+        # Track scanning metrics
+        scan_start = time.time()
+        all_matches = []
+        timeouts = 0
+        errors = 0
+        
+        # Build per-file external variables for rules that depend on them
+        externals = {
+            'extension': ext,
+            'filename': os.path.basename(filepath),
+            'filepath': filepath,
+            'filetype': _classify_filetype(filepath),
+        }
+        
+        # Load small files into memory so libyara doesn't have to re-open the
+        # path itself, which can trigger spurious "Failed to open" messages on
+        # locked/protected or oddly-handled files. Keep using the file path for
+        # anything > 100 MB to avoid excessive memory use.
+        data = None
+        use_data = file_size <= 5 * 1024 * 1024
+
+        # Apply each rule with a timeout
+        for rule_index, rule in enumerate(rules):
+            try:
+                # Apply the rule with timeout and per-file externals
+                if use_data:
+                    if data is None:
+                        with open(filepath, 'rb') as fh:
+                            data = fh.read()
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore', RuntimeWarning)
+                    if use_data:
+                        matches = rule.match(data=data, timeout=timeout, externals=externals, fast=True)
+                    else:
+                        matches = rule.match(filepath, timeout=timeout, externals=externals, fast=True)
+
+                # Process any matches found
+                if matches:
+                    # Hard-coded suppression of known noisy/broad rules.
+                    matches = [m for m in matches if getattr(m, 'rule', '') not in NOISY_RULE_NAMES]
+                    if not matches:
+                        continue
+                    # Adaptive suppression: also filter rules that the
+                    # reputation system has dynamically suppressed based on
+                    # clean-file / malware-hit ratios.  This is the
+                    # "automatic add/remove to noisy" mechanism -- it goes
+                    # back and forth as rules prove noisy or legitimate.
+                    try:
+                        from security.rule_reputation import is_suppressed as _is_reputation_suppressed
+                        matches = [m for m in matches if not _is_reputation_suppressed(getattr(m, 'rule', ''))]
+                    except Exception:
+                        pass
+                    if not matches:
+                        continue
+                    all_matches.extend(matches)
+                    rule_names = [getattr(m, 'rule', f'Rule-{rule_index}') for m in matches]
+                    # Only log this rule if its highest severity meets the configured threshold.
+                    rule_highest = get_highest_severity(matches)
+                    if _rank_of(rule_highest) >= _rank_of(YARA_LOG_MIN_SEVERITY):
+                        logging.warning(f"{rule_highest.upper() if rule_highest else 'YARA'} match in {filepath}: {', '.join(rule_names)}")
+            except YaraTimeoutError:
+                timeouts += 1
+                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}), stopping this file")
+                break
+            except YaraError as ye:
+                errors += 1
+                logging.error(f"YARA error scanning {filepath}: {str(ye)}")
+                continue
+            except Exception as e:
+                errors += 1
+                # Permission denied on locked files is normal — don't spam the log
+                if 'Permission denied' in str(e) or 'Errno 13' in str(e):
+                    logging.debug(f"Skipping locked file {filepath}: {str(e)}")
+                else:
+                    logging.error(f"Error applying YARA rule to {filepath}: {str(e)}")
+                continue
+        
+        # Log scan summary, but only if any match reaches the configured threshold.
+        scan_time = time.time() - scan_start
+        if all_matches:
+            highest = get_highest_severity(all_matches)
+            if _rank_of(highest) >= _rank_of(YARA_LOG_MIN_SEVERITY):
+                logging.warning(f"Found {len(all_matches)} YARA matches in {filepath} (highest: {highest}, scan time: {scan_time:.2f}s)")
+            else:
+                logging.debug(f"Found {len(all_matches)} low-severity YARA matches in {filepath} (scan time: {scan_time:.2f}s)")
+        else:
+            logging.info(f"No YARA matches in {filepath} (scan time: {scan_time:.2f}s, timeouts: {timeouts}, errors: {errors})")
+            
+        return all_matches
+        
+    except Exception as e:
+        logging.error(f"Unexpected error in YARA scan of {filepath}: {str(e)}")
+        return []
+
+
+def _normalize_severity(value):
+    """Normalize a YARA metadata severity value to a lower-case string."""
+    if value is None:
+        return ''
+    if isinstance(value, bytes):
+        value = value.decode('utf-8', errors='ignore')
+    return str(value).strip().lower()
+
+
+def _rule_matches_definitive_keyword(rule_name):
+    """Return True if the rule name contains a definitive malware-family
+    keyword as a *whole token* (bounded by non-alphanumeric characters), not
+    a substring.
+
+    The previous implementation used ``kw in normalized_rule`` which is a
+    substring test.  Short keywords like 'rat', 'apt', 'maze', 'pony', 'odin',
+    'mars', 'veil' matched benign rule names such as 'format', 'adapt',
+    'compiler', 'envelope', 'traverse', etc., promoting them to critical and
+    triggering auto-quarantine of clean files.
+
+    Token-boundary matching (``(?<![a-z0-9])kw(?![a-z0-9])``) eliminates
+    those false positives while still catching real family names like
+    'AgentTesla', 'Cobalt_Strike', 'WannaCry', 'XMrig'.  We use
+    non-alphanumeric lookarounds instead of ``\\b`` because ``\\b`` treats
+    underscores as word characters, which would prevent 'Cobalt_Strike' from
+    matching the keyword 'cobalt'.
+    """
+    if not rule_name:
+        return False
+    normalized = rule_name.lower()
+    for kw in DEFINITIVE_MALWARE_KEYWORDS:
+        if re.search(r'(?<![a-z0-9])' + re.escape(kw) + r'(?![a-z0-9])', normalized):
+            return True
+    return False
+
+
+def get_match_severity(match):
+    """Return the severity string from a yara.Match object's metadata, or empty.
+
+    High-severity matches are promoted to critical when the rule name matches a
+    known malware family, so definitive malware triggers automatic quarantine.
+    """
+    meta = getattr(match, 'meta', {}) or {}
+    rule = getattr(match, 'rule', '')
+    for key in ('severity', 'Severity', 'SEVERITY'):
+        if key in meta:
+            sev = _normalize_severity(meta[key])
+            if sev == 'high' and _rule_matches_definitive_keyword(rule):
+                return 'critical'
+            return sev
+    # Rules with no explicit severity but a definitive malware-family name are
+    # treated as critical so they are not ignored by the dashboard/quarantine logic.
+    # Uses word-boundary matching to avoid false positives (e.g. 'rat' in 'format').
+    if _rule_matches_definitive_keyword(rule):
+        return 'critical'
+    return ''
+
+
+def has_critical_yara_match(matches):
+    """Return True if any match in the list has severity == 'critical'."""
+    if not matches:
+        return False
+    for match in matches:
+        if get_match_severity(match) == 'critical':
+            return True
+    return False
+
+
+# Severity ranking (higher number = more severe)
+SEVERITY_RANK = {
+    'low': 1,
+    'medium': 2,
+    'high': 3,
+    'critical': 4
+}
+
+
+def _rank_of(severity):
+    """Return the numeric rank for a severity string."""
+    return SEVERITY_RANK.get(severity, 0)
+
+
+def get_highest_severity(matches):
+    """Return the highest severity string among a list of yara matches."""
+    if not matches:
+        return ''
+    highest = ''
+    highest_rank = 0
+    for match in matches:
+        severity = get_match_severity(match)
+        rank = _rank_of(severity)
+        if rank > highest_rank:
+            highest = severity
+            highest_rank = rank
+    return highest
+
+
+def _severity_prefix(severity):
+    """Return a human-readable prefix for a YARA match severity."""
+    if not severity:
+        return 'YARA match'
+    return f'{severity.upper()} YARA match'
+
+
+def scan_all_folders_with_yara(monitored_folders, rules_path=None):
+    """
+    YARA-based scanning utilities for security module.
+    
+    Phishing detection is available via scan_utils.scan_all_folders_for_phishing(monitored_folders),
+    which will scan and quarantine files with phishing indicators.
+    
+    Scan all files in all monitored folders (recursively) with YARA.
+    Returns a dictionary with scan statistics and a list of results (matches and errors).
+    """
+    import os
+
+    # Try to import quarantine utilities so critical matches can be quarantined
+    quarantine_utils = None
+    try:
+        import quarantine_utils
+    except Exception:
+        quarantine_utils = None
+
+    # Define high-risk file extensions similar to network monitor
+    high_risk_extensions = [
+        '.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.wsf', '.hta', 
+        '.scr', '.pif', '.reg', '.com', '.msi', '.jar', '.jnlp', '.vbe', 
+        '.wsh', '.sys', '.inf'
+    ]
+    
+    results = []
+    scan_stats = {
+        'total_directories': len(monitored_folders),
+        'total_files_scanned': 0,
+        'total_high_risk_files': 0,
+        'total_subdirectories': 0,
+        'total_matches': 0,
+        'total_critical_matches': 0,
+        'total_high_matches': 0,
+        'total_medium_matches': 0,
+        'total_low_matches': 0,
+        'total_quarantined': 0,
+        'total_errors': 0,
+        'directories': []
+    }
+
+    for folder in monitored_folders:
+        folder_stats = {
+            'path': folder,
+            'exists': os.path.exists(folder),
+            'accessible': os.path.exists(folder) and os.access(folder, os.R_OK),
+            'file_count': 0,
+            'high_risk_files': 0,
+            'subdirectory_count': 0,
+            'matches': 0,
+            'critical_matches': 0,
+            'high_matches': 0,
+            'medium_matches': 0,
+            'low_matches': 0,
+            'quarantined': 0,
+            'errors': 0,
+            'subdirectories': []  # List to store subdirectories
+        }
+        
+        if not folder_stats['accessible']:
+            scan_stats['directories'].append(folder_stats)
+            continue
+            
+        for root, dirs, files in os.walk(folder):
+            # Add subdirectory paths and count
+            if root != folder:
+                folder_stats['subdirectory_count'] += 1
+                scan_stats['total_subdirectories'] += 1
+                # Add this subdirectory to our list (with a limit check)
+                if len(folder_stats['subdirectories']) < 100:
+                    folder_stats['subdirectories'].append(root)
+            else:
+                # Count immediate subdirectories for folder stats
+                folder_stats['subdirectory_count'] += len(dirs)
+                scan_stats['total_subdirectories'] += len(dirs)
+                
+                # Add immediate subdirectories to our list (with a limit check)
+                for subdir in dirs:
+                    if len(folder_stats['subdirectories']) < 100:
+                        subdir_path = os.path.join(folder, subdir)
+                        folder_stats['subdirectories'].append(subdir_path)
+                
+            for filename in files:
+                filepath = os.path.join(root, filename)
+                folder_stats['file_count'] += 1
+                scan_stats['total_files_scanned'] += 1
+                
+                # Check if high-risk file
+                _, ext = os.path.splitext(filename)
+                if ext.lower() in high_risk_extensions:
+                    folder_stats['high_risk_files'] += 1
+                    scan_stats['total_high_risk_files'] += 1
+                
+                try:
+                    # Scan the file with YARA
+                    matches = scan_file_with_yara(filepath)
+                    if matches:
+                        folder_stats['matches'] += len(matches)
+                        scan_stats['total_matches'] += len(matches)
+                        highest = get_highest_severity(matches)
+
+                        # Track match counts by highest severity for this file
+                        if highest == 'critical':
+                            folder_stats['critical_matches'] += 1
+                            scan_stats['total_critical_matches'] += 1
+                        elif highest == 'high':
+                            folder_stats['high_matches'] += 1
+                            scan_stats['total_high_matches'] += 1
+                        elif highest == 'medium':
+                            folder_stats['medium_matches'] += 1
+                            scan_stats['total_medium_matches'] += 1
+                        elif highest == 'low':
+                            folder_stats['low_matches'] += 1
+                            scan_stats['total_low_matches'] += 1
+
+                        for match in matches:
+                            rule_name = getattr(match, 'rule', 'Unknown rule')
+                            severity = get_match_severity(match)
+                            prefix = _severity_prefix(severity)
+                            results.append(f"{prefix} ({rule_name}): {filepath}")
+
+                        # Quarantine only critical matches
+                        is_critical = highest == 'critical'
+                        fernet_key = os.environ.get('FERNET_KEY')
+                        if is_critical and quarantine_utils and fernet_key and len(fernet_key) == 44:
+                            try:
+                                quarantine_utils.quarantine_file(filepath)
+                                folder_stats['quarantined'] += 1
+                                scan_stats['total_quarantined'] += 1
+                                results.append(f"Quarantined critical file: {filepath}")
+                            except Exception as qe:
+                                logging.warning(f"Could not quarantine critical file {filepath}: {qe}")
+                                results.append(f"Could not quarantine critical file {filepath}: {qe}")
+                        elif is_critical:
+                            results.append(f"CRITICAL match not quarantined (missing/invalid FERNET_KEY): {filepath}")
+                except Exception as e:
+                    folder_stats['errors'] += 1
+                    scan_stats['total_errors'] += 1
+                    results.append(f"Error scanning {filepath}: {e}")
+        
+        scan_stats['directories'].append(folder_stats)
+    
+    return {
+        'results': results,
+        'stats': scan_stats
+    }
+
+if __name__ == '__main__':
+    import sys
+    import logging
+    
+    # Set up logging
+    logging.basicConfig(level=logging.DEBUG)
+    
+    # Test loading rules
+    rules = load_yara_rules()
+    print(f"Loaded {len(rules) if rules else 0} YARA rule sets")
+    
+    # If a directory is provided, scan it
+    if len(sys.argv) > 1:
+        directory = sys.argv[1]
+        if not os.path.exists(directory):
+            print(f"Directory not found: {directory}")
+            sys.exit(1)
+            
+        print(f"Scanning directory: {directory}")
+        results = scan_all_folders_with_yara(monitored_folders=[directory])
+        if results:
+            print("\nScan Results:")
+            for result in results:
+                print(result)
+        else:
+            print("No suspicious files found.")
+    else:
+        # Use default monitored folders if no directory provided
+        try:
+            # Try to import from folder watcher
+            from folder_watcher import MONITORED_FOLDERS
+            if MONITORED_FOLDERS:
+                print("\n====================================")
+                print(f"SCANNING MONITORED FOLDERS:")
+                for folder in MONITORED_FOLDERS:
+                    print(f"  - {folder}")
+                print("====================================")
+                
+                results = scan_all_folders_with_yara(monitored_folders=MONITORED_FOLDERS)
+                
+                print("\n====================================")
+                print(f"SCAN COMPLETED - {len(results)} MATCHES FOUND")
+                print("====================================")
+                
+                if results:
+                    print("\nSCAN RESULTS:")
+                    for i, result in enumerate(results, 1):
+                        print(f"{i}. {result}")
+                else:
+                    print("No suspicious files found in monitored folders.")
+            else:
+                print("No monitored folders defined")
+        except ImportError:
+            # Fall back to common folders if folder_watcher not available
+            default_folders = []
+            # Add user Downloads folder
+            downloads = os.path.join(os.path.expanduser('~'), 'Downloads')
+            if os.path.exists(downloads):
+                default_folders.append(downloads)
+            # Add user Desktop folder
+            desktop = os.path.join(os.path.expanduser('~'), 'Desktop')
+            if os.path.exists(desktop):
+                default_folders.append(desktop)
+                
+            if default_folders:
+                print("\n====================================")
+                print(f"SCANNING DEFAULT FOLDERS:")
+                for folder in default_folders:
+                    print(f"  - {folder}")
+                print("====================================")
+                
+                results = scan_all_folders_with_yara(monitored_folders=default_folders)
+                
+                print("\n====================================")
+                print(f"SCAN COMPLETED - {len(results)} MATCHES FOUND")
+                print("====================================")
+                
+                if results:
+                    print("\nSCAN RESULTS:")
+                    for i, result in enumerate(results, 1):
+                        print(f"{i}. {result}")
+                else:
+                    print("No suspicious files found in default folders.")
+            else:
+                print("No default folders found to scan")
+                print("Usage: python yara_scanner.py <directory>")
+                print("Specify a directory to scan")

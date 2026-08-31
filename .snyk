@@ -1,0 +1,10 @@
+# Snyk (https://snyk.io) policy file
+exclude:
+  global:
+    - 'scikit-learn-main/**'
+    - 'build/**'
+    - 'dist/**'
+    - 'uploads/**'
+    - 'data/**'
+    - 'models/**'
+    - 'test_*.py'

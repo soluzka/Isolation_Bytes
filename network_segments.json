@@ -1,0 +1,54 @@
+{
+    "trusted": {
+        "ip_ranges": [
+            "192.168.1.0/24"
+        ],
+        "services": [
+            "web",
+            "database"
+        ],
+        "ports": [
+            80,
+            5432,
+            443,
+            3306
+        ],
+        "priority": 10
+    },
+    "untrusted": {
+        "ip_ranges": [
+            "10.0.0.0/8"
+        ],
+        "services": [
+            "web"
+        ],
+        "ports": [
+            80,
+            443
+        ],
+        "priority": 50
+    },
+    "admin": {
+        "ip_ranges": [
+            "192.168.1.100/32"
+        ],
+        "services": [
+            "admin"
+        ],
+        "ports": [
+            3389,
+            22
+        ],
+        "priority": 1
+    },
+    "default": {
+        "ip_ranges": [
+            "0.0.0.0/0"
+        ],
+        "services": [
+            "unknown"
+        ],
+        "ports": [],
+        "priority": 100
+    }
+}
