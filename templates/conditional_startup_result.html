@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>Conditional Startup Results</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='network_monitor.css') }}">
+    <script src="{{ url_for('static', filename='traffic_display.js') }}"></script>
+    <style>
+        body { max-width: 700px; margin: 2em auto; font-family: Arial, sans-serif; background: #f8f9fa; }
+        h2 { color: #2d5f9a; }
+        h3 { color: #2d5f9a; }
+        nav a { margin-right: 1em; }
+        .card { background: white; border-radius: 8px; padding: 1em; margin: 1em 0; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .card-header { border-bottom: 1px solid #eee; margin: -1em -1em 1em; padding: 1em; background: #f8f9fa; border-radius: 8px 8px 0 0; }
+        .alert { padding: 1em; margin: 1em 0; border-radius: 6px; }
+        .alert-success { background: #eafaf1; color: #006644; }
+        .alert-danger { background: #f8d7da; color: #721c24; }
+        .alert-warning { background: #fff3cd; color: #856404; }
+        .alert-info { background: #d1ecf1; color: #0c5460; }
+        .status-span { font-weight: bold; }
+        .status-enabled { color: #27ae60; }
+        .status-disabled { color: #c0392b; }
+        .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+        .summary-tile { flex: 1; min-width: 120px; padding: 10px; background: #f8f9fa; border-radius: 5px; text-align: center; }
+        .summary-tile .value { display: block; font-size: 1.6em; font-weight: bold; color: #2d5f9a; }
+        .summary-tile .label { font-size: 0.85em; color: #555; }
+        .summary-tile.has-findings .value { color: #e74c3c; }
+        .item-list { list-style-type: none; padding-left: 0; margin: 0.5em 0 0; max-height: 220px; overflow-y: auto; }
+        .item-list li { padding: 6px 8px; margin-bottom: 4px; background: #f9f9f9; border-left: 3px solid #3498db; border-radius: 4px; font-size: 0.9em; word-break: break-all; }
+        .item-list.errors li { border-left-color: #e74c3c; }
+        .item-list.quarantined li { border-left-color: #b36200; }
+        pre { background: #fff3cd; color: #222; padding: 1em; border-radius: 6px; max-height: 500px; overflow: auto; }
+        details summary { cursor: pointer; color: #2d5f9a; font-weight: bold; }
+        .traffic-stats-container { margin-top: 15px; background: #f8f9fa; padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h2>Conditional Startup Output</h2>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="alert {{ 'alert-danger' if category == 'error' else 'alert-success' }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <div class="card-header">
+            <h3 style="margin:0;">Run Summary</h3>
+        </div>
+        <div style="padding:0.5em;">
+            {% if summary %}
+            <p>
+                Completed: <strong>{{ summary.last_run or 'Unknown' }}</strong>
+                {% if summary.duration is not none %} &middot; took <strong>{{ summary.duration }}s</strong>{% endif %}
+            </p>
+            <div class="summary-grid">
+                <div class="summary-tile">
+                    <span class="value">{{ summary.scanned_files }}</span>
+                    <span class="label">Files Scanned</span>
+                </div>
+                <div class="summary-tile {{ 'has-findings' if summary.quarantined_files else '' }}">
+                    <span class="value">{{ summary.quarantined_files }}</span>
+                    <span class="label">Quarantined</span>
+                </div>
+                <div class="summary-tile {{ 'has-findings' if summary.errors else '' }}">
+                    <span class="value">{{ summary.errors }}</span>
+                    <span class="label">Errors</span>
+                </div>
+                <div class="summary-tile">
+                    <span class="value">{{ summary.process_events }}</span>
+                    <span class="label">Process Events</span>
+                </div>
+            </div>
+            {% else %}
+            <p class="alert alert-info">No summary information available for this run.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if results %}
+    <div class="card">
+        <div class="card-header">
+            <h3 style="margin:0;">Scan Details</h3>
+        </div>
+        <div style="padding:0.5em;">
+            {% if results.quarantined_files %}
+            <h4>Quarantined Files ({{ results.quarantined_files|length }})</h4>
+            <ul class="item-list quarantined">
+                {% for item in results.quarantined_files %}<li>{{ item }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if results.errors %}
+            <h4>Errors ({{ results.errors|length }})</h4>
+            <ul class="item-list errors">
+                {% for item in results.errors %}<li>{{ item }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if results.process_events %}
+            <h4>Process Events ({{ results.process_events|length }})</h4>
+            <ul class="item-list">
+                {% for item in results.process_events %}<li>{{ item }}</li>{% endfor %}
+            </ul>
+            {% endif %}
+            {% if results.scanned_files %}
+            <details>
+                <summary>Scanned Files ({{ results.scanned_files|length }})</summary>
+                <ul class="item-list">
+                    {% for item in results.scanned_files %}<li>{{ item }}</li>{% endfor %}
+                </ul>
+            </details>
+            {% endif %}
+            {% if not results.quarantined_files and not results.errors and not results.process_events and not results.scanned_files %}
+            <p class="alert alert-info">No scan details were reported for this run.</p>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Live Network Monitoring -->
+    <div class="card">
+        <div class="card-header">
+            <h3 style="margin:0;">Live Network Traffic Monitoring</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <p>Status: <span id="network_monitor_status" class="status-span status-disabled">Checking...</span></p>
+            <div id="traffic_stats" class="traffic-stats-container">
+                <p>Traffic statistics will appear here when monitoring is active.</p>
+            </div>
+            <div class="network-monitored-directories">
+                <div id="monitored_directories" style="background:#f8f9fa;padding:10px;border-radius:5px;">
+                    <p>Directory information will appear here when monitoring is active.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 style="margin:0;">Full Log</h3>
+        </div>
+        <div style="padding:0.5em;">
+            <pre>{{ output }}</pre>
+        </div>
+    </div>
+
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/logs">View Antivirus Logs</a>
+        <a href="/quarantine">Manage Quarantine</a>
+    </nav>
+
+    <script>
+        // Keep the network monitor status badge in sync with the server
+        function updateNetworkMonitorStatus(running) {
+            const statusSpan = document.getElementById('network_monitor_status');
+            if (!statusSpan) return;
+            statusSpan.textContent = running ? 'Enabled' : 'Disabled';
+            statusSpan.className = 'status-span ' + (running ? 'status-enabled' : 'status-disabled');
+        }
+
+        function refreshNetworkMonitorStatus() {
+            fetch('/api/conditional_startup/status')
+                .then(response => response.json())
+                .then(data => updateNetworkMonitorStatus(Boolean(data.network_monitor_running)))
+                .catch(error => console.error('Error fetching monitor status:', error));
+        }
+
+        refreshNetworkMonitorStatus();
+        setInterval(refreshNetworkMonitorStatus, 5000);
+    </script>
+</body>
+</html>

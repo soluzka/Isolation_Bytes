@@ -1,0 +1,38 @@
+[Unit]
+Description=Antivirus Cloud Server (Flask + waitress WSGI)
+Documentation=https://devin.ai
+After=network.target
+
+[Service]
+# IMPORTANT: change these three values to match your VPS.
+#   User        -- a non-root user that owns the repo checkout.
+#   Group       -- usually the same as User, or 'www-data' if nginx needs to
+#                  read sockets (we use a TCP port here, so any group works).
+#   WorkingDirectory -- the absolute path to the repo root on the VPS.
+User=www-data
+Group=www-data
+WorkingDirectory=/opt/antivirus-yara-rules-c
+
+# Use the Python from the virtualenv if you created one, e.g.:
+#   /opt/antivirus-yara-rules-c/venv/bin/python
+# Otherwise use the system python3.
+ExecStart=/usr/bin/python3 -m waitress --listen=127.0.0.1:5002 wsgi:application
+
+# Restart the worker if it crashes or is killed.
+Restart=always
+RestartSec=3
+
+# Hardening -- drop privileges and limit what the service can do.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/antivirus-yara-rules-c/instance /opt/antivirus-yara-rules-c/logs
+
+# Logging -- captured by journald; view with:
+#   journalctl -u antivirus-cloud -f
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

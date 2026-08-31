@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishTrimmed>false</PublishTrimmed>
+    <TrimmerRemoveSymbols>true</TrimmerRemoveSymbols>
+    <DebuggerSupport>false</DebuggerSupport>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <AssemblyTitle>Isolation Bytes Login</AssemblyTitle>
+    <AssemblyProduct>Isolation Bytes</AssemblyProduct>
+    <AssemblyCompany>soluzka</AssemblyCompany>
+    <Version>1.8.946.0</Version>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyName>IsolationBytesLogin</AssemblyName>
+  </PropertyGroup>
+
+  <!-- No embedded cloud_server.exe, cloudflared, or Python installer.
+       The login exe is a thin client that validates via the server API. -->
+
+  <Target Name="CopyFriendlyLauncherName" AfterTargets="Publish">
+    <Copy SourceFiles="$(PublishDir)IsolationBytesLogin.exe" DestinationFiles="$(PublishDir)AntivirusServerLogin.exe" />
+  </Target>
+</Project>

@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>Delete Temp Files</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h2>Delete All Local Temp Files</h2>
+    <form method="POST" action="/delete_temp_files">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <button type="submit" class="danger">Delete All Temp Files</button>
+    </form>
+    {% if deleted %}
+        <div class="success">All temp files have been deleted.</div>
+    {% elif error %}
+        <div class="error">Error: {{ error }}</div>
+    {% endif %}
+    <a href="/">Back to Home</a>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!-- filepath: c:\Users\bpier\Desktop\antivirus\antivirus\antivirus\templates\quarantine.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>Quarantine Management</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <style>
+        :root {
+            --danger: #c0392b;
+            --danger-hover: #a93226;
+            --success: #27ae60;
+            --success-hover: #219150;
+            --primary: #b36200;
+            --bg: #f4f6f8;
+            --card: #ffffff;
+            --border: #e1e4e8;
+            --text: #2c3e50;
+        }
+        body {
+            max-width: 900px;
+            margin: 2em auto;
+            padding: 0 1em;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.5;
+        }
+        h2, h3 { color: var(--primary); margin-top: 1.5em; margin-bottom: 0.5em; }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 1.5em;
+        }
+        p { margin-top: 0; }
+        button {
+            border: none;
+            border-radius: 6px;
+            padding: 0.5em 1em;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.05s;
+        }
+        button:hover { transform: translateY(-1px); }
+        button:active { transform: translateY(0); }
+        .btn-restore {
+            background: var(--success);
+            color: #fff;
+            margin-right: 0.5em;
+        }
+        .btn-restore:hover { background: var(--success-hover); }
+        .btn-delete, .btn-delete-all {
+            background: var(--danger);
+            color: #fff;
+        }
+        .btn-delete:hover, .btn-delete-all:hover { background: var(--danger-hover); }
+        .btn-delete-all { margin-bottom: 0.5em; }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.75em;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        th, td {
+            border-bottom: 1px solid var(--border);
+            padding: 0.75em;
+            text-align: left;
+            vertical-align: top;
+        }
+        th { background-color: #f4f4f4; font-weight: 600; }
+        tr:hover { background-color: #f8f9fa; }
+        .actions { white-space: nowrap; }
+        .actions button { font-size: 0.85em; padding: 0.4em 0.75em; }
+        pre {
+            background: #fff3cd;
+            color: #856404;
+            padding: 1em;
+            border-radius: 6px;
+            max-height: 250px;
+            overflow: auto;
+            border: 1px solid #ffe8a1;
+        }
+        nav {
+            margin-top: 2em;
+            padding-top: 1em;
+            border-top: 1px solid var(--border);
+        }
+        nav a {
+            margin-right: 1.5em;
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 500;
+        }
+        nav a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h2>Quarantine Management</h2>
+    <p>Manage quarantined files below. You can view details, restore them, or delete them permanently.</p>
+
+    <div class="card">
+    <h3>Blocked Threats (Ransomware, Persistence, YARA &amp; ML)</h3>
+    <p>Files blocked in place by the agent. These are threats that have been denied execution. You can quarantine them to move them to the quarantine folder.</p>
+    <button id="quarantineBlockedBtn" class="dashboard-button" style="background:#dc3545;color:#fff;margin-bottom:10px;">Quarantine All Blocked Threats</button>
+    <div id="blockedStatus" style="margin-bottom:8px;"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Agent / Hostname</th>
+                <th>File Path</th>
+                <th>Threat Type</th>
+                <th>Severity</th>
+                <th>Rule</th>
+                <th>Reason</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for bf in blocked_findings %}
+            <tr>
+                <td>{{ bf.hostname }}</td>
+                <td>{{ bf.path }}</td>
+                <td style="color:{% if bf.threat_type == 'ransomware' %}#dc3545{% elif bf.threat_type == 'persistence' %}#fd7e14{% elif bf.threat_type == 'ml_suspicious' %}#6f42c1{% else %}#6c757d{% endif %};font-weight:bold;">{{ bf.threat_type }}</td>
+                <td>{{ bf.severity }}{% if bf.ml_score %} (ML:{{ bf.ml_score }}){% endif %}</td>
+                <td>{{ bf.rule }}</td>
+                <td style="font-size:0.85em;color:#555;">{{ bf.reason }}</td>
+                <td class="actions">
+                    <button type="button" class="btn-restore js-quarantine-single"
+                        data-device-id="{{ bf.device_id }}"
+                        data-path="{{ bf.path|e }}">Quarantine</button>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not blocked_findings %}
+            <tr>
+                <td colspan="7" style="text-align:center;">No blocked threats. Blocked ransomware, persistence, YARA, and ML files will appear here for review and quarantine.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+
+    <div class="card">
+    <h3>Agent-Quarantined Files (Local PCs)</h3>
+    <p>Files quarantined by Isolation Bytes agents running on connected PCs. These are stored locally on each agent's machine.</p>
+    <button id="refreshAgentQ" class="dashboard-button blue" style="margin-bottom:10px;">Refresh Agent Quarantine List</button>
+    <button id="deleteAllAgentQ" class="dashboard-button" style="background:#dc3545;color:#fff;margin-bottom:10px;margin-left:8px;">Delete All Quarantined Files</button>
+    <div id="agentQStatus" style="margin-bottom:8px;"></div>
+    <table>
+        <thead>
+            <tr>
+                <th>Agent / Hostname</th>
+                <th>File Name</th>
+                <th>Original Path</th>
+                <th>Quarantined At</th>
+                <th>Size</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for qf in agent_quarantined_files %}
+            <tr>
+                <td>{{ qf.hostname }}</td>
+                <td>{{ qf.filename }}</td>
+                <td>{{ qf.original_path }}</td>
+                <td>{{ qf.quarantined_at }}</td>
+                <td>{{ qf.size }}</td>
+                <td class="actions">
+                    <button type="button" class="btn-restore js-agent-restore"
+                        data-device-id="{{ qf.device_id }}"
+                        data-filename="{{ qf.filename|e }}"
+                        data-destination="{{ qf.original_path|e }}">Restore</button>
+                    <button type="button" class="btn-delete js-agent-delete"
+                        data-device-id="{{ qf.device_id }}"
+                        data-filename="{{ qf.filename|e }}">Delete</button>
+                </td>
+            </tr>
+            {% endfor %}
+            {% if not agent_quarantined_files %}
+            <tr>
+                <td colspan="6" style="text-align: center;">No agent-quarantined files. Click "Refresh" to request the latest list from connected agents.</td>
+            </tr>
+            {% endif %}
+        </tbody>
+    </table>
+    </div>
+
+    <div class="card">
+    <h3>Recent Quarantine/Deletion Events</h3>
+    <pre style="background:#fff3cd;color:#856404;padding:0.5em 1em;border-radius:6px;max-height:250px;overflow:auto;">{{ quarantine_log|default('No recent events found.') }}</pre>
+    </div>
+
+    <nav>
+        <a href="/">Back to Home</a>
+        <a href="/yara_scanner.html">YARA Scanner</a>
+    </nav>
+    
+    <script>
+        // Quarantine all blocked threats — uses combined unblock+quarantine
+        const quarantineBlockedBtn = document.getElementById('quarantineBlockedBtn');
+        if (quarantineBlockedBtn) {
+            quarantineBlockedBtn.addEventListener('click', function() {
+                if (!confirm('Unblock and quarantine ALL blocked threats on all connected agents?')) return;
+                const status = document.getElementById('blockedStatus');
+                const btn = this;
+                btn.disabled = true;
+                btn.textContent = 'Unblocking & Quarantining...';
+                status.innerHTML = '<p>Sending unblock + quarantine command to all agents...</p>';
+                fetch('/api/agent-unblock/findings', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+                    body: JSON.stringify({quarantine_after: true})
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        const msg = data.message || 'Command sent.';
+                        const color = data.ok ? '#28a745' : '#dc3545';
+                        status.innerHTML = '<p style="color:' + color + ';">' + msg + ' Refreshing in 30 seconds...</p>';
+                        setTimeout(function() { window.location.reload(); }, 30000);
+                    })
+                    .catch(function() {
+                        status.innerHTML = '<p style="color:#dc3545;">Failed to send command.</p>';
+                    })
+                    .finally(function() {
+                        btn.disabled = false;
+                        btn.textContent = 'Quarantine All Blocked Threats';
+                    });
+            });
+        }
+        // Quarantine single blocked file
+        document.querySelectorAll('.js-quarantine-single').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const deviceId = this.dataset.deviceId;
+                const path = this.dataset.path;
+                if (!confirm('Quarantine ' + path + ' on the agent PC?')) return;
+                fetch('/api/agent-quarantine/single', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({device_id: deviceId, path: path})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.ok) {
+                        alert('Quarantine command sent. File will be moved to quarantine.');
+                        setTimeout(function() { window.location.reload(); }, 5000);
+                    } else {
+                        alert(data.message || 'Failed to quarantine.');
+                    }
+                })
+                .catch(function() { alert('Error sending quarantine command.'); });
+            });
+        });
+
+        // Auto-request agent quarantine list on page load
+        (function() {
+            fetch('/api/agent-quarantine/list', {method: 'POST', credentials: 'same-origin'})
+                .then(r => r.json())
+                .then(data => {
+                    const status = document.getElementById('agentQStatus');
+                    if (status && data.ok) {
+                        status.innerHTML = '<p style="color:#28a745;">Requested quarantine list from ' + (data.sent || 0) + ' agent(s). Refreshing in 12 seconds...</p>';
+                    }
+                    // Auto-reload after 12 seconds to pick up agent responses
+                    setTimeout(function() { window.location.reload(); }, 12000);
+                })
+                .catch(function() {});
+        })();
+
+        // Rescan for ransomware & persistence — triggers a full scan on all agents
+        const rescanBtn = document.getElementById('rescanBtn');
+        if (rescanBtn) {
+            rescanBtn.addEventListener('click', function() {
+                const status = document.getElementById('agentQStatus');
+                const btn = this;
+                btn.disabled = true;
+                btn.textContent = 'Scanning...';
+                status.innerHTML = '<p>Sending full scan command to all connected agents. This will detect ransomware, persistence, and YARA threats. Results will appear below shortly.</p>';
+                fetch('/api/agent-trigger-scan', {method: 'POST', credentials: 'same-origin'})
+                    .then(r => r.json())
+                    .then(data => {
+                        const count = data.agents || data.sent || 0;
+                        status.innerHTML = '<p style="color:#28a745;">Scan triggered on ' + count + ' agent(s). Waiting for results...</p>';
+                        // Auto-reload after 15 seconds to pick up scan results + quarantine updates
+                        setTimeout(function() { window.location.reload(); }, 15000);
+                    })
+                    .catch(function() {
+                        status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scan.</p>';
+                    })
+                    .finally(function() {
+                        btn.disabled = false;
+                        btn.textContent = 'Rescan for Ransomware & Persistence';
+                    });
+            });
+        }
+
+        // Refresh agent quarantine list
+        const refreshAgentQ = document.getElementById('refreshAgentQ');
+        if (refreshAgentQ) {
+            refreshAgentQ.addEventListener('click', function() {
+                const status = document.getElementById('agentQStatus');
+                const btn = this;
+                btn.disabled = true;
+                btn.textContent = 'Requesting...';
+                status.innerHTML = '<p>Sending list_quarantine command to agents. The list will update on next page refresh (within ~10 seconds).</p>';
+                fetch('/api/agent-quarantine/list', {method: 'POST', credentials: 'same-origin'})
+                    .then(r => r.json())
+                    .then(data => {
+                        status.innerHTML = '<p>' + (data.message || 'Done') + '</p>';
+                        // Auto-reload after 12 seconds to pick up agent responses
+                        setTimeout(function() { window.location.reload(); }, 12000);
+                    })
+                    .catch(function() {
+                        status.innerHTML = '<p style="color:#dc3545;">Failed to request agent quarantine list.</p>';
+                    })
+                    .finally(function() {
+                        btn.disabled = false;
+                        btn.textContent = 'Refresh Agent Quarantine List';
+                    });
+            });
+        }
+
+        // Delete all quarantined files on all agents
+        const deleteAllAgentQ = document.getElementById('deleteAllAgentQ');
+        if (deleteAllAgentQ) {
+            deleteAllAgentQ.addEventListener('click', function() {
+                if (!confirm('Permanently delete ALL quarantined files on ALL connected agents? This cannot be undone.')) return;
+                const status = document.getElementById('agentQStatus');
+                const btn = this;
+                btn.disabled = true;
+                btn.textContent = 'Deleting...';
+                status.innerHTML = '<p style="color:#dc3545;">Sending delete-all command to all agents...</p>';
+                fetch('/api/agent-quarantine/delete-all', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                })
+                    .then(r => r.json())
+                    .then(data => {
+                        const msg = data.message || 'Command sent.';
+                        const color = data.ok ? '#28a745' : '#dc3545';
+                        status.innerHTML = '<p style="color:' + color + ';">' + msg + ' Refreshing in 15 seconds...</p>';
+                        setTimeout(function() { window.location.reload(); }, 15000);
+                    })
+                    .catch(function() {
+                        status.innerHTML = '<p style="color:#dc3545;">Failed to send delete-all command.</p>';
+                    })
+                    .finally(function() {
+                        btn.disabled = false;
+                        btn.textContent = 'Delete All Quarantined Files';
+                    });
+            });
+        }
+
+        // Agent quarantine restore/delete
+        document.querySelectorAll('.js-agent-restore').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const deviceId = this.dataset.deviceId;
+                const filename = this.dataset.filename;
+                const destination = this.dataset.destination;
+                if (!confirm('Restore ' + filename + ' to ' + destination + ' on the agent PC? It may contain malware.')) return;
+                fetch('/api/agent-quarantine/restore', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({device_id: deviceId, filename: filename, destination: destination})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.message || 'Restore command sent.');
+                    setTimeout(function() { window.location.reload(); }, 3000);
+                })
+                .catch(function() { alert('Failed to send restore command.'); });
+            });
+        });
+        document.querySelectorAll('.js-agent-delete').forEach(btn => {
+            btn.addEventListener('click', function() {
+                const deviceId = this.dataset.deviceId;
+                const filename = this.dataset.filename;
+                if (!confirm('Permanently delete ' + filename + ' from the agent quarantine?')) return;
+                fetch('/api/agent-quarantine/delete', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({device_id: deviceId, filename: filename})
+                })
+                .then(r => r.json())
+                .then(data => {
+                    alert(data.message || 'Delete command sent.');
+                    setTimeout(function() { window.location.reload(); }, 3000);
+                })
+                .catch(function() { alert('Failed to send delete command.'); });
+            });
+        });
+    </script>
+</body>
+</html>
