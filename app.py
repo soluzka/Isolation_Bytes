@@ -6225,6 +6225,13 @@ try:
 except Exception as e:
     logging.warning(f'Could not register cloud blueprint: {e}')
 
+# Register the voice repair assistant blueprint (optional)
+try:
+    from voice_assistant import voice_bp
+    app.register_blueprint(voice_bp)
+except Exception as e:
+    logging.warning(f'Could not register voice assistant blueprint: {e}')
+
 # Initialize threat detector
 threat_detector = ThreatDetectionModel()
 

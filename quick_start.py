@@ -2258,6 +2258,13 @@ def network_monitored_directories():
 # Register the network blueprint with the app
 app.register_blueprint(network_bp)
 
+# Register the voice repair assistant blueprint (optional)
+try:
+    from voice_assistant import voice_bp
+    app.register_blueprint(voice_bp)
+except Exception as e:
+    logger.warning('Could not register voice assistant blueprint: %s', e)
+
 # Direct route for network monitoring API endpoint (needed by YARA scanner)
 @app.route('/api/network/monitored_directories', methods=['GET'])
 def api_network_monitored_directories():

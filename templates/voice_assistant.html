@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isolation Bytes — Voice Repair Assistant</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/modern-normalize/2.0.0/modern-normalize.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body { max-width: 900px; margin: 2em auto; font-family: 'Inter', Arial, sans-serif; background: linear-gradient(135deg, #f0f4f8 0%, #d9e2ec 100%); min-height: 100vh; color: #1f2937; padding: 0 1em; }
+        h1 { color: #2d5f9a; }
+        .card { background: #fff; border-radius: 8px; padding: 1.5em; margin: 1em 0; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+        .mic-wrap { text-align: center; margin: 1.5em 0; }
+        #micBtn { width: 80px; height: 80px; border-radius: 50%; border: none; background: #2d5f9a; color: #fff; font-size: 2em; cursor: pointer; transition: transform .15s, background .15s; }
+        #micBtn:hover { background: #1e3f6f; }
+        #micBtn.listening { background: #e74c3c; animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(231,76,60,.5); } 70% { box-shadow: 0 0 0 18px rgba(231,76,60,0); } 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0); } }
+        .transcript { font-size: 1.1em; min-height: 1.5em; color: #334155; margin: 1em 0; }
+        .response { background: #e0f2fe; border-left: 4px solid #2d5f9a; padding: 1em; border-radius: 4px; white-space: pre-wrap; }
+        .error { background: #fee2e2; border-left-color: #e74c3c; }
+        .suggestion { background: #fef3c7; border-left-color: #f59e0b; margin-top: .5em; }
+        .input-row { display: flex; gap: .5em; margin: 1em 0; }
+        input[type="text"] { flex: 1; padding: .6em .8em; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 1em; }
+        button.action { padding: .6em 1.2em; background: #2d5f9a; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; }
+        button.action:hover { background: #1e3f6f; }
+        .options { display: flex; align-items: center; gap: 1em; margin: 1em 0; font-size: .95em; color: #475569; }
+        .chips { display: flex; flex-wrap: wrap; gap: .5em; margin: .5em 0; }
+        .chip { background: #e2e8f0; color: #1e293b; border: none; border-radius: 16px; padding: .35em .9em; cursor: pointer; font-size: .9em; }
+        .chip:hover { background: #cbd5e1; }
+        nav a { display: inline-block; padding: .5em 1em; background: #7f8c8d; color: #fff; border-radius: 5px; text-decoration: none; margin-bottom: 1em; }
+        #intentName { color: #64748b; font-size: .9em; margin-top: .5em; }
+    </style>
+</head>
+<body>
+    <nav><a href="/">Back to Dashboard</a></nav>
+    <h1>Voice Repair Assistant</h1>
+    <p>Speak or type a repair command. Examples: <em>"check my internet"</em>, <em>"clean temp files"</em>, <em>"is my disk healthy?"</em></p>
+
+    <div class="card">
+        <div class="mic-wrap">
+            <button id="micBtn" title="Hold to speak">🎙</button>
+            <div id="micStatus">Tap and hold microphone, or type below</div>
+        </div>
+
+        <div class="input-row">
+            <input type="text" id="commandInput" placeholder="Type your command here..." autocomplete="off">
+            <button class="action" id="sendBtn">Send</button>
+        </div>
+
+        <div class="options">
+            <label><input type="checkbox" id="speakResult" checked> Read response aloud</label>
+            <label><input type="checkbox" id="applyFix"> Apply repair/cleanup when asked</label>
+        </div>
+
+        <div class="chips" id="chips"></div>
+    </div>
+
+    <div class="card" id="resultCard" style="display:none;">
+        <div class="transcript"><strong>You said:</strong> <span id="transcript"></span></div>
+        <div id="intentName"></div>
+        <div class="response" id="response"></div>
+        <div class="suggestion" id="suggestion" style="display:none;"></div>
+    </div>
+
+    <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+
+        async function postCommand(command, applyFix=false) {
+            const res = await fetch('/api/voice/command', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken,
+                },
+                body: JSON.stringify({ command, apply_fix: applyFix }),
+            });
+            return res.json();
+        }
+
+        function showResult(data) {
+            const card = document.getElementById('resultCard');
+            const responseEl = document.getElementById('response');
+            const suggestionEl = document.getElementById('suggestion');
+            card.style.display = 'block';
+            document.getElementById('transcript').textContent = data.command || '';
+            document.getElementById('intentName').textContent = data.intent ? `Intent: ${data.intent}` : '';
+            responseEl.textContent = data.response || data.message || 'No response';
+            responseEl.className = 'response' + (data.success === false ? ' error' : '');
+            if (data.suggested_fix) {
+                suggestionEl.style.display = 'block';
+                suggestionEl.textContent = 'Suggested fix: ' + data.suggested_fix;
+            } else {
+                suggestionEl.style.display = 'none';
+            }
+            if (document.getElementById('speakResult').checked) {
+                speak(data.response || data.message || '');
+            }
+        }
+
+        function speak(text) {
+            if (!window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            const u = new SpeechSynthesisUtterance(text);
+            u.rate = 1.05;
+            window.speechSynthesis.speak(u);
+        }
+
+        async function handleCommand(command) {
+            const applyFix = document.getElementById('applyFix').checked;
+            if (!command) return;
+            showResult({ command, response: 'Thinking...' });
+            try {
+                const data = await postCommand(command, applyFix);
+                showResult(data);
+            } catch (e) {
+                showResult({ command, response: 'Network error: ' + e, success: false });
+            }
+        }
+
+        // Web Speech API setup
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const micBtn = document.getElementById('micBtn');
+        const micStatus = document.getElementById('micStatus');
+        let recognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'en-US';
+            recognition.onstart = () => {
+                micBtn.classList.add('listening');
+                micStatus.textContent = 'Listening...';
+            };
+            recognition.onend = () => {
+                micBtn.classList.remove('listening');
+                micStatus.textContent = 'Tap and hold microphone, or type below';
+            };
+            recognition.onerror = (e) => {
+                micBtn.classList.remove('listening');
+                micStatus.textContent = 'Speech error: ' + e.error;
+            };
+            recognition.onresult = (e) => {
+                let final = '';
+                for (let i = e.resultIndex; i < e.results.length; i++) {
+                    if (e.results[i].isFinal) final += e.results[i][0].transcript;
+                }
+                if (final) {
+                    document.getElementById('commandInput').value = final.trim();
+                    handleCommand(final.trim());
+                }
+            };
+            micBtn.onmousedown = micBtn.ontouchstart = () => {
+                window.speechSynthesis && window.speechSynthesis.cancel();
+                recognition.start();
+            };
+            micBtn.onmouseup = micBtn.onmouseleave = micBtn.ontouchend = () => {
+                recognition.stop();
+            };
+        } else {
+            micBtn.disabled = true;
+            micStatus.textContent = 'Speech recognition not supported in this browser.';
+        }
+
+        document.getElementById('sendBtn').onclick = () => {
+            const cmd = document.getElementById('commandInput').value.trim();
+            handleCommand(cmd);
+        };
+        document.getElementById('commandInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                const cmd = e.target.value.trim();
+                handleCommand(cmd);
+            }
+        });
+
+        // Quick suggestion chips
+        const examples = [
+            'check my system status',
+            'is my internet working',
+            'disk space',
+            'clean temp files',
+            'top processes',
+            'check updates',
+            'hardware specs',
+            'flush dns now',
+        ];
+        const chips = document.getElementById('chips');
+        examples.forEach(ex => {
+            const b = document.createElement('button');
+            b.className = 'chip';
+            b.textContent = ex;
+            b.onclick = () => {
+                document.getElementById('commandInput').value = ex;
+                handleCommand(ex);
+            };
+            chips.appendChild(b);
+        });
+    </script>
+</body>
+</html>
