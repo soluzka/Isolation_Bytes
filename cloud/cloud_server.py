@@ -5745,7 +5745,10 @@ def cloud_static(filename):
         p = Path(d) / filename
         if p.exists() and p.is_file():
             return send_from_directory(d, filename)
-    return jsonify({'error': 'not found'}), 404
+    # API endpoints should still return JSON 404s; humans get the 404 page.
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'not found'}), 404
+    return render_template('404.html'), 404
 
 
 def _find_resource_dir(name):
@@ -5907,8 +5910,6 @@ if __name__ == '__main__':
             if os.path.exists(str(ak)):
                 flask_ssl_key = str(ak)
                 break
-        if os.path.exists(auto_key):
-            flask_ssl_key = auto_key
     flask_port = int(os.environ.get('FLASK_PORT', '8443'))
     host = '0.0.0.0' if flask_public else '127.0.0.1'
 
