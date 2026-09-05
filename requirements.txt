@@ -1,4 +1,4 @@
-﻿# Isolation Bytes - Python dependencies
+# Isolation Bytes - Python dependencies
 # Compatible with Python 3.10+
 
 # ---- Flask web framework ----
@@ -33,7 +33,7 @@ pandas>=2.0.0
 matplotlib>=3.5.0
 seaborn>=0.12.0
 numpy>=1.24.0
-scipy>=1.10.0
+scipy>=1.18.1
 scikit-learn>=1.2.0
 
 # ClamAV integration on Linux/macOS
