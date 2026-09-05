@@ -1,4 +1,4 @@
-﻿# Isolation Bytes - Python dependencies
+# Isolation Bytes - Python dependencies
 # Compatible with Python 3.10+
 
 # ---- Flask web framework ----
@@ -44,7 +44,7 @@ pytest>=7.0.0
 pip-audit>=2.0.0
 
 # .env file loading
-python-dotenv>=1.0.0
+python-dotenv>=1.2.3
 
 # HTTP library
 urllib3>=1.26.0
