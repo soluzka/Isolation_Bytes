@@ -1,4 +1,4 @@
-﻿# Isolation Bytes - Python dependencies
+# Isolation Bytes - Python dependencies
 # Compatible with Python 3.10+
 
 # ---- Flask web framework ----
@@ -61,7 +61,7 @@ wmi>=1.5.1; platform_system=="Windows"
 Werkzeug>=3.0.0
 
 # Archive extraction
-rarfile>=4.0.0
+rarfile>=4.5
 
 # DNS
 dnslib>=0.9.0

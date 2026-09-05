@@ -53,7 +53,7 @@ pywin32-ctypes>=0.2.0
 Werkzeug>=3.1.6
 
 # Archive extraction support
-rarfile>=4.0
+rarfile>=4.5
 
 # YARA for signature scanning
 yara-python>=4.0
