@@ -1,4 +1,4 @@
-﻿# Isolation Bytes - Python dependencies
+# Isolation Bytes - Python dependencies
 # Compatible with Python 3.10+
 
 # ---- Flask web framework ----
@@ -168,7 +168,7 @@ smmap>=5.0.0
 tifffile>=2023.0.0
 #tokenizers>=0.13.0
 #torch>=2.0.0
-tornado>=6.2.0
+tornado>=6.5.8
 tqdm>=4.64.0
 #transformers>=4.30.0
 wsproto>=1.2.0
