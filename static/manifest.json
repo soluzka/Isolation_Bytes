@@ -1,0 +1,71 @@
+{
+    "name": "Isolation Bytes Antivirus",
+    "short_name": "Isolation Bytes",
+    "description": "AI-powered antivirus with YARA rules, ML detection, and cloud dashboard",
+    "id": "/",
+    "start_url": "https://isolation-bytes.com/",
+    "scope": "https://isolation-bytes.com/",
+    "display": "standalone",
+    "orientation": "any",
+    "theme_color": "#0b1321",
+    "background_color": "#0b1321",
+    "categories": ["security", "productivity", "utilities"],
+    "lang": "en-US",
+    "dir": "ltr",
+    "icons": [
+        {
+            "src": "/static/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "any"
+        },
+        {
+            "src": "/static/icon-512-maskable.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ],
+    "shortcuts": [
+        {
+            "name": "Dashboard",
+            "url": "/dashboard",
+            "description": "Open the security dashboard"
+        },
+        {
+            "name": "Scan",
+            "url": "/yara-scanner",
+            "description": "Run a YARA scan"
+        },
+        {
+            "name": "Quarantine",
+            "url": "/quarantine",
+            "description": "View quarantined files"
+        },
+        {
+            "name": "Startup Apps",
+            "url": "/startup-apps",
+            "description": "Manage startup applications"
+        }
+    ],
+    "screenshots": [],
+    "prefer_related_applications": false,
+    "related_applications": [
+        {
+            "platform": "windows",
+            "url": "https://isolation-bytes.com/download/IsolationBytes.appinstaller",
+            "id": "soluzka.IsolationBytes"
+        },
+        {
+            "platform": "play",
+            "url": "https://isolation-bytes.com/download/IsolationBytes.apk",
+            "id": "com.soluzka.antivirus"
+        }
+    ]
+}

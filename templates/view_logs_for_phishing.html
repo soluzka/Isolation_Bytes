@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta name="csrf-token" content="{{ session.csrf_token }}">
+    <script>
+        (function() {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
+            const originalFetch = window.fetch;
+            window.fetch = function(resource, init) {
+                init = init || {};
+                if (init.method && ['POST', 'PUT', 'DELETE', 'PATCH'].includes(init.method.toUpperCase())) {
+                    if (typeof resource === 'string' && resource.startsWith('/')) {
+                        if (!init.headers) {
+                            init.headers = {};
+                        } else if (init.headers instanceof Headers) {
+                            init.headers.set('X-CSRF-Token', csrfToken);
+                            return originalFetch(resource, init);
+                        }
+                        if (!init.headers['X-CSRF-Token']) {
+                            init.headers['X-CSRF-Token'] = csrfToken;
+                        }
+                    }
+                }
+                return originalFetch(resource, init);
+            };
+        })();
+    </script>
+    <meta charset="UTF-8">
+    <title>View Log Files for Phishing</title>
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <h1>View Log Files for Phishing Indicators</h1>
+    <form method="get" action="">
+        <label for="logfile">Select log file:</label>
+        <select name="logfile" id="logfile" onchange="this.form.submit()">
+            <option value="">-- Choose a log file --</option>
+            {% for log in log_files %}
+                <option value="{{ log }}" {% if log == selected_log %}selected{% endif %}>{{ log }}</option>
+            {% endfor %}
+        </select>
+    </form>
+    {% if findings is not none and selected_log %}
+        <h2>Results for {{ selected_log }}</h2>
+        {% if findings %}
+            <ul>
+            {% for kind, value in findings %}
+                <li><strong>{{ kind|capitalize }}:</strong> {{ value }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>No phishing indicators detected.</p>
+        {% endif %}
+    {% endif %}
+    <p><a href="/">Back to Home</a></p>
+</body>
+</html>

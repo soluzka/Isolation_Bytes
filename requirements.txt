@@ -1,0 +1,175 @@
+﻿# Isolation Bytes - Python dependencies
+# Compatible with Python 3.10+
+
+# ---- Flask web framework ----
+Flask>=2.3.0
+flask-cors>=4.0.0
+flask-sqlalchemy>=3.0.0
+Flask-Login>=0.6.0
+waitress>=3.0.1
+markupsafe>=2.1.0
+itsdangerous>=2.1.0
+click>=8.1.0
+Jinja2>=3.1.0
+
+# Flask-WTF for CSRF protection
+Flask-WTF>=1.0.0
+
+# Cryptography for file encryption/decryption
+cffi>=1.15.0
+cryptography>=41.0.0
+
+# Requests for HTTP file download
+requests>=2.28.0
+
+# Watchdog for real-time folder monitoring
+watchdog>=3.0.0
+
+# psutil for process management
+psutil>=5.9.0
+
+# Data analysis (used in data_analysis.py)
+pandas>=2.0.0
+matplotlib>=3.5.0
+seaborn>=0.12.0
+numpy>=1.24.0
+scipy>=1.10.0
+scikit-learn>=1.2.0
+
+# ClamAV integration on Linux/macOS
+clamd>=1.0.2
+
+# Testing and dependency vulnerability scanning
+pytest>=7.0.0
+pip-audit>=2.0.0
+
+# .env file loading
+python-dotenv>=1.0.0
+
+# HTTP library
+urllib3>=1.26.0
+
+# Production WSGI server
+gunicorn>=21.0.0
+
+# Windows-only packages
+pywin32>=306; platform_system=="Windows"
+pywin32-ctypes>=0.2.3
+wmi>=1.5.1; platform_system=="Windows"
+
+# Werkzeug
+Werkzeug>=3.0.0
+
+# Archive extraction
+rarfile>=4.0.0
+
+# DNS
+dnslib>=0.9.0
+dnspython>=2.3.0
+
+# Password hashing & 2FA
+bcrypt>=4.0.0
+pyotp>=2.8.0
+
+# 7z archive support
+py7zr>=0.20.0
+
+# Machine Learning
+joblib>=1.2.0
+
+# Network monitoring / rate limiting
+flask-limiter>=3.0.0
+limits>=3.0.0
+ordered-set>=4.0.0
+rich>=13.0.0
+pygments>=2.15.0
+typing_extensions>=4.0.0
+wrapt>=1.14.0
+markdown-it-py>=2.0.0
+mdurl>=0.1.0
+python-magic>=0.4.27 ; platform_system!="Windows"
+python-magic-bin>=0.4.14 ; platform_system=="Windows"
+
+# Redis for shared state / caching
+redis>=4.0.0
+
+# Build tools
+setuptools>=67.0.0
+altgraph>=0.17.0
+
+# YARA for signature scanning (needs libyara-dev + build-essential on Linux)
+yara-python>=4.3.0
+
+# Fuzzy hashing (needs build-essential + libfuzzy-dev on Linux)
+py-tlsh>=4.0.0
+pyssdeep>=1.0.0
+
+# Local llama.cpp backend for the findings assistant (needs g++ / CMake)
+#llama-cpp-python>=0.3.0
+
+# Static-file malware classifier
+lief>=0.12.0
+lightgbm>=3.3.0
+pefile>=2023.0.0
+
+# ONNX model conversion
+skl2onnx>=1.14.0
+onnxconverter-common>=1.13.0
+onnxruntime>=1.15.0
+onnxmltools>=1.11.0
+
+# Let's Encrypt / ACME
+certbot>=2.0.0
+acme>=2.0.0
+pyopenssl>=23.0.0
+
+# UPnP client
+upnpclient>=1.0.0
+
+# PyInstaller for building EXEs
+#pyinstaller>=6.0.0
+
+# SSH-based remote server management
+paramiko>=3.0.0
+
+# Transitive dependencies
+aiohttp>=3.8.0
+astunparse>=1.6.0
+backoff>=2.0.0
+cachetools>=5.0.0
+confection>=0.1.0
+cymem>=2.0.0
+gitpython>=3.1.0
+google-pasta>=0.2.0
+h11>=0.14.0
+hpack>=4.0.0
+httpx>=0.24.0
+hyperframe>=6.0.0
+imageio>=2.25.0
+jsonpatch>=1.25.0
+kubernetes>=28.0.0
+langgraph>=0.2.0
+llvmlite>=0.40.0
+mmh3>=4.0.0
+namex>=0.1.0
+oauthlib>=3.1.0
+overrides>=7.0.0
+preshed>=3.0.0
+pyarrow>=12.0.0
+pyasn1>=0.4.0
+pybase64>=1.0.0
+pypika>=0.48.0
+regex>=2022.0.0
+requests-toolbelt>=1.0.0
+simple-websocket>=1.0.0
+smart-open>=6.0.0
+smmap>=5.0.0
+#thinc>=8.0.0
+tifffile>=2023.0.0
+#tokenizers>=0.13.0
+#torch>=2.0.0
+tornado>=6.2.0
+tqdm>=4.64.0
+#transformers>=4.30.0
+wsproto>=1.2.0
+zstandard>=0.21.0

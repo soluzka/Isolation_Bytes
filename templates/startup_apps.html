@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Isolation Bytes - Startup Apps</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="icon" type="image/x-icon" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background-color: #f8f9fa; }
+        .startupw-container { background: white; padding: 2rem; border-radius: 10px; box-shadow: 0 0 10px rgba(0,0,0,0.1); margin: 2rem auto; max-width: 600px; text-align: center; }
+        .status { font-size: 1.5rem; font-weight: bold; margin: 1rem 0; }
+        .active { color: #27ae60; }
+        .inactive { color: #c0392b; }
+        .platform-instructions { text-align: left; background: #f1f3f5; border-radius: 8px; padding: 1rem 1.5rem; margin-top: 1.5rem; font-size: 0.9rem; }
+        .platform-instructions h5 { margin-bottom: 0.5rem; }
+        .platform-instructions code { background: #e9ecef; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+<div id="favicon-icon-overlay"><img src="{{ url_for('static', filename='favicon.ico') }}" alt="Shield"></div>
+    <div class="startupw-container">
+        <h2 class="mb-4">Startup Apps</h2>
+        <p>Run the antivirus dashboard automatically when you log in.</p>
+
+        {% if cloud_mode %}
+        {% if has_agents %}
+        <div id="startup-status-container">
+            {% if active %}
+            <div class="status active" id="status-display">ENABLED</div>
+            {% else %}
+            <div class="status inactive" id="status-display">DISABLED</div>
+            {% endif %}
+        </div>
+
+        <div id="startup-buttons">
+            {% if active %}
+            <form method="POST" action="{{ url_for('startup_with_windows') }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+                <input type="hidden" name="action" value="disable">
+                <button type="submit" class="btn btn-danger btn-lg">Disable</button>
+            </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('startup_with_windows') }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ session.get('csrf_token', '') }}">
+                <input type="hidden" name="action" value="enable">
+                <button type="submit" class="btn btn-success btn-lg">Enable</button>
+            </form>
+            {% endif %}
+        </div>
+
+        {% if message %}
+        <div class="alert alert-info mt-3" id="startup-message">{{ message }}</div>
+        <script>
+        // Auto-refresh after 15 seconds to give the agent time to process
+        // the command on its next heartbeat (10s interval) and report back
+        setTimeout(function() { window.location.reload(); }, 15000);
+        </script>
+        {% endif %}
+        {% else %}
+        <div class="alert alert-info" id="cloud-mode-notice">
+            <p>No agents are connected. Install the Isolation Bytes agent on your device to toggle startup remotely.</p>
+            <p class="mb-0">The agent runs on Windows, macOS, Linux, and Android (via Termux).</p>
+        </div>
+        {% endif %}
+        {% else %}
+        <div id="startup-status-container">
+            {% if active %}
+            <div class="status active" id="status-display">ENABLED</div>
+            {% else %}
+            <div class="status inactive" id="status-display">DISABLED</div>
+            {% endif %}
+        </div>
+
+        <div id="startup-buttons">
+            {% if active %}
+            <button type="button" class="btn btn-danger btn-lg" onclick="toggleStartup(false)">Disable</button>
+            {% else %}
+            <button type="button" class="btn btn-success btn-lg" onclick="toggleStartup(true)">Enable</button>
+            {% endif %}
+        </div>
+
+        {% if message %}
+        <div class="alert alert-info mt-3" id="startup-message">{{ message }}</div>
+        {% endif %}
+        {% endif %}
+
+        <div id="platform-fallback" class="platform-instructions" style="display:none;">
+            <h5>Manual Setup</h5>
+            <p id="platform-text"></p>
+        </div>
+
+        <p class="text-center mt-3"><a href="{{ url_for('index') }}">Back to dashboard</a></p>
+    </div>
+
+    <script>
+    // Detect if we're running inside the desktop launcher (has SoluzkaHost)
+    var hasLauncher = typeof window.SoluzkaHost !== 'undefined';
+    var cloudMode = {{ cloud_mode | tojson }};
+
+    function toggleStartup(enable) {
+        if (hasLauncher) {
+            // Use the launcher's native app: protocol to toggle startup
+            // This works on Windows (registry), Linux (systemd/autostart), and macOS (LaunchAgent)
+            window.location = 'app:startup?enable=' + (enable ? '1' : '0');
+            // Refresh status after a short delay
+            setTimeout(function() {
+                window.location = 'app:startup_status';
+                // Update UI optimistically
+                var statusDisplay = document.getElementById('status-display');
+                var buttons = document.getElementById('startup-buttons');
+                if (enable) {
+                    statusDisplay.textContent = 'ENABLED';
+                    statusDisplay.className = 'status active';
+                    buttons.innerHTML = '<button type="button" class="btn btn-danger btn-lg" onclick="toggleStartup(false)">Disable</button>';
+                } else {
+                    statusDisplay.textContent = 'DISABLED';
+                    statusDisplay.className = 'status inactive';
+                    buttons.innerHTML = '<button type="button" class="btn btn-success btn-lg" onclick="toggleStartup(true)">Enable</button>';
+                }
+            }, 500);
+        } else if (cloudMode) {
+            // Cloud mode without launcher — redirect to the local desktop app
+            window.open('http://127.0.0.1:5000/startup-with-windows', '_blank');
+        } else {
+            // Running in a regular browser on the local app — submit to the server
+            // The server will configure startup for the platform it's running on
+            var form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '{{ url_for("startup_with_windows") }}';
+            var csrf = document.createElement('input');
+            csrf.type = 'hidden';
+            csrf.name = 'csrf_token';
+            csrf.value = '{{ session.csrf_token }}';
+            form.appendChild(csrf);
+            var action = document.createElement('input');
+            action.type = 'hidden';
+            action.name = 'action';
+            action.value = enable ? 'enable' : 'disable';
+            form.appendChild(action);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    }
+
+    // If no launcher is detected, show platform-specific manual instructions
+    if (!hasLauncher) {
+        var ua = navigator.userAgent.toLowerCase();
+        var platform = navigator.platform.toLowerCase();
+        var instructions = '';
+
+        // --- Mobile platforms ---
+        var isAndroid = ua.indexOf('android') >= 0;
+        var isIOS = ua.indexOf('iphone') >= 0 || ua.indexOf('ipad') >= 0 || ua.indexOf('ipod') >= 0;
+        var isWindowsPhone = ua.indexOf('windows phone') >= 0;
+        var isKaiOS = ua.indexOf('kaios') >= 0;
+        var isFireOS = ua.indexOf('silk') >= 0 || (isAndroid && ua.indexOf('kindle') >= 0);
+
+        // --- Console platforms ---
+        var isPS5 = ua.indexOf('playstation') >= 0;
+        var isXbox = ua.indexOf('xbox') >= 0;
+        var isSwitch = ua.indexOf('nintendo switch') >= 0 || ua.indexOf('switch') >= 0;
+        var isSteamDeck = ua.indexOf('valve') >= 0 || ua.indexOf('steam deck') >= 0;
+
+        // --- TV / set-top platforms ---
+        var isRoku = ua.indexOf('roku') >= 0;
+        var isAppleTV = ua.indexOf('appletv') >= 0 || ua.indexOf('tvos') >= 0;
+        var isAndroidTV = isAndroid && (ua.indexOf('tv') >= 0 || ua.indexOf('aft') >= 0);
+        var isFireTV = ua.indexOf('aftt') >= 0 || ua.indexOf('aftm') >= 0 || ua.indexOf('afts') >= 0;
+        var isTizen = ua.indexOf('tizen') >= 0;  // Samsung TV
+        var isWebOS = ua.indexOf('webos') >= 0;  // LG TV
+        var isChromecast = ua.indexOf('crkey') >= 0;
+
+        // --- Desktop platforms ---
+        var isWindows = platform.indexOf('win') >= 0 && !isWindowsPhone;
+        var isMac = platform.indexOf('mac') >= 0 && !isAppleTV;
+        var isLinux = platform.indexOf('linux') >= 0 && !isAndroid && !isSteamDeck;
+        var isChromeOS = ua.indexOf('cros') >= 0;
+        var isFreeBSD = platform.indexOf('freebsd') >= 0 || platform.indexOf('openbsd') >= 0;
+        var isSolaris = platform.indexOf('sunos') >= 0;
+        var isAIX = platform.indexOf('aix') >= 0;
+
+        if (isAndroid && !isAndroidTV && !isFireTV) {
+            instructions = '<strong>Android (Termux):</strong><br>' +
+                '1. Install <a href="https://f-droid.org/packages/com.termux.boot/" target="_blank">Termux:Boot</a> from F-Droid<br>' +
+                '2. Open Termux:Boot once to activate it<br>' +
+                '3. In Termux, run:<br>' +
+                '<code>mkdir -p ~/.termux/boot</code><br>' +
+                '<code>cat &gt; ~/.termux/boot/isolationbytes &lt;&lt; \'EOF\'</code><br>' +
+                '<code>#!/data/data/com.termux/files/usr/bin/bash</code><br>' +
+                '<code>termux-wake-lock</code><br>' +
+                '<code>python ~/Isolation_Bytes/mobile_agent.py --server https://isolation-bytes.com --key=YOUR_KEY</code><br>' +
+                '<code>EOF</code><br>' +
+                '<code>chmod +x ~/.termux/boot/isolationbytes</code><br><br>' +
+                'Replace <code>YOUR_KEY</code> with your API key. The agent will start automatically when the phone boots.<br><br>' +
+                '<strong>Alternatively</strong>, some phones support auto-start in Settings:<br>' +
+                'Samsung: <code>Settings &gt; Battery &gt; App launch &gt; Auto-launch</code><br>' +
+                'Xiaomi/MIUI: <code>Settings &gt; Permissions &gt; Autostart</code><br>' +
+                'Huawei: <code>Settings &gt; Apps &gt; Startup management</code><br>' +
+                'Oppo/Realme: <code>Settings &gt; App auto-management</code>';
+        } else if (isAndroidTV || isFireTV) {
+            instructions = '<strong>Android TV / Fire TV:</strong> Go to <code>Settings &gt; Apps &gt; Isolation Bytes</code> ' +
+                'and enable <code>Start on boot</code>. ' +
+                'On Fire TV, go to <code>Settings &gt; Applications &gt; Isolation Bytes &gt; Launch on startup</code>.';
+        } else if (isIOS) {
+            instructions = '<strong>iOS / iPadOS:</strong> iOS does not support auto-starting apps at login. ' +
+                'Open Isolation Bytes manually when needed. ' +
+                'You can add it to your Home Screen for quick access: tap the Share button in Safari, ' +
+                'then <code>Add to Home Screen</code>.';
+        } else if (isWindowsPhone) {
+            instructions = '<strong>Windows Phone:</strong> Go to <code>Settings &gt; Apps &gt; Isolation Bytes</code> ' +
+                'and enable <code>Run in background</code>.';
+        } else if (isKaiOS) {
+            instructions = '<strong>KaiOS:</strong> Go to <code>Settings &gt; Apps &gt; Isolation Bytes</code> ' +
+                'and enable <code>Auto-start</code> if available.';
+        } else if (isFireOS) {
+            instructions = '<strong>Fire OS (Kindle):</strong> Go to <code>Settings &gt; Apps &gt; Isolation Bytes</code> ' +
+                'and enable <code>Auto-start</code>.';
+        } else if (isPS5) {
+            instructions = '<strong>PlayStation:</strong> Consoles do not support auto-starting third-party apps. ' +
+                'Open Isolation Bytes from the browser or media player manually.';
+        } else if (isXbox) {
+            instructions = '<strong>Xbox:</strong> Go to <code>Settings &gt; System &gt; Startup</code> ' +
+                'and enable <code>Resume previous apps</code>. ' +
+                'Isolation Bytes can be pinned to the home screen for quick access.';
+        } else if (isSwitch) {
+            instructions = '<strong>Nintendo Switch:</strong> Consoles do not support auto-starting third-party apps. ' +
+                'Open Isolation Bytes from the browser manually.';
+        } else if (isSteamDeck) {
+            instructions = '<strong>Steam Deck:</strong> Add Isolation Bytes as a non-Steam game, ' +
+                'then go to <code>Steam &gt; Settings &gt; Startup</code> and enable auto-launch. ' +
+                'Or create a <code>.desktop</code> file in <code>~/.config/autostart/</code>.';
+        } else if (isRoku) {
+            instructions = '<strong>Roku:</strong> Go to <code>Settings &gt; System &gt; Power &gt; Auto-start</code> ' +
+                'and enable Isolation Bytes if listed.';
+        } else if (isAppleTV) {
+            instructions = '<strong>Apple TV:</strong> tvOS does not support auto-starting third-party apps. ' +
+                'Open Isolation Bytes from the home screen manually.';
+        } else if (isTizen) {
+            instructions = '<strong>Samsung TV (Tizen):</strong> Go to <code>Settings &gt; General &gt; Smart Features &gt; ' +
+                'Auto Protection</code> and enable Isolation Bytes if listed.';
+        } else if (isWebOS) {
+            instructions = '<strong>LG TV (webOS):</strong> Go to <code>Settings &gt; General &gt; App Auto-Start</code> ' +
+                'and enable Isolation Bytes if listed.';
+        } else if (isChromecast) {
+            instructions = '<strong>Chromecast:</strong> Chromecast does not support auto-starting apps. ' +
+                'Cast Isolation Bytes from your phone or open it from the home screen.';
+        } else if (isWindows) {
+            instructions = '<strong>Windows:</strong> Press <code>Win+R</code>, type <code>shell:startup</code>, ' +
+                'and add a shortcut to the Isolation Bytes launcher in that folder. ' +
+                'Or use the Isolation Bytes desktop launcher to toggle startup automatically.';
+        } else if (isMac) {
+            instructions = '<strong>macOS:</strong> Open <code>System Settings &gt; General &gt; Login Items</code>, ' +
+                'and add the Isolation Bytes launcher to <code>Open at Login</code>. ' +
+                'Or use the Isolation Bytes desktop launcher to toggle startup automatically.';
+        } else if (isChromeOS) {
+            instructions = '<strong>ChromeOS:</strong> Open <code>Settings &gt; Apps &gt; Isolation Bytes</code> ' +
+                'and enable <code>Start on boot</code> if available. ' +
+                'Alternatively, pin the app to the shelf for quick access.';
+        } else if (isLinux) {
+            instructions = '<strong>Linux:</strong> Create a <code>.desktop</code> file in ' +
+                '<code>~/.config/autostart/</code> pointing to the Isolation Bytes launcher. ' +
+                'Or use systemd: <code>systemctl --user enable isolation-bytes</code>. ' +
+                'Or use the Isolation Bytes desktop launcher to toggle startup automatically.';
+        } else if (ua.indexOf('arm') >= 0 || ua.indexOf('aarch64') >= 0 || platform.indexOf('arm') >= 0) {
+            instructions = '<strong>Raspberry Pi / ARM Linux:</strong><br>' +
+                'Option 1 — systemd service (recommended):<br>' +
+                '<code>sudo nano /etc/systemd/system/isolationbytes.service</code><br>' +
+                'Add:<br>' +
+                '<code>[Unit]<br>Description=Isolation Bytes Agent<br>After=network.target</code><br>' +
+                '<code>[Service]<br>ExecStart=/usr/bin/python3 /home/pi/Isolation_Bytes/standalone_agent.py --server https://isolation-bytes.com --key=YOUR_KEY<br>Restart=always<br>User=pi</code><br>' +
+                '<code>[Install]<br>WantedBy=multi-user.target</code><br><br>' +
+                'Then enable it:<br>' +
+                '<code>sudo systemctl enable isolationbytes</code><br>' +
+                '<code>sudo systemctl start isolationbytes</code><br><br>' +
+                'Option 2 — crontab:<br>' +
+                '<code>crontab -e</code><br>' +
+                'Add: <code>@reboot python3 /home/pi/Isolation_Bytes/standalone_agent.py --server https://isolation-bytes.com --key=YOUR_KEY &amp;</code><br><br>' +
+                'Option 3 — rc.local:<br>' +
+                '<code>sudo nano /etc/rc.local</code><br>' +
+                'Add before <code>exit 0</code>: <code>su - pi -c "python3 /home/pi/Isolation_Bytes/standalone_agent.py --server https://isolation-bytes.com --key=YOUR_KEY &amp;"</code><br><br>' +
+                'Replace <code>YOUR_KEY</code> with your API key and <code>pi</code> with your username if different.';
+        } else if (isFreeBSD) {
+            instructions = '<strong>BSD:</strong> Add the Isolation Bytes launcher to your ' +
+                '<code>~/.xinitrc</code> or <code>~/.xprofile</code> for X11 auto-start. ' +
+                'For console, add it to your shell profile.';
+        } else if (isSolaris) {
+            instructions = '<strong>Solaris:</strong> Add the Isolation Bytes launcher to your ' +
+                '<code>~/.xinitrc</code> or use SMF: <code>svcadm enable isolation-bytes</code>.';
+        } else if (isAIX) {
+            instructions = '<strong>AIX:</strong> Add the Isolation Bytes launcher to your ' +
+                '<code>~/.profile</code> or <code>inittab</code> for auto-start.';
+        } else {
+            instructions = '<strong>Unknown platform (' + platform + '):</strong><br><br>' +
+                'Most operating systems support auto-starting apps. Try one of these common methods:<br><br>' +
+                '<strong>1. Desktop launcher:</strong> Use the Isolation Bytes desktop launcher ' +
+                'to enable startup automatically — it detects your platform and configures it for you.<br><br>' +
+                '<strong>2. Startup folder / autostart:</strong> Look for a startup, autostart, or login items ' +
+                'folder in your system settings and add a shortcut to Isolation Bytes there.<br><br>' +
+                '<strong>3. Task scheduler / cron / systemd:</strong> Schedule Isolation Bytes to run at boot ' +
+                'or login using your system\'s task scheduler.<br><br>' +
+                '<strong>4. Browser auto-launch:</strong> Set <code>https://isolation-bytes.com</code> as your ' +
+                'browser homepage or as a pinned tab that opens on startup.<br><br>' +
+                '<strong>5. Bookmark / home screen:</strong> Add Isolation Bytes to your bookmarks, home screen, ' +
+                'or quick-launch bar for one-tap access.<br><br>' +
+                'Your detected platform: <code>' + platform + '</code><br>' +
+                'Your user agent: <code>' + ua.substring(0, 120) + '</code>';
+        }
+        document.getElementById('platform-text').innerHTML = instructions;
+        document.getElementById('platform-fallback').style.display = 'block';
+    }
+    </script>
+</body>
+</html>
