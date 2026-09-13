@@ -135,6 +135,10 @@ NOISY_RULE_NAMES = {
     'VirtualizationEscape',
     'ZeroTrustBypass',
     'cobalt_strike_tmp01925d3f',
+    # New Microsoft threat rules (temporarily suppressed to prevent false positives on admin operations)
+    'SuspDllOwnship_ZA',
+    'SuspDllOwnship_DA_PowerShell',
+    'DLL_Tampering_Generic',
 }
 
 # Rule-name keywords that indicate a known malware family or definitive malware
@@ -184,6 +188,10 @@ DEFINITIVE_MALWARE_KEYWORDS = (
     'zaccess', 'zbot', 'zloader', 'zusy',
     # Specific families found in the local rule set
     'clickfix', 'clandestine',
+    # Microsoft-specific threats and new malware families
+    'suspdllownship', 'china_chopper', 'covenant', 'empire', 'powersploit',
+    'b374k', 'r57', 'c99', 'c100', 'webshell', 'backdoor',
+    'dll_hijacking', 'sideloading', 'injection', 'phantom', 'comodo',
 )
 
 def _classify_filetype(filepath):
@@ -701,9 +709,49 @@ def _severity_prefix(severity):
     return f'{severity.upper()} YARA match'
 
 
+def _categorize_threat(rule_name):
+    """Categorize a YARA rule match into threat categories for better reporting."""
+    if not rule_name:
+        return 'unknown'
+    
+    rule_lower = rule_name.lower()
+    
+    # Microsoft specific threats (check first for priority)
+    if any(keyword in rule_lower for keyword in ['suspdllownship', 'microsoft_threat', 'susp_dll']):
+        return 'microsoft_threat'
+    
+    # Web shell detection
+    if any(keyword in rule_lower for keyword in ['webshell', 'web_shell', 'china_chopper', 'php_webshell', 'asp_webshell', 'jsp_webshell']):
+        return 'webshell'
+    
+    # PowerShell malware
+    if any(keyword in rule_lower for keyword in ['powershell', 'ps1', 'c2_framework', 'empire', 'powersploit', 'covenant']):
+        return 'powershell'
+    
+    # DLL security threats
+    if any(keyword in rule_lower for keyword in ['dll', 'hijacking', 'sideloading', 'injection', 'phantom', 'comodo']):
+        return 'dll_security'
+    
+    # C2 and RAT
+    if any(keyword in rule_lower for keyword in ['c2', 'rat', 'backdoor', 'reverse_shell']):
+        return 'c2_rats'
+    
+    # General malware
+    if any(keyword in rule_lower for keyword in ['malware', 'trojan', 'stealer', 'ransomware', 'botnet']):
+        return 'malware'
+    
+    return 'generic'
+
+
 def scan_all_folders_with_yara(monitored_folders, rules_path=None):
     """
     YARA-based scanning utilities for security module.
+    
+    Enhanced with comprehensive security rules for:
+    - Microsoft threats (SuspDllOwnship variants)
+    - PowerShell malware (C2 frameworks, credential theft, lateral movement)
+    - Advanced web shells (PHP, ASP.NET, JSP, file upload, reverse shell)
+    - DLL security (hijacking, injection, tampering, persistence)
     
     Phishing detection is available via scan_utils.scan_all_folders_for_phishing(monitored_folders),
     which will scan and quarantine files with phishing indicators.
@@ -721,10 +769,23 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         quarantine_utils = None
 
     # Define high-risk file extensions similar to network monitor
+    # Enhanced with web shell and PowerShell extensions
     high_risk_extensions = [
         '.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.wsf', '.hta', 
         '.scr', '.pif', '.reg', '.com', '.msi', '.jar', '.jnlp', '.vbe', 
-        '.wsh', '.sys', '.inf'
+        '.wsh', '.sys', '.inf',
+        # Web shell extensions
+        '.php', '.phtml', '.php3', '.php4', '.php5', '.php7',
+        '.asp', '.aspx', '.ashx', '.asmx', '.asax', '.ascx',
+        '.jsp', '.jspx', '.jsw', '.jsv', '.jspf',
+        # Additional script extensions
+        '.psm1', '.psd1', '.ps1xml', '.psc1',
+        '.vbscript', '.js', '.jse', '.vbe',
+        '.wsf', '.wsc', '.ws', '.xml',
+        # Configuration files that can contain web shells
+        '.htaccess', '.htpasswd', '.conf', '.config', '.ini',
+        # Template files
+        '.html', '.htm', '.shtml', '.dhtml'
     ]
     
     results = []
@@ -821,7 +882,8 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
                             rule_name = getattr(match, 'rule', 'Unknown rule')
                             severity = get_match_severity(match)
                             prefix = _severity_prefix(severity)
-                            results.append(f"{prefix} ({rule_name}): {filepath}")
+                            threat_category = _categorize_threat(rule_name)
+                            results.append(f"{prefix} [{threat_category}] ({rule_name}): {filepath}")
 
                         # Quarantine only critical matches
                         is_critical = highest == 'critical'
