@@ -59,7 +59,41 @@
     global.fetch = wrappedFetch;
 })(window);
 
-// Unwrap payloads that nest the data under a success/stats or success/patterns envelope
+// Remove the stale successful agent-trigger text if an older status producer
+// puts it into the Index dashboard's red error banner. This is deliberately
+// scoped to the exact success message so real errors remain visible.
+(function installIndexAgentSuccessGuard(global) {
+    const SUCCESS_RE = /^Last error:\s*Scan triggered for \d+ agent\(s\)\./i;
+
+    function scrub(root) {
+        if (!root || !root.querySelectorAll) return;
+        root.querySelectorAll('.alert.alert-danger').forEach(function(node) {
+            const text = (node.textContent || '').trim();
+            if (SUCCESS_RE.test(text)) {
+                node.remove();
+            }
+        });
+    }
+
+    function install() {
+        scrub(document);
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                mutation.addedNodes.forEach(function(node) {
+                    if (node.nodeType === 1) scrub(node.parentNode || node);
+                });
+            });
+        });
+        observer.observe(document.documentElement || document, {childList: true, subtree: true});
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', install, {once: true});
+    } else {
+        install();
+    }
+})(window);
+
 function unwrapPayload(payload, key) {
     if (payload && typeof payload === 'object' && typeof key === 'string') {
         const match = Object.entries(payload).find(([k, v]) => k === key && v && typeof v === 'object');
@@ -74,7 +108,6 @@ function clearChildren(node) {
     }
 }
 
-// Update traffic statistics display
 function updateTrafficDisplay(trafficData, c2Data) {
     trafficData = unwrapPayload(trafficData, 'stats');
     c2Data = unwrapPayload(c2Data, 'patterns');
@@ -410,46 +443,37 @@ function fetchMonitoredNetworkDirectories() {
 function updateMonitoredDirectoriesDisplay(data) {
     safeDomOperation('monitored_directories', function(container) {
         clearChildren(container);
-
         const header = document.createElement('h4');
         header.textContent = 'Monitored Network Directories';
         container.appendChild(header);
-
         if (data.last_scan) {
             const timestamp = document.createElement('p');
             timestamp.className = 'timestamp';
             timestamp.textContent = `Last scan: ${data.last_scan}`;
             container.appendChild(timestamp);
         }
-
         if (data.directories && data.directories.length > 0) {
             const list = document.createElement('ul');
             list.className = 'directory-list';
-
             data.directories.forEach(dir => {
                 const item = document.createElement('li');
                 const dirName = document.createElement('strong');
                 dirName.textContent = dir.path || 'Unknown';
-
                 item.appendChild(dirName);
-
                 if (dir.status) {
                     const status = document.createElement('span');
                     status.className = `status ${dir.status.toLowerCase()}`;
                     status.textContent = ` - ${dir.status}`;
                     item.appendChild(status);
                 }
-
                 if (dir.description) {
                     const desc = document.createElement('p');
                     desc.className = 'description';
                     desc.textContent = dir.description;
                     item.appendChild(desc);
                 }
-
                 list.appendChild(item);
             });
-
             container.appendChild(list);
         } else {
             const noData = document.createElement('p');
@@ -461,12 +485,8 @@ function updateMonitoredDirectoriesDisplay(data) {
 }
 
 document.addEventListener('DOMContentLoaded', function() {
-    window.serviceStates = window.serviceStates || {
-        networkMonitorRunning: false
-    };
-
+    window.serviceStates = window.serviceStates || {networkMonitorRunning: false};
     startTrafficMonitoring();
-
     safeDomOperation('monitored_directories', function() {
         fetchMonitoredNetworkDirectories();
     });
