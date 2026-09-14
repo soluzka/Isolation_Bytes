@@ -2122,8 +2122,10 @@ X-GNOME-Autostart-enabled=true
                             # dashboard counter with low-confidence hits.
                             if _rank_of(highest) >= _rank_of('high'):
                                 self._threats_blocked += 1
-                                # Block in place only — no quarantine during scan.
-                                # Quarantine is a separate manual action from the dashboard.
+                                # Contain first, then automatically quarantine confirmed
+                                # high/critical malware. _quarantine_file() delegates to
+                                # quarantine_utils, whose canonical destination is
+                                # %USERPROFILE%\AppData\Local\Temp\Defender_Quarantine.
                                 bok = self._block_file_in_place(filepath)
                                 if bok:
                                     for f in findings:
@@ -2139,6 +2141,18 @@ X-GNOME-Autostart-enabled=true
                                                 f['renamed'] = True
                                             else:
                                                 f['block_error'] = True
+                                # Quarantine confirmed high/critical YARA hits after
+                                # containment. Lower-severity matches remain for review.
+                                try:
+                                    if os.path.exists(filepath):
+                                        qok = self._quarantine_file(filepath)
+                                        for f in findings:
+                                            if f.get('path') == filepath:
+                                                f['quarantined'] = bool(qok)
+                                                if qok:
+                                                    f['blocked'] = False
+                                except Exception as qe:
+                                    print(f'[QUARANTINE] Failed for {filepath}: {qe}')
                     # ML detection — always run, even on YARA-matched files
                     # so ransomware/persistence indicators are counted
                     ml_suspicious = False
@@ -2176,6 +2190,17 @@ X-GNOME-Autostart-enabled=true
                                 except Exception:
                                     pass
                                 self._threats_blocked += 1
+                            # Quarantine ML-only findings at a strong-confidence threshold.
+                            try:
+                                if ml_suspicious and ml_score >= 80 and os.path.exists(filepath):
+                                    qok = self._quarantine_file(filepath)
+                                    target = next((f for f in findings if f.get('path') == filepath), None)
+                                    if target:
+                                        target['quarantined'] = bool(qok)
+                                        if qok:
+                                            target['blocked'] = False
+                            except Exception as qe:
+                                print(f'[QUARANTINE] ML quarantine failed for {filepath}: {qe}')
                             print(f"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}")
                     except Exception:
                         pass
