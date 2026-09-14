@@ -145,7 +145,7 @@ def _agent_trigger_scan_response():
         _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
         sent += 1
     message = f'Scan triggered for {sent} agent(s). Results will appear shortly.'
-    return jsonify({'ok': True, 'success': True, 'status': 'success', 'accepted': True, 'message_type': 'success', 'message': message, 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': message, 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
 
 
 def _yara_only_quarantine_response():
