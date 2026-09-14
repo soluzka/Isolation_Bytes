@@ -1,0 +1,102 @@
+name: Unify agent and YARA dashboard scan status
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: write
+
+jobs:
+  unify:
+    if: "!contains(github.event.head_commit.message, '[agent-unification-patch]')"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+          fetch-depth: 0
+
+      - name: Make dashboard use the same agent scan command
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('cloud/cloud_server.py')
+          s = p.read_text(encoding='utf-8')
+          old = """def _complete_agent_scan_results_response():
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
+    return jsonify(build_complete_agent_scan_results(_legacy)), 200
+
+
+@app.before_request
+"""
+          new = """def _complete_agent_scan_results_response():
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
+    return jsonify(build_complete_agent_scan_results(_legacy)), 200
+
+
+def _run_startup_agent_scan_response():
+    \"\"\"Make the Index Conditional Startup button trigger the exact same
+    connected-agent scan command used by the YARA scanner.\"\"\"
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
+    agents = _legacy._all_agents()
+    if not agents:
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'No connected agents to scan.', 'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
+    now = time.time()
+    sent = 0
+    for device_id, agent in agents.items():
+        pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
+        pending.append({'action': 'scan_now'})
+        _legacy.commands[device_id] = pending
+        _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
+        sent += 1
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'message_type': 'success', 'accepted': True,
+                    'message': f'Scan started for {sent} agent(s). YARA and Index will use the same live scan results.',
+                    'error': None, 'agents': sent, 'agents_triggered': sent}), 200
+
+
+@app.before_request
+"""
+          if old not in s:
+              raise SystemExit('cloud_server.py insertion point not found')
+          s = s.replace(old, new, 1)
+          old2 = """def _intercept_agent_scan_and_yara_quarantine():
+    if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
+        return _agent_trigger_scan_response()
+"""
+          new2 = """def _intercept_agent_scan_and_yara_quarantine():
+    if request.method == 'POST' and request.path == '/run_startup':
+        return _run_startup_agent_scan_response()
+    if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
+        return _agent_trigger_scan_response()
+"""
+          if old2 not in s:
+              raise SystemExit('cloud_server.py interceptor point not found')
+          s = s.replace(old2, new2, 1)
+          p.write_text(s, encoding='utf-8')
+
+          p = Path('templates/index.html')
+          s = p.read_text(encoding='utf-8')
+          old = """if (response.status === 200 && (data.status === 'started' || data.status === 'already_running')) {"""
+          new = """if (response.status === 200 && (data.status === 'started' || data.status === 'already_running' || data.status === 'success' || data.ok === true)) {"""
+          if old not in s:
+              raise SystemExit('index.html success condition not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Commit
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add cloud/cloud_server.py templates/index.html
+          git diff --cached --quiet && exit 0
+          git commit -m 'Unify Index and YARA agent scan status [agent-unification-patch]'
+          git push origin HEAD:security-v2
