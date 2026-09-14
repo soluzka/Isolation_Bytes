@@ -33,6 +33,46 @@
     }
 
     /**
+     * Add an explicit success/status classification to the agent-trigger-scan
+     * response. Some callers historically treated every message returned by
+     * this endpoint as an error because the payload used `ok` while their
+     * generic response handler expected `success`.
+     */
+    function installScanTriggerResponseNormalizer() {
+        const originalFetch = global.fetch;
+        if (typeof originalFetch !== 'function' || originalFetch.__scanTriggerNormalized) {
+            return;
+        }
+
+        const wrappedFetch = function (resource, options) {
+            return originalFetch.call(this, resource, options).then(function (response) {
+                const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+                if (!url.includes('/api/agent-trigger-scan')) {
+                    return response;
+                }
+
+                const originalJson = response.json.bind(response);
+                response.json = function () {
+                    return originalJson().then(function (data) {
+                        if (data && typeof data === 'object') {
+                            const successful = data.ok === true;
+                            data.success = successful;
+                            data.status = successful ? 'success' : 'error';
+                            data.message_type = successful ? 'success' : 'error';
+                        }
+                        return data;
+                    });
+                };
+                return response;
+            });
+        };
+        wrappedFetch.__scanTriggerNormalized = true;
+        global.fetch = wrappedFetch;
+    }
+
+    installScanTriggerResponseNormalizer();
+
+    /**
      * Fetch JSON from a URL. Never rejects/throws: resolves to
      * { ok: boolean, status: number|null, data: any, error: string|null }.
      */
