@@ -374,7 +374,7 @@ def run_startup_compat():
     if callable(fn):
         try:
             fn()
-            return jsonify({'message': 'Conditional startup triggered', 'success': True}), 200
+            return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Conditional startup triggered', 'error': None}), 200
         except Exception as e:
             logging.error(f'Error running conditional startup: {e}')
             return jsonify({'message': 'Failed to trigger', 'error': str(e)}), 500
