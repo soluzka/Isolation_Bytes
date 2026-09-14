@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: security-v2
+          fetch-depth: 1
 
       - name: Verify unified scan status implementation
         shell: bash
@@ -23,7 +24,8 @@ jobs:
           set -euo pipefail
           grep -F "def _complete_agent_scan_results_response" cloud/cloud_server.py >/dev/null
           grep -F "build_complete_agent_scan_results(_legacy)" cloud/cloud_server.py >/dev/null
-          grep -F "def _run_startup_agent_scan_response" cloud/cloud_server.py >/dev/null
-          grep -F "request.path == '/run_startup'" cloud/cloud_server.py >/dev/null
+          grep -F "def _agent_trigger_scan_response" cloud/cloud_server.py >/dev/null
+          grep -F "'status': 'success'" cloud/cloud_server.py >/dev/null
           grep -F "data.status === 'success'" templates/index.html >/dev/null
-          echo "Index and YARA scan-status integration is present."
+          test -f cloud/_agent_results_unlimited.py
+          echo "Agent and YARA scan-status integration is present."
