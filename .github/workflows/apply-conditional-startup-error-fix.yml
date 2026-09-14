@@ -34,24 +34,40 @@ jobs:
               "    if isinstance(last_error, str) and last_error.lower().startswith('scan triggered for ') and ' agent(s).' in last_error.lower():\n"
               "        resp['last_error'] = None\n"
           )
-          if marker in text:
-              print('Patch already present')
-          elif anchor not in text:
-              raise SystemExit('Conditional startup status response anchor not found')
-          else:
+          if marker not in text:
+              if anchor not in text:
+                  raise SystemExit('Conditional startup status response anchor not found')
               text = text.replace(anchor, anchor + insertion, 1)
               path.write_text(text, encoding='utf-8')
 
-      - name: Commit patched source
-        shell: bash
+      - name: Store modified app.py blob in GitHub object database
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
         run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          if git diff --quiet; then
-            echo 'No source change needed.'
-            exit 0
-          fi
-          git add app.py
-          git commit -m 'Fix conditional startup agent success state'
-          git rev-parse HEAD
+          import base64
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          content = open('app.py', 'rb').read()
+          payload = json.dumps({
+              'content': base64.b64encode(content).decode('ascii'),
+              'encoding': 'base64'
+          }).encode('utf-8')
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPO"]}/git/blobs',
+              data=payload,
+              headers={
+                  'Authorization': f'Bearer {os.environ["GH_TOKEN"]}',
+                  'Accept': 'application/vnd.github+json',
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'Content-Type': 'application/json'
+              },
+              method='POST'
+          )
+          with urllib.request.urlopen(req) as response:
+              result = json.load(response)
+          print('MODIFIED_APP_BLOB_SHA=' + result['sha'])
