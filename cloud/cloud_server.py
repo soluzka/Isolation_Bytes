@@ -69,7 +69,10 @@ def _canonical_yara_agent_state():
         elif pending_scan:
             running = True
 
-        for finding in report.get('findings') or []:
+        # Agents may use either `findings` or the older `results` field.
+        # Read both so the dashboard and YARA Scanner see the same detections.
+        report_findings = report.get('findings') or report.get('results') or []
+        for finding in report_findings:
             if not isinstance(finding, dict) or not _is_yara_finding(finding):
                 continue
             path = finding.get('path') or finding.get('original_path') or ''
@@ -93,7 +96,7 @@ def _canonical_yara_agent_state():
             if 'persist' in threat or 'persist' in rule:
                 persistence_indicators += 1
 
-        for finding in report.get('findings') or []:
+        for finding in report_findings:
             if not isinstance(finding, dict):
                 continue
             rule = str(finding.get('rule') or '').lower()
