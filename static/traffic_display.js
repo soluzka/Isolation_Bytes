@@ -2,10 +2,9 @@
  * Network traffic monitoring display functions
  */
 
-// Normalize the agent scan trigger response for the legacy Index dashboard.
-// The backend now returns the canonical status="success", while the existing
-// Index trigger handler accepts the legacy started/already_running states.
-// Keep both contracts true so the trigger is never rendered as an error.
+// Normalize agent-trigger and conditional-startup status responses before the
+// legacy Index dashboard renders them. A successful agent trigger is a status
+// message, never a conditional-startup error.
 (function installAgentScanTriggerCompatibility(global) {
     const originalFetch = global.fetch;
     if (typeof originalFetch !== 'function' || originalFetch.__agentScanTriggerCompat) return;
@@ -13,6 +12,26 @@
     const wrappedFetch = function(resource, options) {
         return originalFetch.call(this, resource, options).then(function(response) {
             const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+
+            if (url.includes('/api/conditional_startup/status')) {
+                const originalJson = response.json.bind(response);
+                response.json = function() {
+                    return originalJson().then(function(data) {
+                        if (data && typeof data === 'object') {
+                            const lastError = typeof data.last_error === 'string' ? data.last_error : '';
+                            if (/^Scan triggered for \d+ agent\(s\)\./i.test(lastError)) {
+                                data.last_error = null;
+                            }
+                            if (data.message_type === 'success' && data.error == null) {
+                                data.last_error = null;
+                            }
+                        }
+                        return data;
+                    });
+                };
+                return response;
+            }
+
             if (!url.includes('/api/agent-trigger-scan')) return response;
 
             const originalJson = response.json.bind(response);
@@ -63,12 +82,10 @@ function updateTrafficDisplay(trafficData, c2Data) {
     const trafficContainer = document.getElementById('traffic_stats');
     if (!trafficContainer) return;
 
-    // Clear the "will appear here" message
     if (trafficContainer.innerText.includes('appear here when')) {
         clearChildren(trafficContainer);
     }
 
-    // Format bytes to KB/MB/GB
     const formatBytes = (bytes) => {
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1048576) return (bytes / 1024).toFixed(2) + ' KB';
@@ -76,7 +93,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
         return (bytes / 1073741824).toFixed(2) + ' GB';
     };
 
-    // Create container for statistics if it doesn't exist
     if (!document.getElementById('traffic_content')) {
         const contentDiv = document.createElement('div');
         contentDiv.id = 'traffic_content';
@@ -85,7 +101,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
 
     const trafficContent = document.getElementById('traffic_content');
 
-    // Return if no traffic data available
     if (!trafficData || trafficData.error) {
         clearChildren(trafficContent);
         const alert = document.createElement('div');
@@ -100,7 +115,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
     clearChildren(trafficContent);
     const fragment = document.createDocumentFragment();
 
-    // Connection Summary
     const summary = document.createElement('div');
     summary.style.cssText = 'margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #eee;';
     const summaryTitle = document.createElement('h4');
@@ -126,7 +140,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
     summary.appendChild(summaryFlex);
     fragment.appendChild(summary);
 
-    // Active IP addresses
     if (trafficData.active_ips && trafficData.active_ips.length > 0) {
         const ipSection = document.createElement('div');
         ipSection.style.cssText = 'margin-bottom: 15px;';
@@ -145,7 +158,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
         fragment.appendChild(ipSection);
     }
 
-    // Protocol breakdown
     if (trafficData.protocols && Object.keys(trafficData.protocols).length > 0) {
         const protoSection = document.createElement('div');
         protoSection.style.cssText = 'margin-bottom: 15px;';
@@ -167,7 +179,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
         fragment.appendChild(protoSection);
     }
 
-    // Process information
     if (trafficData.processes && Object.keys(trafficData.processes).length > 0) {
         const procSection = document.createElement('div');
         procSection.style.cssText = 'margin-bottom: 15px;';
@@ -214,7 +225,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
         fragment.appendChild(procSection);
     }
 
-    // C2 detection information
     if (c2Data && !c2Data.error && c2Data.suspicious_connections && c2Data.suspicious_connections.length > 0) {
         const c2Section = document.createElement('div');
         c2Section.style.cssText = 'margin-top: 20px; border-top: 1px solid #eee; padding-top: 15px;';
@@ -260,7 +270,6 @@ function updateTrafficDisplay(trafficData, c2Data) {
     trafficContent.appendChild(fragment);
 }
 
-// Function to fetch traffic statistics from the API
 function updateTrafficStats() {
     Promise.all([
         fetch('/get_traffic_stats', {credentials: 'include'}),
@@ -293,7 +302,6 @@ function updateTrafficStats() {
     });
 }
 
-// Function to safely interact with DOM elements
 function safeDomOperation(elementId, operation) {
     try {
         const element = document.getElementById(elementId);
@@ -310,21 +318,18 @@ function safeDomOperation(elementId, operation) {
     }
 }
 
-// Function to start traffic monitoring with enhanced error handling
 function startTrafficMonitoring() {
-    // Safely check if traffic_stats element exists
     if (!safeDomOperation('traffic_stats', function() {})) {
         console.error('Traffic stats container not found, cannot start monitoring');
         return;
     }
-    
-    // Initialize window.serviceStates if it doesn't exist
+
     if (!window.serviceStates) {
         window.serviceStates = {
             networkMonitorRunning: false
         };
     }
-    
+
     fetch('/start_traffic_monitoring', {
         method: 'POST',
         credentials: 'include'
@@ -338,25 +343,21 @@ function startTrafficMonitoring() {
     .then(data => {
         console.log('Traffic monitoring started:', data);
         window.serviceStates.networkMonitorRunning = true;
-        
-        // Start updating traffic stats only if monitoring started successfully
+
         if (typeof updateTrafficStats === 'function') {
             updateTrafficStats();
         }
-        
-        // Safely update the network monitor status if the function exists
+
         if (typeof window.updateNetworkMonitorStatus === 'function') {
             window.updateNetworkMonitorStatus(true);
         }
-        
-        // Show monitored network directories if the function exists
+
         if (typeof fetchMonitoredNetworkDirectories === 'function') {
             fetchMonitoredNetworkDirectories();
         }
     })
     .catch(error => {
         console.error('Error starting traffic monitoring:', error);
-        // Display error in traffic stats container
         safeDomOperation('traffic_stats', function(container) {
             clearChildren(container);
             const alert = document.createElement('div');
@@ -365,15 +366,10 @@ function startTrafficMonitoring() {
             container.appendChild(alert);
         });
     });
-    
-    // Set up interval to update stats every 3 seconds
+
     window.trafficStatsInterval = setInterval(updateTrafficStats, 3000);
 }
 
-/**
- * Function to fetch and display monitored network directories
- * This connects to the network_monitor_integration.py endpoint
- */
 function fetchMonitoredNetworkDirectories() {
     safeDomOperation('monitored_directories', function(container) {
         clearChildren(container);
@@ -411,56 +407,49 @@ function fetchMonitoredNetworkDirectories() {
     });
 }
 
-/**
- * Function to update the displayed list of monitored directories
- */
 function updateMonitoredDirectoriesDisplay(data) {
     safeDomOperation('monitored_directories', function(container) {
-        // Clear previous content
         clearChildren(container);
 
-        // Create header
         const header = document.createElement('h4');
         header.textContent = 'Monitored Network Directories';
         container.appendChild(header);
-        
-        // Create timestamp info
+
         if (data.last_scan) {
             const timestamp = document.createElement('p');
             timestamp.className = 'timestamp';
             timestamp.textContent = `Last scan: ${data.last_scan}`;
             container.appendChild(timestamp);
         }
-        
-        // Create list of directories
+
         if (data.directories && data.directories.length > 0) {
             const list = document.createElement('ul');
             list.className = 'directory-list';
-            
+
             data.directories.forEach(dir => {
                 const item = document.createElement('li');
                 const dirName = document.createElement('strong');
                 dirName.textContent = dir.path || 'Unknown';
-                
+
                 item.appendChild(dirName);
-                
+
                 if (dir.status) {
                     const status = document.createElement('span');
                     status.className = `status ${dir.status.toLowerCase()}`;
                     status.textContent = ` - ${dir.status}`;
                     item.appendChild(status);
                 }
-                
+
                 if (dir.description) {
                     const desc = document.createElement('p');
                     desc.className = 'description';
                     desc.textContent = dir.description;
                     item.appendChild(desc);
                 }
-                
+
                 list.appendChild(item);
             });
-            
+
             container.appendChild(list);
         } else {
             const noData = document.createElement('p');
@@ -471,17 +460,13 @@ function updateMonitoredDirectoriesDisplay(data) {
     });
 }
 
-// Start traffic monitoring and fetch monitored directories when page loads
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize service states object
     window.serviceStates = window.serviceStates || {
         networkMonitorRunning: false
     };
-    
-    // Start traffic monitoring
+
     startTrafficMonitoring();
-    
-    // Fetch monitored directories if the container exists
+
     safeDomOperation('monitored_directories', function() {
         fetchMonitoredNetworkDirectories();
     });
