@@ -1633,6 +1633,34 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                     output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
                     scanned_file_status[filepath]["error"] = str(quarantine_exc)
                     results["errors"].append({"file": filepath, "error": f"Quarantine failed: {quarantine_exc}"})
+
+        # ── Adaptive YARA rule reputation ─────────────────────────────────────
+        # Feed back into rule_reputation so rules auto-suppress on clean files
+        # and auto-unsuppress when they match confirmed malware.
+        # This is the "automatic FP / non-FP detection" mechanism: rules that
+        # keep firing on clean files get suppressed; rules that hit real malware
+        # get re-enabled even if they were suppressed before.
+        if yara_result:
+            try:
+                from security.rule_reputation import record_clean_hit, record_malware_hit
+                yara_rule_names = [getattr(m, 'rule', '') for m in yara_result if getattr(m, 'rule', '')]
+                if malware_found:
+                    # File is confirmed malware — these rules earned their keep
+                    for rname in yara_rule_names:
+                        record_malware_hit(rname)
+                    output.write(f"[rule_reputation] Recorded malware hit for {len(yara_rule_names)} rule(s) on {filepath}\n")
+                else:
+                    # YARA fired but no independent signal confirmed malware — clean hit
+                    for rname in yara_rule_names:
+                        record_clean_hit(rname)
+                    output.write(f"[rule_reputation] Recorded clean hit for {len(yara_rule_names)} rule(s) on {filepath}\n")
+            except Exception as rep_exc:
+                output.write(f"[INFO] rule_reputation update skipped for {filepath}: {rep_exc}\n")
+        # ──────────────────────────────────────────────────────────────────────
+
+        # Increment the stable counter now that this file is fully processed
+        with results_lock:
+            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
         if callable(progress_callback):
             progress_callback(results)
     except (PermissionError, OSError) as perm_error:
@@ -1643,6 +1671,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 "quarantined": False,
                 "error": str(perm_error)
             }
+            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
             if callable(progress_callback):
                 progress_callback(results)
     except Exception as scan_exc:
@@ -1654,6 +1683,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 "quarantined": False,
                 "error": str(scan_exc)
             }
+            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
             if callable(progress_callback):
                 progress_callback(results)
 
@@ -1748,6 +1778,7 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     output = io.StringIO()
     results = {
         "scanned_files": {},
+        "scanned_files_count": 0,  # stable integer — only incremented when a file finishes
         "quarantined_files": [],
         "errors": [],
         "process_events": [],

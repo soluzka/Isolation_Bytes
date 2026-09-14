@@ -135,20 +135,12 @@ NOISY_RULE_NAMES = {
     'VirtualizationEscape',
     'ZeroTrustBypass',
     'cobalt_strike_tmp01925d3f',
-    # New Microsoft threat rules (temporarily suppressed to prevent false positives on admin operations)
-    'SuspDllOwnship_ZA',
-    'SuspDllOwnship_DA_PowerShell',
-    'DLL_Tampering_Generic',
-    # Additional DLL security rules that may false positive on legitimate unblock/quarantine operations
-    'DLL_Hijacking_Generic',
-    'DLL_Sideloading_Attack',
-    'DLL_Injection_Techniques',
-    'DLL_Suspicious_Imports',
-    'Microsoft_Threat_Indicators',
-    'DLL_Phantom_DLL_Hijacking',
-    'DLL_Comodo_Hijacking',
-    'DLL_Persistence_Mechanisms',
-    'DLL_Obfuscation_Techniques',
+    # NOTE: SuspDllOwnship, DLL security, and Microsoft threat rules have been
+    # intentionally removed from this suppression list so they actively scan
+    # for real malware (Trojan:Win32/SuspDllOwnship.ZA!MTB, etc.).
+    # False positives on legitimate admin operations are handled by the
+    # adaptive rule_reputation system (record_clean_hit / record_malware_hit)
+    # and by the multi-family confidence check in conditional_startup.py.
 }
 
 # Rule-name keywords that indicate a known malware family or definitive malware
@@ -904,6 +896,15 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
                                 folder_stats['quarantined'] += 1
                                 scan_stats['total_quarantined'] += 1
                                 results.append(f"Quarantined critical file: {filepath}")
+                                # Confirmed malware quarantined — record for reputation
+                                try:
+                                    from security.rule_reputation import record_malware_hit
+                                    for m in matches:
+                                        rn = getattr(m, 'rule', '')
+                                        if rn:
+                                            record_malware_hit(rn)
+                                except Exception:
+                                    pass
                             except Exception as qe:
                                 logging.warning(f"Could not quarantine critical file {filepath}: {qe}")
                                 results.append(f"Could not quarantine critical file {filepath}: {qe}")

@@ -69,6 +69,30 @@ def force_unlock_windows(filepath):
         except Exception as e:
             logging.warning(f'Could not run handle.exe to unlock {filepath}: {e}')
 
+
+def _neutralise_in_place(filepath):
+    """Overwrite a file's content with null bytes so it cannot execute.
+
+    Used as a last resort when the original file cannot be deleted (e.g. a
+    webshell held open by IIS/Apache). Zeroing the content makes the file
+    harmless on disk immediately — web servers cannot interpret null-byte
+    PHP/ASP/JSP as executable code — even if the inode stays until reboot.
+
+    Returns True if neutralisation succeeded, False otherwise.
+    """
+    try:
+        size = os.path.getsize(filepath)
+        with open(filepath, 'r+b') as fh:
+            fh.write(b'\x00' * size)
+            fh.flush()
+            os.fsync(fh.fileno())
+            fh.truncate(size)
+        logging.warning(f"Neutralised (zeroed) locked file in-place: {filepath}")
+        return True
+    except Exception as ne:
+        logging.error(f"Could not neutralise {filepath} in-place: {ne}")
+        return False
+
 def _add_local_signatures(data, filepath):
     """Append the hashes of a quarantined file to the local signature file so
     the same malware is detected by hash next time."""
@@ -369,21 +393,34 @@ def quarantine_file(filepath, reason=''):
         if os.path.exists(filepath):
             try:
                 os.remove(filepath)  # Delete the original file only after verified quarantine
+                logging.info(f"Deleted quarantined file: {filepath}")
             except PermissionError:
+                # Step 1: try to unlock with handle.exe (Sysinternals)
                 force_unlock_windows(filepath)
                 try:
                     os.remove(filepath)
+                    logging.info(f"Deleted {filepath} after handle.exe unlock")
                 except Exception as e2:
                     logging.error(f"Still failed to delete {filepath} after unlock attempt: {e2}")
-                    # Kill processes that have the file locked, then retry
+                    # Step 2: kill processes holding the file open, then retry
+                    deleted = False
                     try:
                         from security.scan_cache import _kill_processes_locking_file
                         _kill_processes_locking_file(filepath)
                         os.remove(filepath)
+                        deleted = True
                         logging.warning(f"Deleted {filepath} after killing locking process")
                     except Exception as e3:
                         logging.error(f"Could not delete {filepath} after killing processes: {e3}")
-                        # Schedule for deletion on next reboot via MoveFileEx
+
+                    if not deleted:
+                        # Step 3: neutralise the file in-place so it cannot execute
+                        # even though we cannot delete it yet.  This is critical for
+                        # webshells held open by IIS/Apache — zeroing the bytes makes
+                        # the script harmless immediately without needing to delete it.
+                        _neutralise_in_place(filepath)
+
+                        # Step 4: schedule for deletion on next reboot via MoveFileEx
                         try:
                             import ctypes
                             MOVEFILE_DELAY_UNTIL_REBOOT = 4
