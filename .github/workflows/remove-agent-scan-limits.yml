@@ -6,39 +6,24 @@ on:
       - security-v2
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   remove-limits:
-    if: "!contains(github.event.head_commit.message, '[unlimited-scan-patch]')"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           ref: security-v2
-          fetch-depth: 0
 
-      - name: Remove artificial scan cycle limits
+      - name: Verify unlimited agent entrypoint
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('standalone_agent.py')
-          s = p.read_text(encoding='utf-8')
-          s = s.replace('MAX_FILES_PER_SCAN = 5000    # full-system scan budget; keeps the agent aligned with dashboard scans', 'MAX_FILES_PER_SCAN = float(\'inf\')  # no artificial per-cycle file limit')
-          s = s.replace('MAX_SCAN_CYCLE_SECONDS = 600 # allow a full-system scan to run for the dashboard scan window', 'MAX_SCAN_CYCLE_SECONDS = float(\'inf\')  # no artificial scan-time limit')
-          p.write_text(s, encoding='utf-8')
-          if 'MAX_FILES_PER_SCAN = float(\'inf\')' not in s or 'MAX_SCAN_CYCLE_SECONDS = float(\'inf\')' not in s:
-              raise SystemExit('Expected scan limits were not found; refusing to commit')
-          PY
-
-      - name: Commit unlimited scan change
-        shell: bash
-        run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add standalone_agent.py
-          git diff --cached --quiet && exit 0
-          git commit -m 'Remove standalone agent scan limits [unlimited-scan-patch]'
-          git push origin HEAD:security-v2
+          set -euo pipefail
+          test -f standalone_agent_unlimited.py
+          test -f standalone_agent.spec
+          grep -F "standalone_agent_unlimited.py" standalone_agent.spec >/dev/null
+          grep -F "MAX_FILES_PER_SCAN = float('inf')" standalone_agent_unlimited.py >/dev/null
+          grep -F "MAX_SCAN_CYCLE_SECONDS = float('inf')" standalone_agent_unlimited.py >/dev/null
+          echo "Unlimited scan entrypoint is configured and packaged by standalone_agent.spec."
