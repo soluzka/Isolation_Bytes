@@ -2,6 +2,44 @@
  * Network traffic monitoring display functions
  */
 
+// Normalize the agent scan trigger response for the legacy Index dashboard.
+// The backend now returns the canonical status="success", while the existing
+// Index trigger handler accepts the legacy started/already_running states.
+// Keep both contracts true so the trigger is never rendered as an error.
+(function installAgentScanTriggerCompatibility(global) {
+    const originalFetch = global.fetch;
+    if (typeof originalFetch !== 'function' || originalFetch.__agentScanTriggerCompat) return;
+
+    const wrappedFetch = function(resource, options) {
+        return originalFetch.call(this, resource, options).then(function(response) {
+            const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
+            if (!url.includes('/api/agent-trigger-scan')) return response;
+
+            const originalJson = response.json.bind(response);
+            response.json = function() {
+                return originalJson().then(function(data) {
+                    if (data && typeof data === 'object') {
+                        const successful = data.ok === true || data.success === true || data.status === 'success' || data.status === 'started' || data.status === 'already_running';
+                        data.ok = successful;
+                        data.success = successful;
+                        data.message_type = successful ? 'success' : 'error';
+                        if (successful) {
+                            data.error = null;
+                            if (data.status === 'success') data.status = 'started';
+                        } else {
+                            data.status = 'error';
+                        }
+                    }
+                    return data;
+                });
+            };
+            return response;
+        });
+    };
+    wrappedFetch.__agentScanTriggerCompat = true;
+    global.fetch = wrappedFetch;
+})(window);
+
 // Unwrap payloads that nest the data under a success/stats or success/patterns envelope
 function unwrapPayload(payload, key) {
     if (payload && typeof payload === 'object' && typeof key === 'string') {
