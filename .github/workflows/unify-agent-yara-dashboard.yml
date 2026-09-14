@@ -6,7 +6,7 @@ on:
       - security-v2
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   unify:
@@ -17,6 +17,36 @@ jobs:
         with:
           ref: security-v2
           fetch-depth: 1
+
+      - name: Normalize Index scan trigger success handling
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('templates/index.html')
+          text = path.read_text(encoding='utf-8')
+          old = "if (response.status === 200 && (data.status === 'started' || data.status === 'already_running')) {"
+          new = "if (response.status === 200 && (data.status === 'started' || data.status === 'already_running' || data.status === 'success' || data.ok === true || data.success === true)) {"
+          if old not in text:
+              raise SystemExit('Expected Index scan trigger condition was not found')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+
+      - name: Commit Index fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- templates/index.html; then
+            echo "Index scan trigger handling is already normalized."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add templates/index.html
+          git commit -m "Fix Index scan trigger success handling"
+          git push origin HEAD:security-v2
 
       - name: Verify unified scan status implementation
         shell: bash
