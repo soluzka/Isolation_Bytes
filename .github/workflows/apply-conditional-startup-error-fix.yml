@@ -1,0 +1,57 @@
+name: Apply conditional startup state sanitization
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+          fetch-depth: 1
+
+      - name: Patch conditional startup status producer
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+          marker = "# Never expose a successful agent-trigger message as a conditional-startup error."
+          anchor = "    resp = dict(state)\n"
+          insertion = (
+              "    " + marker + "\n"
+              "    last_error = resp.get('last_error')\n"
+              "    if isinstance(last_error, str) and last_error.lower().startswith('scan triggered for ') and ' agent(s).' in last_error.lower():\n"
+              "        resp['last_error'] = None\n"
+          )
+          if marker in text:
+              print('Patch already present')
+          elif anchor not in text:
+              raise SystemExit('Conditional startup status response anchor not found')
+          else:
+              text = text.replace(anchor, anchor + insertion, 1)
+              path.write_text(text, encoding='utf-8')
+
+      - name: Commit patched source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet; then
+            echo 'No source change needed.'
+            exit 0
+          fi
+          git add app.py
+          git commit -m 'Fix conditional startup agent success state'
+          git rev-parse HEAD
