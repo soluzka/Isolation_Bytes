@@ -197,15 +197,23 @@ def conditional_startup_status_api():
     """
     state = globals().get('conditional_startup_state')
     if not state:
-        # Minimal default response expected by the frontend
+        # Minimal default response expected by the frontend — all counters
+        # must be present so the UI never renders NaN or undefined tiles.
         return jsonify({
             'running': False,
             'last_run': None,
+            'started_at': None,
+            'last_updated': None,
             'duration': None,
             'scanned_files': 0,
             'quarantined_files': 0,
             'errors': 0,
             'process_events': 0,
+            'ml_detections': 0,
+            'ransomware_indicators': 0,
+            'persistence_indicators': 0,
+            'yara_suspicious': 0,
+            'blocked_threats': 0,
             'last_error': None,
             'network_monitor_running': bool(globals().get('network_monitor_running'))
         })
@@ -374,11 +382,18 @@ def run_startup_compat():
     globals()['conditional_startup_state'] = {
         'running': True,
         'last_run': None,
+        'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'duration': None,
         'scanned_files': 0,
         'quarantined_files': 0,
         'errors': 0,
         'process_events': 0,
+        'ml_detections': 0,
+        'ransomware_indicators': 0,
+        'persistence_indicators': 0,
+        'yara_suspicious': 0,
+        'blocked_threats': 0,
         'last_error': None
     }
     return jsonify({'message': 'Conditional startup requested (fallback)', 'success': True}), 200
@@ -422,86 +437,9 @@ def simple_network_monitored_directories():
         }
     })
 
-# Add direct route for network monitored directories to ensure it's available
-@app.route('/api/network/monitored_directories', methods=['GET'])
-def network_monitored_directories():
-    """Endpoint to get network monitored directories"""
-    try:
-        from network_endpoint import get_network_monitored_directories_handler
-        return get_network_monitored_directories_handler(network_monitor)
-    except Exception as e:
-        # Fallback implementation in case of import errors
-        import os
-        import logging
-        from datetime import datetime
-        from flask import jsonify
-        
-        try:
-            # Get timestamp for last scan
-            last_scan = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            
-            # Define a comprehensive set of monitored directories that cover common system areas
-            monitored_dirs = [
-                # System directories - critical for malware monitoring
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32\\drivers\\etc'),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32\\config'),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32\\wbem'),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32\\tasks'),  # Scheduled tasks
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'SysWOW64'),
-                os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'Prefetch'),
-                
-                # User directories - common for user-initiated malware
-                os.path.join(os.environ.get('USERPROFILE', ''), 'Documents'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'Downloads'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Local\\Temp'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Roaming'),
-                
-                # Startup locations - critical for persistence mechanisms
-                os.path.join(os.environ.get('PROGRAMDATA', 'C:\\ProgramData'), 'Microsoft\\Windows\\Start Menu\\Programs\\Startup'),
-                os.path.join(os.environ.get('USERPROFILE', ''), 'AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup'),
-            ]
-            
-            # Build response data
-            directories = []
-            for dir_path in monitored_dirs:
-                exists = os.path.exists(dir_path)
-                accessible = exists and os.access(dir_path, os.R_OK)
-                file_count = 0
-                
-                if accessible:
-                    try:
-                        file_count = len([f for f in os.listdir(dir_path) if os.path.isfile(os.path.join(dir_path, f))])
-                    except Exception:
-                        logging.warning(f"Failed to count files in {dir_path}", exc_info=False)
-                
-                directories.append({
-                    'path': dir_path,
-                    'exists': exists,
-                    'accessible': accessible,
-                    'file_count': file_count
-                })
-            
-            return jsonify({
-                'success': True,
-                'monitoring_status': {
-                    'enabled': True,
-                    'last_scan': last_scan,
-                    'total_directories': len(directories),
-                    'directories': directories
-                }
-            })
-            
-        except Exception as e2:
-            logging.error(f"Complete fallback error: {str(e2)}")
-            return jsonify({
-                'success': False,
-                'error': str(e2),
-                'monitoring_status': {
-                    'enabled': False,
-                    'directories': []
-                }
-            }), 500
+# NOTE: The canonical /api/network/monitored_directories handler is
+# simple_network_monitored_directories() defined above. All previous duplicate
+# definitions of this route have been removed to prevent Flask endpoint conflicts.
 
 # Network monitor instance will be initialized on first request (to avoid duplicate starts and ensure runtime paths are available)
 # set_network_monitor_instance will be called when the monitor is created in initialize_monitors()
@@ -629,21 +567,39 @@ DEFAULT_MONITORED_DIRECTORIES = [
     os.path.join(os.environ.get('USERPROFILE', ''), 'Desktop'),
     os.path.join(os.environ.get('USERPROFILE', ''), 'Pictures'),
     os.path.join(os.environ.get('USERPROFILE', ''), 'Videos'),
-    
+
     # Temporary folders - common for dropper malware
     os.path.join(os.environ.get('TEMP', '')),
-    os.path.join(os.environ.get('SYSTEMROOT', 'C:\Windows'), 'Temp'),
-    
+    os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'Temp'),
+
     # Startup locations - persistence mechanisms
-    os.path.join(os.environ.get('APPDATA', ''), 'Microsoft\Windows\Start Menu\Programs\Startup'),
-    
+    os.path.join(os.environ.get('APPDATA', ''), 'Microsoft\\Windows\\Start Menu\\Programs\\Startup'),
+
     # AppData locations - commonly abused for hiding malware
     os.path.join(os.environ.get('APPDATA', '')),
     os.path.join(os.environ.get('LOCALAPPDATA', '')),
-    
+
     # System locations that might be compromised
-    os.path.join(os.environ.get('SYSTEMROOT', 'C:\Windows'), 'System32'),
+    os.path.join(os.environ.get('SYSTEMROOT', 'C:\\Windows'), 'System32'),
+
+    # ── Web server roots — webshells are typically dropped here ──────────────
+    # IIS (Windows default web root)
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'inetpub', 'wwwroot'),
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'inetpub', 'wwwroot', 'asp'),
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'inetpub', 'wwwroot', 'aspnet_client'),
+    # XAMPP
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'xampp', 'htdocs'),
+    # WAMP
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'wamp', 'www'),
+    os.path.join(os.environ.get('SystemDrive', 'C:'), 'wamp64', 'www'),
+    # User-local web roots
+    os.path.join(os.environ.get('USERPROFILE', ''), 'www'),
+    os.path.join(os.environ.get('USERPROFILE', ''), 'public_html'),
+    os.path.join(os.environ.get('USERPROFILE', ''), 'htdocs'),
+    os.path.join(os.environ.get('USERPROFILE', ''), 'Sites'),
 ]
+# Strip entries that don't exist so they don't clutter scan results
+DEFAULT_MONITORED_DIRECTORIES = [d for d in DEFAULT_MONITORED_DIRECTORIES if d and os.path.isdir(d)]
 
 # Initialize encryption key
 # SECURITY: Never auto-generate FERNET_KEY - must be provided by admin
@@ -723,8 +679,7 @@ def initialize_monitors():
 
         folder_watcher = FolderWatcher(directories)
         folder_watcher.start()
-
-_initialized = True
+        _initialized = True  # Mark initialized INSIDE the guard so it actually takes effect
 
 # Initialize threat detection
 class ThreatDetectionModel:
@@ -854,9 +809,28 @@ def login():
         password = request.form.get('password')
         
         user = User.query.filter_by(username=username).first()
-        if user and user.password == password:  # In a real app, use proper password hashing
-            login_user(user, remember=True)
-            return redirect(url_for('index'))
+        # Use bcrypt to verify the hashed password — never compare plaintext
+        if user and user.password:
+            try:
+                import bcrypt as _bcrypt
+                _password_ok = _bcrypt.checkpw(
+                    password.encode('utf-8'),
+                    user.password.encode('utf-8') if isinstance(user.password, str) else user.password
+                )
+            except Exception:
+                # Fallback for legacy plaintext-stored passwords (first-login migration)
+                _password_ok = (user.password == password)
+                if _password_ok:
+                    # Migrate to hashed on successful legacy login
+                    try:
+                        import bcrypt as _bcrypt
+                        user.password = _bcrypt.hashpw(password.encode('utf-8'), _bcrypt.gensalt()).decode('utf-8')
+                        db.session.commit()
+                    except Exception:
+                        pass
+            if _password_ok:
+                login_user(user, remember=True)
+                return redirect(url_for('index'))
         
         flash('Invalid username or password')
     return send_from_directory('website', 'login.html')
@@ -2238,6 +2212,8 @@ def index():
 conditional_startup_state = {
     'running': False,
     'last_run': None,
+    'started_at': None,
+    'last_updated': None,
     'duration': None,
     'scanned_files': 0,
     'quarantined_files': 0,
@@ -2247,6 +2223,7 @@ conditional_startup_state = {
     'ransomware_indicators': 0,
     'persistence_indicators': 0,
     'yara_suspicious': 0,
+    'blocked_threats': 0,
     'last_error': None,
 }
 
@@ -2279,8 +2256,12 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     conditional_startup_state.update({
         'running': False,
         'last_run': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
-        'scanned_files': count('scanned_files'),
+        # Use the stable integer counter so the number never decreases mid-scan.
+        # scanned_files is a dict that grows during scanning; len() on it
+        # fluctuates when the UI polls mid-run, causing the counter to jump.
+        'scanned_files': results.get('scanned_files_count') or count('scanned_files'),
         'quarantined_files': count('quarantined_files'),
         'errors': count('errors'),
         'process_events': count('process_events'),
@@ -2288,6 +2269,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'ransomware_indicators': count('ransomware_indicators'),
         'persistence_indicators': persistence_count,
         'yara_suspicious': count('yara_suspicious'),
+        'blocked_threats': conditional_startup_state.get('blocked_threats', 0),
         'last_error': str(error) if error else None,
     })
     return conditional_startup_state
@@ -2303,27 +2285,75 @@ def conditional_startup_status():
 
 @app.route('/run_startup', methods=['POST'])
 def run_startup():
-    """Run conditional startup scans (all monitored directories and all processes)"""
-    try:
-        from conditional_startup import run_conditional_startup_logic
-        conditional_startup_state['running'] = True
-        start_time = time.time()
-        scan_data = run_conditional_startup_logic(open_browser=False)
-        duration = time.time() - start_time
-        record_conditional_startup_run(scan_data, duration)
-        scan_data, _ = normalize_conditional_startup_data(scan_data)
-        return jsonify({
-            "status": "success",
-            "results": scan_data.get("results", []),
-            "errors": scan_data.get("errors", []),
-            "log": scan_data.get("log", ""),
-            "scanned_directories": load_scan_directories(),
-            "scan_time": f"{duration:.2f} seconds",
-            "timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    """Run conditional startup scans in a background thread.
+
+    Returns immediately with {"status": "started"} so Flask stays responsive
+    and the frontend's 5-second /api/conditional_startup/status polls return
+    live incremental counts (Files Scanned, Quarantined, YARA Suspicious, …)
+    instead of jumping from 0 to final all at once.
+    """
+    # Prevent launching a second scan while one is already running.
+    if conditional_startup_state.get('running'):
+        return jsonify({"status": "already_running",
+                        "message": "A scan is already in progress"}), 200
+
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    conditional_startup_state.update({
+        'running': True,
+        'started_at': now_str,
+        'last_updated': now_str,
+        'last_run': None,
+        'duration': None,
+        'scanned_files': 0,
+        'quarantined_files': 0,
+        'errors': 0,
+        'process_events': 0,
+        'ml_detections': 0,
+        'ransomware_indicators': 0,
+        'persistence_indicators': 0,
+        'yara_suspicious': 0,
+        'blocked_threats': 0,
+        'last_error': None,
+    })
+
+    def _progress(results):
+        """Called by conditional_startup after every file completes."""
+        persistence = results.get('persistence_indicators') or {}
+        persistence_count = sum(
+            len(v) for v in persistence.values() if isinstance(v, (list, tuple, dict))
+        )
+        conditional_startup_state.update({
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'scanned_files': results.get('scanned_files_count', 0),
+            'quarantined_files': len(results.get('quarantined_files') or []),
+            'errors': len(results.get('errors') or []),
+            'process_events': len(results.get('process_events') or []),
+            'ml_detections': len(results.get('ml_detections') or []),
+            'ransomware_indicators': len(results.get('ransomware_indicators') or []),
+            'persistence_indicators': persistence_count,
+            'yara_suspicious': len(results.get('yara_suspicious') or []),
         })
-    except Exception as e:
-        record_conditional_startup_run(error=e)
-        return jsonify({"status": "error", "message": str(e)}), 500
+
+    def _run():
+        try:
+            from conditional_startup import run_conditional_startup_logic
+            start_time = time.time()
+            scan_data = run_conditional_startup_logic(
+                open_browser=False, progress_callback=_progress)
+            duration = time.time() - start_time
+            record_conditional_startup_run(scan_data, duration)
+        except Exception as e:
+            logging.error(f"Background scan error: {e}")
+            record_conditional_startup_run(error=e)
+
+    t = threading.Thread(target=_run, name='conditional-startup-scan', daemon=True)
+    t.start()
+
+    return jsonify({
+        "status": "started",
+        "message": "Scan started. Poll /api/conditional_startup/status for live progress.",
+        "timestamp": now_str,
+    })
 
 # Route for conditional startup
 @app.route('/run_conditional_startup', methods=['POST'])
@@ -2335,7 +2365,7 @@ def run_conditional_startup_route():
         results = conditional_startup.run_conditional_startup_logic(open_browser=False)
         return jsonify({
             'status': 'success',
-            'scanned_files': results.get('scanned_files', []),
+            'scanned_files': results.get('scanned_files_count') or len(results.get('scanned_files') or []),
             'quarantined_files': results.get('quarantined_files', []),
             'errors': results.get('errors', []),
             'process_events': results.get('process_events', []),
@@ -2423,15 +2453,11 @@ def toggle_network_monitor(action):
         logging.error(f"Error toggling network monitor: {str(e)}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
-# Route to get network monitored directories
-@app.route('/api/network/monitored_directories', methods=['GET'])
+# Route to get network monitored directories (canonical — delegates to simple_network_monitored_directories)
+# NOTE: Flask does not allow the same URL to be registered twice.  The canonical
+# implementation lives in simple_network_monitored_directories() above.
 def get_network_monitored_directories_endpoint():
-    try:
-        # Get network monitored directories
-        return get_network_monitored_directories_handler(network_monitor)
-    except Exception as e:
-        logging.error(f"Error getting network monitored directories: {str(e)}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+    return simple_network_monitored_directories()
 
 # Route to get folder watcher paths
 @app.route('/get_folder_watcher_paths', methods=['GET'])

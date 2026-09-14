@@ -10,3 +10,19 @@
 ~/Downloads
 ~/Documents
 ~/Desktop
+
+# ── Web server roots — webshells are typically dropped here ─────────────────
+# IIS (default Windows web root)
+%SystemDrive%\inetpub\wwwroot
+%SystemDrive%\inetpub\wwwroot\asp
+%SystemDrive%\inetpub\wwwroot\aspnet_client
+# XAMPP (common developer stack on Windows)
+%SystemDrive%\xampp\htdocs
+# WAMP
+%SystemDrive%\wamp\www
+%SystemDrive%\wamp64\www
+# Common user-placed web roots
+%UserProfile%\www
+%UserProfile%\public_html
+%UserProfile%\htdocs
+%UserProfile%\Sites

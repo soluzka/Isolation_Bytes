@@ -987,31 +987,37 @@ if (stopAutoUpdatesBtn) {
                     runBtn.disabled = true;
                     const originalText = runBtn.textContent;
                     runBtn.textContent = 'Running...';
-                    messageDiv.innerHTML = '<p style="color:#b36200;">Running all scans, this can take a while...</p>';
+                    messageDiv.innerHTML = '<p style="color:#b36200;">Scan started — tiles update every 5 seconds as files are scanned...</p>';
                     fetch('/run_startup', {method: 'POST', credentials: 'include'})
                         .then(async response => {
-                            if (!response.ok) {
-                                throw new Error(`Request failed with status ${response.status}`);
-                            }
                             const text = await response.text();
-                            try {
-                                return JSON.parse(text);
-                            } catch (e) {
-                                throw new Error('Response was not valid JSON');
-                            }
-                        })
-                        .then(data => {
-                            if (data.success || data.status === 'success') {
-                                messageDiv.className = 'alert alert-info'; messageDiv.textContent = htmlEscape(data.message || 'Conditional startup completed.');
+                            let data;
+                            try { data = JSON.parse(text); } catch(e) { data = {}; }
+                            if (response.status === 200 && (data.status === 'started' || data.status === 'already_running')) {
+                                // Scan is running in background — the setInterval below
+                                // will update the tiles live. Re-enable the button once
+                                // the status endpoint reports running:false.
+                                if (data.status === 'already_running') {
+                                    messageDiv.innerHTML = '<p style="color:#b36200;">A scan is already running — watching for updates...</p>';
+                                }
+                                const waitForFinish = setInterval(() => {
+                                    refreshStatus().then(d => {
+                                        if (d && !d.running) {
+                                            clearInterval(waitForFinish);
+                                            runBtn.disabled = false;
+                                            runBtn.textContent = originalText;
+                                            messageDiv.innerHTML = '<p style="color:#27ae60;">Scan complete.</p>';
+                                        }
+                                    }).catch(() => {});
+                                }, 5000);
                             } else {
-                                messageDiv.className = 'alert alert-danger'; messageDiv.textContent = 'Error: ' + htmlEscape(data.message || data.error || 'Unknown error');
+                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${htmlEscape((data && (data.message || data.error)) || 'Unknown error')}</div>`;
+                                runBtn.disabled = false;
+                                runBtn.textContent = originalText;
                             }
-                            return refreshStatus();
                         })
                         .catch(error => {
                             messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${htmlEscape(error.message || error)}</div>`;
-                        })
-                        .finally(() => {
                             runBtn.disabled = false;
                             runBtn.textContent = originalText;
                         });
