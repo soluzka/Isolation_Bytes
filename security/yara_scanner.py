@@ -139,6 +139,16 @@ NOISY_RULE_NAMES = {
     'SuspDllOwnship_ZA',
     'SuspDllOwnship_DA_PowerShell',
     'DLL_Tampering_Generic',
+    # Additional DLL security rules that may false positive on legitimate unblock/quarantine operations
+    'DLL_Hijacking_Generic',
+    'DLL_Sideloading_Attack',
+    'DLL_Injection_Techniques',
+    'DLL_Suspicious_Imports',
+    'Microsoft_Threat_Indicators',
+    'DLL_Phantom_DLL_Hijacking',
+    'DLL_Comodo_Hijacking',
+    'DLL_Persistence_Mechanisms',
+    'DLL_Obfuscation_Techniques',
 }
 
 # Rule-name keywords that indicate a known malware family or definitive malware

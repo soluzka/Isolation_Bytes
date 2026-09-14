@@ -46,9 +46,10 @@ rule SuspDllOwnship_ZA
     condition:
         $pe and
         (
-            (2 of ($dll*) and 2 of ($own*) and 2 of ($priv*)) or
-            (2 of ($own*) and 2 of ($priv*) and 2 of ($inj*)) or
-            (1 of ($own*) and 2 of ($inj*) and 1 of ($priv*))
+            // Require ALL three categories of malicious indicators (DLL + ownership + injection)
+            (2 of ($dll*) and 2 of ($own*) and 2 of ($priv*) and 2 of ($inj*)) or
+            // Alternative: ownership + privilege + injection (very strong indicator)
+            (2 of ($own*) and 2 of ($priv*) and 2 of ($inj*))
         )
 }
 
@@ -97,9 +98,10 @@ rule SuspDllOwnship_DA_PowerShell
             $ps1 or $ps2 or $ps3 or $ps4
         ) and
         (
-            (1 of ($dll_ps*) and 1 of ($sec*) and 2 of ($obf*)) or
-            (2 of ($sec*) and 1 of ($wmi*) and 2 of ($obf*)) or
-            (1 of ($dll_ps*) and 2 of ($obf*) and 1 of ($wmi*))
+            // Require ALL three categories (DLL + security + obfuscation + WMI) for stronger detection
+            (1 of ($dll_ps*) and 1 of ($sec*) and 2 of ($obf*) and 1 of ($wmi*)) or
+            // Alternative: security + WMI + obfuscation (still strong)
+            (2 of ($sec*) and 1 of ($wmi*) and 2 of ($obf*))
         )
 }
 
@@ -138,9 +140,10 @@ rule DLL_Tampering_Generic
     condition:
         $pe and
         (
+            // Require ALL three categories for stronger detection (avoid false positives on legitimate operations)
             (2 of ($api*) and 1 of ($reg*) and 1 of ($fs*)) or
-            (1 of ($api*) and 2 of ($fs*) and 1 of ($reg*)) or
-            (2 of ($reg*) and 1 of ($fs*) and 1 of ($api*))
+            // Alternative: API + file system + registry (still requires multiple indicators)
+            (2 of ($api*) and 2 of ($fs*) and 1 of ($reg*))
         )
 }
 
