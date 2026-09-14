@@ -1,206 +1,212 @@
-"""
-Manual and (opt-in) automatic blocking of outbound connections to specific
-remote IPs, via Windows Firewall rules (netsh advfirewall).
+"""Windows Firewall outbound/inbound IP blocking with safe validation.
 
-Design notes:
-- Requires the process to be running elevated (Administrator). netsh
-  advfirewall rejects rule changes otherwise; block_ip()/unblock_ip() detect
-  that specific failure and return a clear, actionable error rather than
-  silently doing nothing.
-- Blocks are persisted to a JSON state file (blocked_ips.json) so the block
-  list survives server restarts and can be listed/reversed later.
-- Never blocks loopback/private/link-local addresses -- those are either the
-  local machine itself or LAN devices, and firewalling them out could cut off
-  legitimate local services (or the user's own network) rather than an
-  external threat.
-- Auto-blocking (see should_auto_block_ip) is opt-in and off by default: the
-  existing C2 heuristic this would drive from (uncommon remote port) is
-  explicitly a weak proxy (see get_c2_patterns() in quick_start.py), so
-  auto-blocking on it risks cutting off legitimate connections. Manual,
-  human-initiated blocking from the dashboard doesn't have that risk since a
-  person is making the call on a specific connection they're looking at.
+Automatic blocking is deliberately gated on a *confirmed* C2 assessment rather
+than a weak port-only heuristic. Manual calls to block_ip remain available.
 """
 import ipaddress
 import json
 import logging
 import os
-import subprocess
 import shutil
+import subprocess
+import time
+from typing import Any, Mapping, Optional
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
-
 logger = logging.getLogger('network_blocking')
-
 _STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'blocked_ips.json')
 _RULE_PREFIX = 'AV_Block_'
 
 
 def _rule_name(ip):
-    return f"{_RULE_PREFIX}{ip}"
+    return f'{_RULE_PREFIX}{ip}'
 
 
 def _load_state():
     if os.path.exists(_STATE_PATH):
         try:
-            with open(_STATE_PATH, 'r') as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError) as e:
-            logger.warning(f"Could not read {_STATE_PATH}: {e}")
+            with open(_STATE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning('Could not read %s: %s', _STATE_PATH, exc)
     return {}
 
 
 def _save_state(state):
     try:
-        with open(_STATE_PATH, 'w') as f:
-            json.dump(state, f, indent=2)
-    except OSError as e:
-        logger.error(f"Could not write {_STATE_PATH}: {e}")
+        directory = os.path.dirname(_STATE_PATH)
+        os.makedirs(directory, exist_ok=True)
+        temp_path = _STATE_PATH + '.tmp'
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(state, f, indent=2, sort_keys=True)
+        os.replace(temp_path, _STATE_PATH)
+        return True
+    except OSError as exc:
+        logger.error('Could not write %s: %s', _STATE_PATH, exc)
+        return False
 
 
 def _validate_blockable_ip(ip):
-    """Returns (valid, error_message). Refuses to block loopback/private/
-    link-local/reserved addresses."""
+    """Return (valid, error), rejecting malformed and local/reserved addresses."""
+    if not isinstance(ip, str) or not ip.strip():
+        return False, 'IP address must be a non-empty string'
+    value = ip.strip()
     try:
-        addr = ipaddress.ip_address(ip)
+        addr = ipaddress.ip_address(value)
     except ValueError:
-        return False, f"{ip!r} is not a valid IP address"
-    if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast:
-        return False, f"Refusing to block {ip} -- it's loopback/private/link-local/reserved, not an external address"
+        return False, f'{value!r} is not a valid IP address'
+    if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified:
+        return False, f'Refusing to block {value}: it is a local/reserved address'
     return True, None
 
 
-def block_ip(ip, reason=""):
-    """Add a Windows Firewall rule blocking outbound traffic to `ip`.
-    Returns (success: bool, message: str)."""
+def _run_netsh(args):
+    try:
+        result = subprocess.run(
+            [NETSH_PATH, 'advfirewall', 'firewall'] + list(args),
+            capture_output=True,
+            text=True,
+            timeout=15,
+            creationflags=0x08000000 if os.name == 'nt' else 0,
+            check=False,
+        )
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        return False, f'Failed to run Windows Firewall command: {exc}'
+
+    combined = f'{result.stdout}\n{result.stderr}'.strip()
+    if result.returncode == 0:
+        return True, combined or 'OK'
+    lowered = combined.lower()
+    if any(token in lowered for token in ('access is denied', 'elevation', 'requires elevation', 'requested operation requires elevation')):
+        return False, 'Blocking requires the app to run as Administrator.'
+    return False, f'netsh failed: {combined or "unknown error"}'
+
+
+def block_ip(ip, reason=''):
+    """Block outbound traffic to an externally routable IP."""
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
-
+    ip = ip.strip()
     state = _load_state()
-    if ip in state:
-        return True, f"{ip} is already blocked"
+    existing = state.get(ip)
+    if existing and existing.get('outbound', True):
+        return True, f'{ip} is already blocked'
 
-    try:
-        result = subprocess.run(  # nosem; nosec B603
-            [NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
-             f'name={_rule_name(ip)}', 'dir=out', 'action=block', f'remoteip={ip}'],
-            capture_output=True, text=True, timeout=15,
-            creationflags=0x08000000
-        )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).strip()
-            if 'elevation' in combined.lower():
-                return False, ("Blocking requires the app to run as Administrator "
-                                "(Windows Firewall rule changes need elevation).")
-            return False, f"netsh failed: {combined or 'unknown error'}"
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, f"Failed to run netsh: {e}"
+    ok, msg = _run_netsh([
+        'add', 'rule',
+        f'name={_rule_name(ip)}',
+        'dir=out', 'action=block', 'enable=yes',
+        'profile=any', f'remoteip={ip}',
+    ])
+    if not ok:
+        return False, msg
 
-    import time
-    state[ip] = {"reason": reason, "blocked_at": time.strftime('%Y-%m-%d %H:%M:%S')}
-    _save_state(state)
-    logger.warning(f"Blocked outbound connections to {ip} ({reason})")
-    return True, f"Blocked {ip}"
+    state[ip] = {
+        'reason': reason or 'manual block',
+        'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'outbound': True,
+        'inbound': bool(existing and existing.get('inbound')),
+    }
+    if not _save_state(state):
+        # Do not claim a durable block-list state if persistence failed. The
+        # firewall rule itself is still active, so report that accurately.
+        return True, f'Blocked {ip}; warning: local block state could not be saved'
+    logger.warning('Blocked outbound connections to %s (%s)', ip, reason or 'manual block')
+    return True, f'Blocked {ip}'
 
 
 def unblock_ip(ip):
-    """Remove the firewall rule blocking `ip`. Returns (success, message)."""
+    """Remove both inbound and outbound firewall rules for an IP."""
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
-    try:
-        result = subprocess.run(  # nosem; nosec B603
-            [NETSH_PATH, 'advfirewall', 'firewall', 'delete', 'rule', f'name={_rule_name(ip)}'],
-            capture_output=True, text=True, timeout=15,
-            creationflags=0x08000000
-        )
-        combined = (result.stdout + result.stderr).strip()
-        if result.returncode != 0 and 'elevation' in combined.lower():
-            return False, "Unblocking requires the app to run as Administrator."
-        # netsh returns non-zero if the rule doesn't exist, which is fine here --
-        # we still want to drop it from our own state either way.
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, f"Failed to run netsh: {e}"
-
+    ip = ip.strip()
+    errors = []
+    for suffix in ('', '_in'):
+        ok, msg = _run_netsh(['delete', 'rule', f'name={_rule_name(ip)}{suffix}'])
+        if not ok and 'not found' not in msg.lower() and 'no rules match' not in msg.lower():
+            errors.append(msg)
+    if errors:
+        return False, errors[0]
     state = _load_state()
-    if ip in state:
-        del state[ip]
-        _save_state(state)
-    return True, f"Unblocked {ip}"
+    state.pop(ip, None)
+    _save_state(state)
+    return True, f'Unblocked {ip}'
 
 
 def list_blocked_ips():
-    """Returns {ip: {reason, blocked_at}} for all currently-tracked blocks."""
     return _load_state()
 
 
-def _run_netsh(args):
-    """Run a netsh advfirewall command and return a (success, message) tuple."""
-    try:
-        result = subprocess.run(  # nosem; nosec B603
-            [NETSH_PATH, 'advfirewall', 'firewall'] + args,
-            capture_output=True, text=True, timeout=15,
-            creationflags=0x08000000
-        )
-        if result.returncode != 0:
-            combined = (result.stdout + result.stderr).strip()
-            if 'elevation' in combined.lower():
-                return False, "Blocking requires the app to run as Administrator."
-            return False, f"netsh failed: {combined or 'unknown error'}"
-        return True, "OK"
-    except (subprocess.TimeoutExpired, OSError) as e:
-        return False, f"Failed to run netsh: {e}"
-
-
-def block_ip_inbound(ip, reason=""):
-    """Block inbound traffic from a remote IP."""
+def block_ip_inbound(ip, reason=''):
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
-
+    ip = ip.strip()
     state = _load_state()
-    if state.get(ip, {}).get("inbound"):
-        return True, f"{ip} is already inbound-blocked"
+    if state.get(ip, {}).get('inbound'):
+        return True, f'{ip} is already inbound-blocked'
 
-    ok, msg = _run_netsh(['add', 'rule', f'name={_rule_name(ip)}_in', 'dir=in', 'action=block', f'remoteip={ip}'])
+    ok, msg = _run_netsh([
+        'add', 'rule', f'name={_rule_name(ip)}_in',
+        'dir=in', 'action=block', 'enable=yes', 'profile=any', f'remoteip={ip}',
+    ])
     if not ok:
         return False, msg
-
-    import time
-    state.setdefault(ip, {"reason": reason, "blocked_at": time.strftime('%Y-%m-%d %H:%M:%S')})
-    state[ip]["inbound"] = True
+    state.setdefault(ip, {'reason': reason or 'inbound block', 'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S')})
+    state[ip]['inbound'] = True
+    state[ip]['outbound'] = bool(state[ip].get('outbound', False))
     _save_state(state)
-    logger.warning(f"Blocked inbound traffic from {ip} ({reason})")
-    return True, f"Blocked inbound from {ip}"
+    logger.warning('Blocked inbound traffic from %s (%s)', ip, reason or 'manual block')
+    return True, f'Blocked inbound from {ip}'
 
 
-def block_outbound_port(port, reason=""):
-    """Block outbound traffic on a specific port (TCP/UDP)."""
-    if not isinstance(port, int) or not 0 <= port <= 65535:
-        return False, f"Invalid port: {port!r}"
-
-    rule = f"AV_BlockPort_{port}"
+def block_outbound_port(port, reason=''):
+    if not isinstance(port, int) or not 1 <= port <= 65535:
+        return False, f'Invalid port: {port!r}'
+    rule = f'AV_BlockPort_{port}'
     state = _load_state()
     if state.get(rule):
-        return True, f"Port {port} is already blocked"
-
-    ok, msg = _run_netsh(['add', 'rule', f'name={rule}', 'dir=out', 'action=block', 'protocol=any', f'localport={port}'])
+        return True, f'Port {port} is already blocked'
+    ok, msg = _run_netsh([
+        'add', 'rule', f'name={rule}', 'dir=out', 'action=block',
+        'enable=yes', 'profile=any', 'protocol=any', f'localport={port}',
+    ])
     if not ok:
         return False, msg
-
-    import time
-    state[rule] = {"port": port, "reason": reason, "blocked_at": time.strftime('%Y-%m-%d %H:%M:%S')}
+    state[rule] = {'port': port, 'reason': reason or 'manual port block', 'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S')}
     _save_state(state)
-    logger.warning(f"Blocked outbound traffic on port {port} ({reason})")
-    return True, f"Blocked outbound port {port}"
+    return True, f'Blocked outbound port {port}'
 
 
-def should_auto_block_ip(ip):
-    """Whether an IP is eligible for automatic blocking. Currently always
-    False beyond the basic validity check -- auto-blocking is opt-in and,
-    even when enabled (see the auto_block_enabled toggle in quick_start.py),
-    should only ever act on signals stronger than the current C2 heuristic.
-    Kept as a single choke point so that if/when a real threat-intel feed is
-    integrated, this is the one place that needs to change."""
+def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidence=None, min_level='high'):
+    """Return True only for a valid external IP with confirmed C2 evidence.
+
+    A boolean ``confirmed_c2`` is required unless an assessment mapping is
+    supplied. This prevents the old uncommon-port heuristic from becoming an
+    automatic firewall action.
+    """
     valid, _ = _validate_blockable_ip(ip)
-    return valid
+    if not valid:
+        return False
+    if confirmed_c2:
+        return True
+    if isinstance(threat_level, Mapping):
+        level = str(threat_level.get('level', '')).lower()
+        score = float(threat_level.get('score', 0.0) or 0.0)
+        return level in {'critical', 'high'} and score >= 0.65
+    if confidence is not None:
+        try:
+            return float(confidence) >= 0.90
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
+def auto_block_confirmed_c2(ip, *, threat_level=None, confidence=None, reason='confirmed C2'):
+    """Convenience gate for the agent/network monitor."""
+    if not should_auto_block_ip(ip, threat_level=threat_level, confidence=confidence, confirmed_c2=True):
+        return False, 'C2 confirmation threshold not met'
+    return block_ip(ip, reason=reason)
