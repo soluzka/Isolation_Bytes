@@ -140,11 +140,54 @@ def _wrap_conditional_startup_routes(legacy):
             app.view_functions[endpoint] = startup_status_wrapped
 
 
+def _fix_license_input_and_login_csrf(legacy):
+    """Keep generated IB license keys intact and allow the public login API.
+
+    RSA signatures make generated license keys substantially longer than the
+    old 256-character sanitizer limit. The login page is also a public API
+    client, so requiring a browser-session CSRF token on its first login POST
+    causes the request to fail before credentials/license validation runs.
+    """
+    try:
+        from security import web_hardening as _web_hardening
+
+        original_sanitize = getattr(legacy, 'sanitize_text', None)
+        if callable(original_sanitize):
+            def license_safe_sanitize(value, *, max_length=512):
+                raw = str(value or '').strip()
+                if raw.startswith('IB-'):
+                    return _web_hardening._CONTROL_CHARS.sub('', raw).strip()
+                return original_sanitize(value, max_length=max_length)
+
+            legacy.sanitize_text = license_safe_sanitize
+    except Exception:
+        pass
+
+    # init_web_security stores its exempt-path set in the closure of the
+    # already-registered before_request function. Add the public login API to
+    # that set without replacing the security middleware itself.
+    try:
+        for funcs in getattr(app, 'before_request_funcs', {}).values():
+            for func in funcs:
+                if getattr(func, '__name__', '') != 'enforce_web_security':
+                    continue
+                freevars = getattr(func.__code__, 'co_freevars', ())
+                closure = getattr(func, '__closure__', ()) or ()
+                for name, cell in zip(freevars, closure):
+                    if name == 'exempt_paths':
+                        value = cell.cell_contents
+                        if isinstance(value, set):
+                            value.update({'/api/user/login'})
+    except Exception:
+        pass
+
+
 # cloud_server.py imports this helper immediately after importing the legacy
 # cloud app, so the legacy view functions are already registered here.
 try:
     from cloud import cloud_server_original as _legacy_app
     _wrap_conditional_startup_routes(_legacy_app)
+    _fix_license_input_and_login_csrf(_legacy_app)
 except Exception:
     # The result helper remains usable independently in tests and tooling.
     pass
