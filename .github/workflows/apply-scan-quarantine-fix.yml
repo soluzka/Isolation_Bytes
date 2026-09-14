@@ -1,0 +1,70 @@
+name: Apply scan and quarantine fix
+on:
+  push:
+    branches: [fix-scan-quarantine-ui]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Patch scan acknowledgement and automatic quarantine
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          # Backend: make the async command contract explicit.
+          p = Path('cloud/cloud_server.py')
+          s = p.read_text(encoding='utf-8')
+          old = "return jsonify({'ok': True, 'message': f'Scan triggered for {sent} agent(s). Results will appear shortly.', 'agents': sent})"
+          new = "return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message': f'Scan triggered for {sent} agent(s). Results will appear shortly.', 'agents': sent, 'agents_triggered': sent})"
+          if old not in s:
+              raise SystemExit('cloud_server.py target not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+          # Agent: confirmed high/critical YARA findings are quarantined using
+          # the single quarantine_utils implementation after containment.
+          p = Path('standalone_agent.py')
+          s = p.read_text(encoding='utf-8')
+          old = """                            if _rank_of(highest) >= _rank_of('high'):\n                                self._threats_blocked += 1\n                                # Block in place only — no quarantine during scan.\n                                # Quarantine is a separate manual action from the dashboard.\n                                bok = self._block_file_in_place(filepath)"""
+          new = """                            if _rank_of(highest) >= _rank_of('high'):\n                                self._threats_blocked += 1\n                                # Contain first, then automatically quarantine confirmed\n                                # high/critical malware. _quarantine_file() delegates to\n                                # quarantine_utils, whose canonical destination is\n                                # %USERPROFILE%\\AppData\\Local\\Temp\\Defender_Quarantine.\n                                bok = self._block_file_in_place(filepath)"""
+          if old not in s:
+              raise SystemExit('standalone_agent.py YARA target not found')
+          s = s.replace(old, new, 1)
+          old = """                                else:\n                                    # Block failed — try rename fallback\n                                    rok = self._rename_block_fallback(filepath)\n                                    for f in findings:\n                                        if f.get('path') == filepath:\n                                            if rok:\n                                                f['blocked'] = True\n                                                f['renamed'] = True\n                                            else:\n                                                f['block_error'] = True\n                    # ML detection — always run, even on YARA-matched files"""
+          new = """                                else:\n                                    # Block failed — try rename fallback\n                                    rok = self._rename_block_fallback(filepath)\n                                    for f in findings:\n                                        if f.get('path') == filepath:\n                                            if rok:\n                                                f['blocked'] = True\n                                                f['renamed'] = True\n                                            else:\n                                                f['block_error'] = True\n                                # Quarantine only confirmed high/critical YARA hits.\n                                # Keep lower-severity/suspicious matches available for review.\n                                try:\n                                    if os.path.exists(filepath):\n                                        qok = self._quarantine_file(filepath)\n                                        for f in findings:\n                                            if f.get('path') == filepath:\n                                                f['quarantined'] = bool(qok)\n                                                if qok:\n                                                    f['blocked'] = False\n                                except Exception as qe:\n                                    print(f'[QUARANTINE] Failed for {filepath}: {qe}')\n                    # ML detection — always run, even on YARA-matched files"""
+          if old not in s:
+              raise SystemExit('standalone_agent.py quarantine insertion target not found')
+          s = s.replace(old, new, 1)
+          old = """                                self._threats_blocked += 1\n                            print(f\"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}\")"""
+          new = """                                self._threats_blocked += 1\n                            # ML-only findings are quarantined when the heuristic score\n                            # is strongly suspicious (>= 80). This avoids moving ordinary\n                            # medium-confidence files while still enforcing cleanup for\n                            # high-confidence malware detections.\n                            try:\n                                if ml_suspicious and ml_score >= 80 and os.path.exists(filepath):\n                                    qok = self._quarantine_file(filepath)\n                                    target = next((f for f in findings if f.get('path') == filepath), None)\n                                    if target:\n                                        target['quarantined'] = bool(qok)\n                                        if qok:\n                                            target['blocked'] = False\n                            except Exception as qe:\n                                print(f'[QUARANTINE] ML quarantine failed for {filepath}: {qe}')\n                            print(f\"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}\")"""
+          if old not in s:
+              raise SystemExit('standalone_agent.py ML target not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+
+          # UI: never classify a successful async scan acknowledgement as an error.
+          p = Path('templates/yara_scanner.html')
+          s = p.read_text(encoding='utf-8')
+          old = """        .then(r => r.json())\n        .then(data => {\n            if (data.ok) {"""
+          new = """        .then(async response => {\n            const text = await response.text();\n            let data = {};\n            try { data = text ? JSON.parse(text) : {}; }\n            catch (e) { throw new Error(`Invalid server response (${response.status})`); }\n            if (!response.ok) {\n                throw new Error(data.message || data.error || `Scan request failed (${response.status})`);\n            }\n            return data;\n        })\n        .then(data => {\n            const accepted = data.ok === true || data.success === true || data.status === 'accepted';\n            if (accepted) {"""
+          if old not in s:
+              raise SystemExit('yara_scanner.html scan handler target not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit fixes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add cloud/cloud_server.py standalone_agent.py templates/yara_scanner.html
+          git commit -m 'Fix scan acknowledgement and automatic quarantine'
+          git push
+      - name: Remove one-time workflow
+        run: |
+          git rm .github/workflows/apply-scan-quarantine-fix.yml
+          git commit -m 'Remove one-time scan quarantine fix workflow'
+          git push
