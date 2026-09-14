@@ -396,7 +396,7 @@ def run_startup_compat():
         'blocked_threats': 0,
         'last_error': None
     }
-    return jsonify({'message': 'Conditional startup requested (fallback)', 'success': True}), 200
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Conditional startup requested (fallback)', 'error': None}), 200
 
 # Add direct simple route for network monitored directories (needed by YARA scanner)
 @app.route('/api/network/monitored_directories', methods=['GET'])
