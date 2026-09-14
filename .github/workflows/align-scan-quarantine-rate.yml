@@ -1,0 +1,54 @@
+name: Align scan and quarantine rate
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [security-v2]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+      - name: Align standalone scan with dashboard policy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('standalone_agent.py')
+          s = p.read_text(encoding='utf-8')
+          replacements = [
+              ('MAX_FILES_PER_SCAN = 50      # cap files per directory to keep CPU free for voice',
+               'MAX_FILES_PER_SCAN = 5000    # full-system scan budget aligned with dashboard scans'),
+              ('MAX_SCAN_CYCLE_SECONDS = 60  # hard cap per scan cycle',
+               'MAX_SCAN_CYCLE_SECONDS = 600 # allow the full-system scan to run through the dashboard scan window'),
+              ("if _rank_of(highest) >= _rank_of('high'):",
+               "if _rank_of(highest) >= _rank_of('medium'):"),
+              ('if ml_suspicious and ml_score >= 80 and os.path.exists(filepath):',
+               'if ml_suspicious and ml_score >= 60 and os.path.exists(filepath):'),
+          ]
+          for old, new in replacements:
+              if old not in s:
+                  raise SystemExit(f'Expected text not found: {old}')
+              s = s.replace(old, new)
+          anchor = """                        else:\n                            for f in findings:\n                                f['blocked'] = True\n            # ML detection for single file scan — always run\n"""
+          replacement = """                        else:\n                            for f in findings:\n                                f['blocked'] = True\n                        try:\n                            if os.path.exists(filepath):\n                                qok = self._quarantine_file(filepath)\n                                for f in findings:\n                                    if f.get('path') == filepath:\n                                        f['quarantined'] = bool(qok)\n                                        if qok:\n                                            f['blocked'] = False\n                        except Exception as qe:\n                            print(f'[QUARANTINE] Single-file YARA quarantine failed for {filepath}: {qe}')\n            # ML detection for single file scan — always run\n"""
+          if anchor not in s:
+              raise SystemExit('Single-file YARA quarantine anchor not found')
+          s = s.replace(anchor, replacement, 1)
+          anchor = """                    self._threats_blocked += 1\n                    print(f\"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}\")\n"""
+          replacement = """                    self._threats_blocked += 1\n                    try:\n                        if ml_score >= 60 and os.path.exists(filepath):\n                            qok = self._quarantine_file(filepath)\n                            target = next((f for f in findings if f.get('path') == filepath), None)\n                            if target:\n                                target['quarantined'] = bool(qok)\n                                if qok:\n                                    target['blocked'] = False\n                    except Exception as qe:\n                        print(f'[QUARANTINE] Single-file ML quarantine failed for {filepath}: {qe}')\n                    print(f\"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}\")\n"""
+          if anchor not in s:
+              raise SystemExit('Single-file ML quarantine anchor not found')
+          s = s.replace(anchor, replacement, 1)
+          p.write_text(s, encoding='utf-8')
+          PY
+      - name: Commit patch to PR branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add standalone_agent.py
+          git commit -m 'Align YARA and ML scan quarantine rates'
+          git push origin HEAD:${{ github.head_ref }}
