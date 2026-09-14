@@ -65,3 +65,86 @@ def build_complete_agent_scan_results(legacy):
         })
         total_findings += len(findings)
     return {'agents': results, 'total_findings': total_findings}
+
+
+def _json_payload(response):
+    """Extract a Flask JSON payload from a view response."""
+    try:
+        if isinstance(response, tuple):
+            response = response[0]
+        return response.get_json(silent=True), response
+    except Exception:
+        return None, response
+
+
+def _wrap_conditional_startup_routes(legacy):
+    """Fix the legacy cloud routes that the Index page actually resolves to.
+
+    The compatibility cloud wrapper's duplicate routes do not necessarily win
+    Flask's URL-rule ordering. Wrap the already-registered legacy view
+    functions instead, so the deployed Index path gets the canonical contract.
+    """
+    app = getattr(legacy, 'app', None)
+    if app is None:
+        return
+
+    for rule in list(app.url_map.iter_rules()):
+        endpoint = rule.endpoint
+        original = app.view_functions.get(endpoint)
+        if not original or getattr(original, '_conditional_startup_contract', False):
+            continue
+
+        if rule.rule == '/run_startup' and 'POST' in rule.methods:
+            def run_startup_wrapped(*args, _original=original, **kwargs):
+                response = _original(*args, **kwargs)
+                data, _ = _json_payload(response)
+                if not isinstance(data, dict):
+                    return response
+
+                message = str(data.get('message') or '')
+                successful = data.get('success') is True and (
+                    message.lower().startswith('scan triggered for ')
+                    or data.get('status') in {'success', 'started', 'already_running'}
+                )
+                if successful:
+                    agents = data.get('agents') or data.get('agents_triggered')
+                    return {
+                        'ok': True,
+                        'success': True,
+                        'status': 'started',
+                        'accepted': True,
+                        'message_type': 'success',
+                        'message': 'Conditional startup scan started on connected agent(s).',
+                        'error': None,
+                        'agents': agents if isinstance(agents, int) else 0,
+                        'agents_triggered': agents if isinstance(agents, int) else 0,
+                    }, 200
+                return response
+
+            run_startup_wrapped._conditional_startup_contract = True
+            app.view_functions[endpoint] = run_startup_wrapped
+
+        elif rule.rule == '/api/conditional_startup/status' and 'GET' in rule.methods:
+            def startup_status_wrapped(*args, _original=original, **kwargs):
+                response = _original(*args, **kwargs)
+                data, _ = _json_payload(response)
+                if isinstance(data, dict):
+                    error = data.get('last_error')
+                    if isinstance(error, str) and error.strip().lower().startswith('scan triggered for '):
+                        data['last_error'] = None
+                        from flask import jsonify
+                        return jsonify(data)
+                return response
+
+            startup_status_wrapped._conditional_startup_contract = True
+            app.view_functions[endpoint] = startup_status_wrapped
+
+
+# cloud_server.py imports this helper immediately after importing the legacy
+# cloud app, so the legacy view functions are already registered here.
+try:
+    from cloud import cloud_server_original as _legacy_app
+    _wrap_conditional_startup_routes(_legacy_app)
+except Exception:
+    # The result helper remains usable independently in tests and tooling.
+    pass
