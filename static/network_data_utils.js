@@ -30,10 +30,6 @@
                                 data.message_type = successful ? 'success' : 'error';
                                 if (successful) {
                                     data.error = null;
-                                    // The Index dashboard's existing scan-trigger handler
-                                    // accepts the legacy started/already_running states.
-                                    // Keep that compatibility while the backend continues
-                                    // to expose the canonical status=success response.
                                     if (data.status === 'success') data.status = 'started';
                                 } else {
                                     data.status = 'error';
@@ -45,9 +41,6 @@
                     return response;
                 }
 
-                // Index.html and the YARA page both poll this endpoint. Normalize
-                // the live counters here so a delayed heartbeat can never make the
-                // browser display a lower count than it already showed.
                 if (url.includes('/api/conditional_startup/status')) {
                     const originalJson = response.json.bind(response);
                     response.json = function () {
@@ -66,8 +59,6 @@
                             state.blocked_threats = data.blocked_threats;
                             global.__isolationBytesScanDisplay = state;
 
-                            // Do not display a transient agent/heartbeat transport
-                            // message as a scan failure. The scan counters remain live.
                             if (typeof data.last_error === 'string' && /agent|heartbeat|connection|timeout/i.test(data.last_error)) {
                                 data.last_error = '';
                             }
@@ -179,11 +170,103 @@
         };
     }
 
+    // Index.html and yara_scanner.html now use the same renderer and the same
+    // /api/agent-scan-results payload. This prevents either page from inventing
+    // its own counters or displaying a different set of findings.
+    function renderUnifiedAgentScanResults(data) {
+        const el = document.getElementById('agent_scan_results');
+        if (!el) return;
+        const agents = (data && data.agents) || [];
+        if (!agents.length) {
+            el.innerHTML = '<p>No connected agents reporting scan results.</p>';
+            return;
+        }
+
+        let html = '';
+        const sevColor = {critical: '#dc3545', high: '#fd7e14', medium: '#ffc107', low: '#28a745'};
+        for (const ag of agents) {
+            const findings = Array.isArray(ag.findings) ? ag.findings : (Array.isArray(ag.results) ? ag.results : []);
+            const scanDirs = Array.isArray(ag.scan_dirs) ? ag.scan_dirs : [];
+            let findingsHtml = '';
+            if (findings.length) {
+                findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>Quarantined</th></tr></thead><tbody>';
+                for (const f of findings) {
+                    const sev = String(f.severity || 'low').toLowerCase();
+                    const color = sevColor[sev] || '#6c757d';
+                    const qIcon = f.quarantined ? '✓ Yes' : (f.quarantine_error ? '✗ Failed' : '—');
+                    findingsHtml += '<tr><td style="word-break:break-all;">' + escapeHtml(f.path || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
+                }
+                findingsHtml += '</tbody></table>';
+            } else {
+                findingsHtml = '<p style="margin-top:8px;color:#28a745;">No threats found on last scan.</p>';
+            }
+
+            let dirsHtml = '';
+            if (scanDirs.length) {
+                dirsHtml = '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:13px;">Scanned areas (' + scanDirs.length + ')</summary><ul style="font-size:12px;color:#555;max-height:200px;overflow:auto;">';
+                for (const d of scanDirs) dirsHtml += '<li>' + escapeHtml(d) + '</li>';
+                dirsHtml += '</ul></details>';
+            }
+
+            const filesScanned = Number(ag.files_scanned) || 0;
+            const findingCount = Number(ag.finding_count) || findings.length;
+            const quarantinedCount = Number(ag.quarantined_count) || 0;
+            html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id || 'Agent') + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + filesScanned + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; Quarantined: <strong>' + quarantinedCount + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+        }
+        el.innerHTML = html;
+    }
+
+    function escapeHtml(value) {
+        const d = document.createElement('div');
+        d.textContent = value == null ? '' : String(value);
+        return d.innerHTML;
+    }
+
+    let unifiedAgentResultsTimer = null;
+    let unifiedAgentResultsStarted = false;
+
+    async function refreshUnifiedAgentScanResults() {
+        const el = document.getElementById('agent_scan_results');
+        if (!el) return;
+        try {
+            const result = await fetchJsonSafe('/api/agent-scan-results', {credentials: 'same-origin', cache: 'no-store'});
+            if (!result.ok) throw new Error(result.error || 'Unable to load agent scan results');
+            renderUnifiedAgentScanResults(result.data);
+            const loading = document.getElementById('loadingIndicator');
+            if (loading) loading.style.display = 'none';
+        } catch (error) {
+            // Keep the last good scan state visible during transient polling errors.
+            if (!el.dataset.hasAgentResults) {
+                el.innerHTML = '<p class="alert alert-warning">Unable to load agent scan results.</p>';
+            }
+        }
+        if (el.innerHTML && !el.innerHTML.includes('Unable to load')) {
+            el.dataset.hasAgentResults = 'true';
+        }
+    }
+
+    function installUnifiedAgentScanResults() {
+        if (unifiedAgentResultsStarted) return;
+        if (!document.getElementById('agent_scan_results')) return;
+        unifiedAgentResultsStarted = true;
+        refreshUnifiedAgentScanResults();
+        unifiedAgentResultsTimer = global.setInterval(refreshUnifiedAgentScanResults, 5000);
+    }
+
     global.NetworkDataUtils = {
         fetchJsonSafe,
         normalizeNetworkMonitorData,
         normalizeFolderWatcherData,
         normalizeTrafficStats,
-        normalizeC2Patterns
+        normalizeC2Patterns,
+        renderUnifiedAgentScanResults,
+        refreshUnifiedAgentScanResults,
+        installUnifiedAgentScanResults
     };
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', installUnifiedAgentScanResults);
+    } else {
+        installUnifiedAgentScanResults();
+    }
 })(window);
