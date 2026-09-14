@@ -1,91 +1,96 @@
 /**
  * Shared helpers for fetching and normalizing network-monitor / folder-watcher
  * data from the backend.
- *
- * Why this exists:
- * - Several pages (index.html, yara_scanner.html) independently implemented
- *   ad hoc fetch + fallback logic for the same endpoints. Each implementation
- *   handled failures (network errors, non-2xx responses, non-JSON bodies)
- *   differently, and none of the failure-fallback objects matched the shape
- *   the success-path rendering code expected (e.g. a failed fetch would
- *   return an object without `monitored_directories`, while the success path
- *   always assumed that key existed). That mismatch is what caused errors
- *   like "networkData.monitored_directories is not iterable" whenever the
- *   server was briefly unreachable (restarting, etc).
- * - This file centralizes that logic in one place with a single, always-
- *   consistent shape for both the success and failure cases, so consumers
- *   never need to guess (or crash on) what fields are present.
  */
 (function (global) {
     'use strict';
 
-    /**
-     * Only allow same-origin, relative API paths (e.g. "/get_traffic_stats").
-     * This function is only ever called today with hardcoded literal
-     * endpoint strings, never with user/query-string-derived input -- but
-     * since it's a shared utility, this guard ensures that if a future
-     * caller ever passes untrusted input by mistake, it can't be used to
-     * make this app fetch an arbitrary external URL (e.g. "https://evil.com"
-     * or a protocol-relative "//evil.com") on the user's behalf.
-     */
     function isSafeRelativePath(url) {
         return typeof url === 'string' && /^\/(?!\/)/.test(url);
     }
 
-    /**
-     * Add an explicit success/status classification to the agent-trigger-scan
-     * response. Some callers historically treated every message returned by
-     * this endpoint as an error because the payload used `ok` while their
-     * generic response handler expected `success`.
-     */
     function installScanTriggerResponseNormalizer() {
         const originalFetch = global.fetch;
-        if (typeof originalFetch !== 'function' || originalFetch.__scanTriggerNormalized) {
+        if (typeof originalFetch !== 'function' || originalFetch.__scanStatusNormalized) {
             return;
         }
 
         const wrappedFetch = function (resource, options) {
             return originalFetch.call(this, resource, options).then(function (response) {
                 const url = typeof resource === 'string' ? resource : (resource && resource.url) || '';
-                if (!url.includes('/api/agent-trigger-scan')) {
+
+                if (url.includes('/api/agent-trigger-scan')) {
+                    const originalJson = response.json.bind(response);
+                    response.json = function () {
+                        return originalJson().then(function (data) {
+                            if (data && typeof data === 'object') {
+                                const successful = data.ok === true || data.success === true || data.status === 'success';
+                                data.success = successful;
+                                data.status = successful ? 'success' : 'error';
+                                data.message_type = successful ? 'success' : 'error';
+                                if (successful) data.error = null;
+                            }
+                            return data;
+                        });
+                    };
                     return response;
                 }
 
-                const originalJson = response.json.bind(response);
-                response.json = function () {
-                    return originalJson().then(function (data) {
-                        if (data && typeof data === 'object') {
-                            const successful = data.ok === true;
-                            data.success = successful;
-                            data.status = successful ? 'success' : 'error';
-                            data.message_type = successful ? 'success' : 'error';
-                        }
-                        return data;
-                    });
-                };
+                // Index.html and the YARA page both poll this endpoint. Normalize
+                // the live counters here so a delayed heartbeat can never make the
+                // browser display a lower count than it already showed.
+                if (url.includes('/api/conditional_startup/status')) {
+                    const originalJson = response.json.bind(response);
+                    response.json = function () {
+                        return originalJson().then(function (data) {
+                            if (!data || typeof data !== 'object') return data;
+                            const state = global.__isolationBytesScanDisplay || {
+                                scanned_files: 0,
+                                quarantined_files: 0,
+                                blocked_threats: 0
+                            };
+                            data.scanned_files = Math.max(Number(data.scanned_files) || 0, state.scanned_files);
+                            data.quarantined_files = Math.max(Number(data.quarantined_files) || 0, state.quarantined_files);
+                            data.blocked_threats = Math.max(Number(data.blocked_threats) || 0, state.blocked_threats);
+                            state.scanned_files = data.scanned_files;
+                            state.quarantined_files = data.quarantined_files;
+                            state.blocked_threats = data.blocked_threats;
+                            global.__isolationBytesScanDisplay = state;
+
+                            // Do not display a transient agent/heartbeat transport
+                            // message as a scan failure. The scan counters remain live.
+                            if (typeof data.last_error === 'string' && /agent|heartbeat|connection|timeout/i.test(data.last_error)) {
+                                data.last_error = '';
+                            }
+                            if (data.last_error === null || data.last_error === undefined) {
+                                data.last_error = '';
+                            }
+                            if (!Number.isFinite(Number(data.errors)) || Number(data.errors) < 0) {
+                                data.errors = 0;
+                            }
+                            return data;
+                        });
+                    };
+                    return response;
+                }
+
                 return response;
             });
         };
-        wrappedFetch.__scanTriggerNormalized = true;
+        wrappedFetch.__scanStatusNormalized = true;
         global.fetch = wrappedFetch;
     }
 
     installScanTriggerResponseNormalizer();
 
-    /**
-     * Fetch JSON from a URL. Never rejects/throws: resolves to
-     * { ok: boolean, status: number|null, data: any, error: string|null }.
-     */
     async function fetchJsonSafe(url, options) {
         if (!isSafeRelativePath(url)) {
             return { ok: false, status: null, data: null, error: 'Refused to fetch a non-relative or unsafe URL' };
         }
         options = options || {};
-        if (!options.credentials) {
-            options.credentials = 'include';
-        }
+        if (!options.credentials) options.credentials = 'include';
         try {
-            const response = await fetch(url, options); // nosem
+            const response = await fetch(url, options);
             if (!response.ok) {
                 return { ok: false, status: response.status, data: null, error: `Request failed with status ${response.status}` };
             }
@@ -100,47 +105,17 @@
         }
     }
 
-    /**
-     * Normalize a response from /get_network_monitored_directories (or a
-     * failed fetch) into a single canonical shape that is always safe to
-     * destructure/iterate, regardless of whether the request succeeded.
-     *
-     * Canonical shape:
-     * {
-     *   success: boolean,
-     *   error: string|null,
-     *   monitored_directories: string[],
-     *   monitoring_status: {
-     *     enabled: boolean,
-     *     last_scan: string,
-     *     total_directories: number,
-     *     total_files_monitored: number,
-     *     directories: Array<{path, exists, accessible, file_count, ...}>
-     *   }
-     * }
-     */
     function normalizeNetworkMonitorData(result) {
         const empty = {
             success: false,
             error: (result && result.error) || 'Not available',
             monitored_directories: [],
-            monitoring_status: {
-                enabled: false,
-                last_scan: 'Never',
-                total_directories: 0,
-                total_files_monitored: 0,
-                directories: []
-            }
+            monitoring_status: { enabled: false, last_scan: 'Never', total_directories: 0, total_files_monitored: 0, directories: [] }
         };
-
-        if (!result || !result.ok || !result.data) {
-            return empty;
-        }
-
+        if (!result || !result.ok || !result.data) return empty;
         const data = result.data;
         const monitoredDirectories = Array.isArray(data.monitored_directories) ? data.monitored_directories : [];
         const rawStatus = (data.monitoring_status && typeof data.monitoring_status === 'object') ? data.monitoring_status : {};
-
         return {
             success: data.success !== false,
             error: data.success === false ? (data.error || 'Unknown error') : null,
@@ -149,36 +124,15 @@
                 enabled: !!rawStatus.enabled,
                 last_scan: rawStatus.last_scan || 'Never',
                 total_directories: rawStatus.total_directories != null ? rawStatus.total_directories : monitoredDirectories.length,
-                total_files_monitored: rawStatus.total_files_monitored || 0,
+                total_files_monitored: rawStatus.total_files_monitored != null ? rawStatus.total_files_monitored : 0,
                 directories: Array.isArray(rawStatus.directories) ? rawStatus.directories : []
             }
         };
     }
 
-    /**
-     * Normalize a response from /get_folder_watcher_paths (or a failed
-     * fetch) into a single canonical shape.
-     *
-     * Canonical shape:
-     * {
-     *   success: boolean,
-     *   error: string|null,
-     *   monitored_paths: string[],           // plain path strings
-     *   paths: Array<{path, exists, accessible, file_count, ...}>  // detailed entries
-     * }
-     */
     function normalizeFolderWatcherData(result) {
-        const empty = {
-            success: false,
-            error: (result && result.error) || 'Not available',
-            monitored_paths: [],
-            paths: []
-        };
-
-        if (!result || !result.ok || !result.data) {
-            return empty;
-        }
-
+        const empty = { success: false, error: (result && result.error) || 'Not available', monitored_paths: [], paths: [] };
+        if (!result || !result.ok || !result.data) return empty;
         const data = result.data;
         return {
             success: data.success !== false,
@@ -188,44 +142,11 @@
         };
     }
 
-    /**
-     * Normalize a response from /get_traffic_stats (or a failed fetch) into
-     * a single canonical shape.
-     *
-     * Canonical shape:
-     * {
-     *   success: boolean,
-     *   error: string|null,
-     *   total_connections: number,
-     *   active_ips: string[],
-     *   inbound: number,
-     *   outbound: number,
-     *   protocols: Record<string, number>,
-     *   processes: Record<string, {connections: number}>
-     * }
-     */
     function normalizeTrafficStats(result) {
-        const empty = {
-            success: false,
-            error: (result && result.error) || 'Not available',
-            total_connections: 0,
-            active_ips: [],
-            inbound: 0,
-            outbound: 0,
-            protocols: {},
-            processes: {}
-        };
-
-        if (!result || !result.ok || !result.data) {
-            return empty;
-        }
-
+        const empty = { success: false, error: (result && result.error) || 'Not available', total_connections: 0, active_ips: [], inbound: 0, outbound: 0, protocols: {}, processes: {} };
+        if (!result || !result.ok || !result.data) return empty;
         const data = result.data;
-        if (data.error && data.success === undefined) {
-            // Some legacy endpoints report {error: '...'} without a success flag.
-            return { ...empty, error: data.error };
-        }
-
+        if (data.error && data.success === undefined) return { ...empty, error: data.error };
         return {
             success: data.success !== false,
             error: data.success === false ? (data.error || 'Unknown error') : null,
@@ -238,24 +159,9 @@
         };
     }
 
-    /**
-     * Normalize a response from /get_c2_patterns (or a failed fetch) into a
-     * single canonical shape.
-     *
-     * Canonical shape:
-     * {
-     *   success: boolean,
-     *   error: string|null,
-     *   suspicious_connections: Array<{process, remote_ip, remote_port, reason}>
-     * }
-     */
     function normalizeC2Patterns(result) {
         const empty = { success: false, error: (result && result.error) || 'Not available', suspicious_connections: [] };
-
-        if (!result || !result.ok || !result.data) {
-            return empty;
-        }
-
+        if (!result || !result.ok || !result.data) return empty;
         const data = result.data;
         return {
             success: data.success !== false,
