@@ -6,11 +6,10 @@ on:
       - security-v2
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  fix:
-    if: github.actor != 'github-actions[bot]'
+  verify:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout security-v2
@@ -19,31 +18,11 @@ jobs:
           ref: security-v2
           fetch-depth: 1
 
-      - name: Normalize legacy scan trigger response
-        shell: python
-        run: |
-          from pathlib import Path
-
-          app = Path('app.py')
-          text = app.read_text(encoding='utf-8')
-          old = "return jsonify({'message': 'Conditional startup triggered', 'success': True}), 200"
-          new = "return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Conditional startup triggered', 'error': None}), 200"
-          if old in text:
-              text = text.replace(old, new, 1)
-              app.write_text(text, encoding='utf-8')
-          elif new not in text:
-              raise SystemExit('Expected /run_startup success response was not found')
-
-      - name: Commit backend contract fix
+      - name: Verify backend success contract
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py
-          if git diff --cached --quiet; then
-            echo "No backend change required."
-            exit 0
-          fi
-          git commit -m "Fix Index run startup success response"
-          git push origin HEAD:security-v2
+          grep -F "'status': 'started'" app.py >/dev/null
+          grep -F "'success': True" app.py >/dev/null
+          grep -F "'error': None" app.py >/dev/null
+          echo "Index run-startup success contract is present."
