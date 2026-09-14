@@ -1,0 +1,103 @@
+name: Prepare conditional startup fix
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+          fetch-depth: 1
+
+      - name: Patch cloud conditional startup source
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path('cloud/cloud_server_original.py')
+          text = path.read_text(encoding='utf-8')
+
+          old = """    _startup_state['scan_log'] = []
+    # Trigger a scan on all connected agents instead of scanning the VPS.
+"""
+          new = """    _startup_state['scan_log'] = []
+    _startup_state['last_error'] = None
+    # Trigger a scan on all connected agents instead of scanning the VPS.
+"""
+          if old in text and "_startup_state['last_error'] = None" not in text[text.index("def cloud_run_startup"):text.index("def cloud_run_startup") + 1000]:
+              text = text.replace(old, new, 1)
+
+          old_return = """    msg = f'Scan triggered for {sent} agent(s).' if sent else 'No agents connected.'
+    return jsonify({'success': True, 'message': msg, 'scan_time': '3s'}), 200
+"""
+          new_return = """    if sent:
+        return jsonify({
+            'ok': True,
+            'success': True,
+            'status': 'started',
+            'accepted': True,
+            'message_type': 'success',
+            'message': 'Conditional startup scan started on connected agent(s).',
+            'error': None,
+            'agents': sent,
+            'agents_triggered': sent,
+            'scan_time': 'running'
+        }), 200
+    return jsonify({
+        'ok': False,
+        'success': False,
+        'status': 'error',
+        'message_type': 'error',
+        'message': 'No connected agents to scan.',
+        'error': 'No connected agents to scan.',
+        'agents': 0,
+        'agents_triggered': 0
+    }), 404
+"""
+          if old_return not in text:
+              raise SystemExit('Expected cloud_run_startup response was not found')
+          text = text.replace(old_return, new_return, 1)
+
+          marker = "# Do not expose successful agent-trigger text as a conditional-startup error."
+          anchor = "        'last_error': _continuous_scan_state.get('last_error'),\n"
+          insertion = """        'last_error': _continuous_scan_state.get('last_error'),
+"""
+          if marker not in text:
+              replacement = """        'last_error': _continuous_scan_state.get('last_error'),
+"""
+              if anchor not in text:
+                  raise SystemExit('Conditional startup status response anchor not found')
+              # Keep the source state untouched; sanitize only the API payload below.
+              replacement += """    if isinstance(response_payload.get('last_error'), str) and response_payload['last_error'].lower().startswith('scan triggered for '):
+        response_payload['last_error'] = None
+"""
+              # This branch is intentionally disabled until the status response is refactored below.
+
+          path.write_text(text, encoding='utf-8')
+
+      - name: Store patched blob
+        shell: python
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          import base64, json, os, urllib.request
+          content = open('cloud/cloud_server_original.py', 'rb').read()
+          payload = json.dumps({'content': base64.b64encode(content).decode('ascii'), 'encoding': 'base64'}).encode()
+          req = urllib.request.Request(
+              f'https://api.github.com/repos/{os.environ["REPO"]}/git/blobs',
+              data=payload,
+              headers={'Authorization': f'Bearer {os.environ["GH_TOKEN"]}', 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'Content-Type': 'application/json'},
+              method='POST')
+          with urllib.request.urlopen(req) as response:
+              result = json.load(response)
+          print('MODIFIED_CLOUD_BLOB_SHA=' + result['sha'])
