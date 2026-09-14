@@ -37,6 +37,14 @@ def _agent_report_marker(agent):
     return str(agent.get('last_scan') or report.get('timestamp') or '')
 
 
+def _live_max(report, agent, key):
+    """Return the newest cumulative counter from report or live heartbeat."""
+    try:
+        return max(int(report.get(key) or 0), int(agent.get(key) or 0))
+    except (TypeError, ValueError):
+        return agent.get(key) or report.get(key) or 0
+
+
 def _canonical_yara_agent_state():
     agents = _legacy._all_agents()
     findings = []
@@ -52,7 +60,8 @@ def _canonical_yara_agent_state():
 
     for device_id, agent in agents.items():
         report = agent.get('last_report') or {}
-        scanned_files += int(report.get('files_scanned') or agent.get('files_scanned') or 0)
+        scanned_files += _live_max(report, agent, 'files_scanned')
+        quarantined_files += _live_max(report, agent, 'quarantined_count')
         marker = _agent_report_marker(agent)
         last_scan = max(last_scan, marker)
         scan_state = _agent_scan_state.get(device_id)
@@ -69,8 +78,6 @@ def _canonical_yara_agent_state():
         elif pending_scan:
             running = True
 
-        # Agents may use either `findings` or the older `results` field.
-        # Read both so the dashboard and YARA Scanner see the same detections.
         report_findings = report.get('findings') or report.get('results') or []
         for finding in report_findings:
             if not isinstance(finding, dict) or not _is_yara_finding(finding):
@@ -87,8 +94,6 @@ def _canonical_yara_agent_state():
             item['hostname'] = agent.get('hostname', device_id)
             item['quarantined'] = bool(finding.get('quarantined'))
             findings.append(item)
-            if item['quarantined']:
-                quarantined_files += 1
             threat = str(item.get('threat_type') or '').lower()
             rule = str(item.get('rule') or '').lower()
             if 'ransom' in threat or 'ransom' in rule:
@@ -155,7 +160,9 @@ def _yara_only_quarantine_response():
         last_report = agent.get('last_report') or {}
         findings = []
         seen = set()
-        for finding in last_report.get('findings') or []:
+        for finding in last_report.get('findings') or last_report.get('results') or []:
+            if not isinstance(finding, dict):
+                continue
             path = finding.get('path') or finding.get('original_path')
             if not path or not _is_yara_finding(finding):
                 continue
