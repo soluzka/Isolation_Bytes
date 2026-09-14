@@ -24,11 +24,20 @@
                     response.json = function () {
                         return originalJson().then(function (data) {
                             if (data && typeof data === 'object') {
-                                const successful = data.ok === true || data.success === true || data.status === 'success';
+                                const successful = data.ok === true || data.success === true || data.status === 'success' || data.status === 'started' || data.status === 'already_running';
                                 data.success = successful;
-                                data.status = successful ? 'success' : 'error';
+                                data.ok = successful;
                                 data.message_type = successful ? 'success' : 'error';
-                                if (successful) data.error = null;
+                                if (successful) {
+                                    data.error = null;
+                                    // The Index dashboard's existing scan-trigger handler
+                                    // accepts the legacy started/already_running states.
+                                    // Keep that compatibility while the backend continues
+                                    // to expose the canonical status=success response.
+                                    if (data.status === 'success') data.status = 'started';
+                                } else {
+                                    data.status = 'error';
+                                }
                             }
                             return data;
                         });
