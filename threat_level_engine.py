@@ -1,153 +1,165 @@
-"""Dynamic threat scoring shared by file, process, and network telemetry.
+"""Dynamic threat scoring shared by file, process, and network monitors.
 
-The engine deliberately keeps the score explainable: independent YARA, ML and
-behavioral evidence are normalized to 0..1, combined, and retained with a
-short-lived history so repeated activity can raise confidence while quiet
-periods allow the score to decay.
+The engine combines YARA severity, ML confidence, and behavioral signals into a
+bounded 0..100 score. Scores are stateful per entity and decay over time so a
+single transient signal does not permanently taint an entity, while repeated
+behavior raises the score naturally.
 """
 from __future__ import annotations
 
+import math
 import threading
 import time
-from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 
-_LEVELS = ((0.85, "critical"), (0.65, "high"), (0.40, "medium"), (0.15, "low"), (0.0, "clean"))
-_YARA_WEIGHTS = {"critical": 1.0, "high": 0.85, "medium": 0.55, "low": 0.25, "info": 0.05}
+_LEVELS = ((80.0, "critical"), (60.0, "high"), (35.0, "medium"), (0.0, "low"))
 
 
-def _clamp(value: Any, default: float = 0.0) -> float:
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return default
+def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    return max(low, min(high, float(value)))
 
 
-def _yara_score(severity: Any) -> float:
+def _severity_score(severity: Any) -> float:
+    if severity is None:
+        return 0.0
     if isinstance(severity, (int, float)):
-        return _clamp(severity)
-    if isinstance(severity, str):
-        return _YARA_WEIGHTS.get(severity.lower().strip(), 0.0)
-    if isinstance(severity, Iterable) and not isinstance(severity, (str, bytes, dict)):
-        return max((_yara_score(item) for item in severity), default=0.0)
-    if isinstance(severity, Mapping):
-        return max((_yara_score(v) for v in severity.values()), default=0.0)
-    return 0.0
+        return _clamp(float(severity))
+    return {"critical": 100.0, "high": 82.0, "medium": 55.0, "low": 25.0}.get(
+        str(severity).strip().lower(), 0.0
+    )
+
+
+def _ml_score(confidence: Any) -> float:
+    if confidence is None:
+        return 0.0
+    value = float(confidence)
+    if value < 0.0:
+        # IsolationForest decision_function is not a probability. Convert a
+        # negative anomaly margin to a bounded confidence without pretending
+        # it is calibrated probability.
+        return _clamp(50.0 + (-value * 50.0))
+    if value <= 1.0:
+        return _clamp(value * 100.0)
+    return _clamp(value)
 
 
 @dataclass
-class ThreatState:
+class _State:
     score: float = 0.0
-    updated_at: float = field(default_factory=time.time)
-    history: deque = field(default_factory=lambda: deque(maxlen=20))
+    last_seen: float = field(default_factory=time.monotonic)
+    behavior: Dict[str, float] = field(default_factory=dict)
 
 
 class ThreatLevelEngine:
-    """Thread-safe, stateful threat scoring engine."""
+    """Thread-safe stateful fusion of static and dynamic security signals."""
 
-    def __init__(self, decay_seconds: float = 300.0):
+    def __init__(self, decay_seconds: float = 300.0, ema_alpha: float = 0.35):
         self.decay_seconds = max(1.0, float(decay_seconds))
-        self._states: Dict[str, ThreatState] = {}
+        self.ema_alpha = _clamp(ema_alpha, 0.01, 1.0)
+        self._states: Dict[str, _State] = {}
         self._lock = threading.RLock()
+
+    @staticmethod
+    def level(score: float) -> str:
+        for threshold, name in _LEVELS:
+            if score >= threshold:
+                return name
+        return "low"
 
     def score(
         self,
-        entity_id: str,
+        entity: str,
         *,
-        yara_severity: Any = 0.0,
-        ml_confidence: Any = 0.0,
-        behavioral_signals: Any = None,
-        behavior_score: Any = None,
-        persist: bool = True,
+        yara_severity: Any = None,
+        yara_matches: Optional[Iterable[Any]] = None,
+        ml_confidence: Any = None,
+        behavioral_signals: Optional[Mapping[str, Any]] = None,
+        confirmed: bool = False,
     ) -> Dict[str, Any]:
-        """Calculate and optionally retain a threat assessment."""
-        yara = _yara_score(yara_severity)
-        ml = _clamp(ml_confidence)
-        behavior = self._behavior_score(behavioral_signals, behavior_score)
-
-        # Evidence weights: YARA is strongest, ML provides corroboration, and
-        # behavior captures activity that may not leave a static signature.
-        raw = (0.45 * yara) + (0.30 * ml) + (0.25 * behavior)
-
-        now = time.time()
-        with self._lock:
-            previous = self._states.get(str(entity_id))
-            previous_score = previous.score if previous else 0.0
-            if previous:
-                elapsed = max(0.0, now - previous.updated_at)
-                decay = max(0.0, min(1.0, elapsed / self.decay_seconds))
-                baseline = previous_score * (1.0 - decay)
-                # New evidence dominates stale history but recent evidence can
-                # accumulate instead of resetting the assessment each event.
-                combined = max(raw, (0.65 * raw) + (0.35 * baseline))
+        """Fuse current signals with recent state and return a score snapshot."""
+        key = str(entity or "unknown")
+        now = time.monotonic()
+        matches = list(yara_matches or [])
+        yara_values = [_severity_score(yara_severity)]
+        for match in matches:
+            if isinstance(match, Mapping):
+                yara_values.append(_severity_score(match.get("severity")))
             else:
-                combined = raw
+                yara_values.append(_severity_score(getattr(match, "severity", None)))
+        yara_component = max(yara_values, default=0.0)
+        ml_component = _ml_score(ml_confidence)
 
-            state = previous or ThreatState()
-            state.score = _clamp(combined)
-            state.updated_at = now
-            state.history.append(state.score)
-            if persist:
-                self._states[str(entity_id)] = state
+        behavior_component = 0.0
+        behavior_details: Dict[str, float] = {}
+        for name, raw in (behavioral_signals or {}).items():
+            try:
+                magnitude = _clamp(float(raw))
+            except (TypeError, ValueError):
+                magnitude = 0.0 if not raw else 50.0
+            behavior_details[str(name)] = magnitude
+            behavior_component = max(behavior_component, magnitude)
 
-            level = self.level_for(state.score)
+        # Weighted fusion: YARA is strongest because it can represent an
+        # explicit signature; ML and behavior provide corroboration.
+        instantaneous = (
+            yara_component * 0.50 + ml_component * 0.25 + behavior_component * 0.25
+        )
+        if confirmed:
+            instantaneous = max(instantaneous, 90.0)
+
+        with self._lock:
+            state = self._states.setdefault(key, _State())
+            elapsed = max(0.0, now - state.last_seen)
+            decay = math.exp(-elapsed / self.decay_seconds)
+            state.score *= decay
+            for name in list(state.behavior):
+                state.behavior[name] *= decay
+                if state.behavior[name] < 0.01:
+                    del state.behavior[name]
+            for name, magnitude in behavior_details.items():
+                state.behavior[name] = state.behavior.get(name, 0.0) + magnitude
+            state.last_seen = now
+            state.score = (
+                state.score * (1.0 - self.ema_alpha)
+                + instantaneous * self.ema_alpha
+            )
+            if confirmed:
+                state.score = max(state.score, 90.0)
+            score = _clamp(state.score)
             return {
-                "entity_id": str(entity_id),
-                "score": round(state.score, 4),
-                "level": level,
-                "signals": {
-                    "yara": round(yara, 4),
-                    "ml": round(ml, 4),
-                    "behavior": round(behavior, 4),
-                },
-                "history": list(state.history),
-                "timestamp": now,
+                "entity": key,
+                "score": round(score, 2),
+                "level": self.level(score),
+                "yara_score": round(yara_component, 2),
+                "ml_score": round(ml_component, 2),
+                "behavior_score": round(behavior_component, 2),
+                "behavioral_signals": behavior_details,
+                "confirmed": bool(confirmed),
+                "timestamp": time.time(),
             }
 
-    def update(self, entity_id: str, **signals: Any) -> Dict[str, Any]:
-        """Alias used by monitoring loops as new telemetry arrives."""
-        return self.score(entity_id, **signals)
-
-    def get(self, entity_id: str) -> Dict[str, Any]:
+    def get(self, entity: str) -> Dict[str, Any]:
         with self._lock:
-            state = self._states.get(str(entity_id))
+            state = self._states.get(str(entity))
             if not state:
-                return {"entity_id": str(entity_id), "score": 0.0, "level": "clean", "signals": {}}
-            return {"entity_id": str(entity_id), "score": round(state.score, 4), "level": self.level_for(state.score)}
+                return {"entity": str(entity), "score": 0.0, "level": "low"}
+            elapsed = max(0.0, time.monotonic() - state.last_seen)
+            score = _clamp(state.score * math.exp(-elapsed / self.decay_seconds))
+            return {"entity": str(entity), "score": round(score, 2), "level": self.level(score)}
 
-    def reset(self, entity_id: str) -> None:
+    def reset(self, entity: Optional[str] = None) -> None:
         with self._lock:
-            self._states.pop(str(entity_id), None)
-
-    @staticmethod
-    def level_for(score: float) -> str:
-        value = _clamp(score)
-        for threshold, level in _LEVELS:
-            if value >= threshold:
-                return level
-        return "clean"
-
-    @staticmethod
-    def _behavior_score(signals: Any, explicit: Any = None) -> float:
-        if explicit is not None:
-            return _clamp(explicit)
-        if signals is None:
-            return 0.0
-        if isinstance(signals, Mapping):
-            values = []
-            for value in signals.values():
-                if isinstance(value, bool):
-                    values.append(1.0 if value else 0.0)
-                elif isinstance(value, (int, float)):
-                    values.append(_clamp(value))
-            return max(values, default=0.0)
-        if isinstance(signals, (list, tuple, set)):
-            return max((_clamp(v, 1.0 if isinstance(v, bool) and v else 0.0) for v in signals), default=0.0)
-        return _clamp(signals)
+            if entity is None:
+                self._states.clear()
+            else:
+                self._states.pop(str(entity), None)
 
 
 threat_level_engine = ThreatLevelEngine()
 
-__all__ = ["ThreatLevelEngine", "ThreatState", "threat_level_engine"]
+
+def score_threat(entity: str, **signals: Any) -> Dict[str, Any]:
+    """Convenience wrapper used by monitoring loops."""
+    return threat_level_engine.score(entity, **signals)
