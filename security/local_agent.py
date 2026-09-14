@@ -45,7 +45,7 @@ class LocalAgent:
         env_id = (os.environ.get('DEVICE_ID') or '').strip().strip('"').strip("'")
         self.device_id = (device_id or env_id) or f'LOCAL-{socket.gethostname().upper()[:12]}'
         self.hostname = socket.gethostname()
-        self.scan_interval = scan_interval  # seconds between scans
+        self.scan_interval = scan_interval
         self.scan_dirs = scan_dirs or [
             os.path.expanduser('~/Downloads'),
             os.path.expanduser('~/Desktop'),
@@ -83,7 +83,6 @@ class LocalAgent:
         try:
             vm = psutil.virtual_memory()
             disk = psutil.disk_usage('/')
-            # Collect all network connections on this PC
             network_connections = []
             try:
                 for c in psutil.net_connections(kind='inet'):
@@ -105,7 +104,6 @@ class LocalAgent:
                     })
             except Exception:
                 pass
-            # Collect all running processes on this PC
             all_processes = []
             try:
                 for p in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent', 'status']):
@@ -194,7 +192,6 @@ class LocalAgent:
             result = voice_assistant.run_command(intent, raw_command=raw, apply_fix=apply_fix)
             self._post_voice_result(job_id, 'completed', result)
         except Exception as e:
-            logger.exception('voice command execution failed for job %s', job_id)
             self._post_voice_result(job_id, 'error', str(e))
 
     def _post_voice_result(self, job_id, status, result):
@@ -232,8 +229,7 @@ class LocalAgent:
             if str(base_dir) not in sys.path:
                 sys.path.insert(0, str(base_dir))
             from security.yara_scanner import scan_file_with_yara
-            matches = scan_file_with_yara(filepath)
-            return matches
+            return scan_file_with_yara(filepath)
         except Exception:
             return []
 
@@ -248,42 +244,96 @@ class LocalAgent:
         except Exception:
             return ''
 
+    def _quarantine_record(self, filepath):
+        """Return the verified quarantine record for an original path, if any.
+
+        YARA may quarantine a critical file during scan_file_with_yara().  The
+        scan result must not claim quarantine merely because a match occurred;
+        it is only considered quarantined when the quarantine subsystem has a
+        corresponding encrypted artifact and log entry for this exact path.
+        """
+        try:
+            from quarantine_utils import list_quarantine_files
+            canonical = os.path.normcase(os.path.abspath(os.path.realpath(filepath)))
+            for item in list_quarantine_files():
+                original = item.get('original_path') or ''
+                if os.path.normcase(os.path.abspath(os.path.realpath(original))) == canonical:
+                    quarantine_path = item.get('path') or ''
+                    if quarantine_path and os.path.isfile(quarantine_path):
+                        return {
+                            'quarantined': True,
+                            'quarantine_path': quarantine_path,
+                            'quarantine_error': '',
+                        }
+        except Exception:
+            pass
+        return {
+            'quarantined': False,
+            'quarantine_path': '',
+            'quarantine_error': 'Quarantine artifact not found or could not be verified',
+        }
+
     def _scan_directory(self, dirpath, max_files=100):
-        """Scan a directory and return findings."""
+        """Scan a directory and return canonical, deduplicated findings."""
         findings = []
         if not os.path.isdir(dirpath):
             return findings
 
         scanned = 0
+        seen_files = set()
+        seen_findings = set()
         for root, dirs, files in os.walk(dirpath):
             for filename in files:
                 if scanned >= max_files or not self._running:
                     break
-                filepath = os.path.join(root, filename)
+                filepath = os.path.normcase(os.path.abspath(os.path.realpath(os.path.join(root, filename))))
+                if filepath in seen_files:
+                    continue
+                seen_files.add(filepath)
                 try:
-                    # Skip very large files (>50MB)
                     if os.path.getsize(filepath) > 50 * 1024 * 1024:
                         continue
+
+                    # Hash before YARA runs. Critical YARA matches may quarantine
+                    # or remove the original before control returns here.
+                    file_hash = self._hash_file(filepath)
                     matches = self._scan_file_yara(filepath)
                     self._files_scanned += 1
+
                     if matches:
-                        h = self._hash_file(filepath)
+                        quarantine = self._quarantine_record(filepath)
                         for m in matches:
+                            rule = str(getattr(m, 'rule', '') or '')
+                            finding_key = (filepath, rule)
+                            if finding_key in seen_findings:
+                                continue
+                            seen_findings.add(finding_key)
+
                             sev = 'medium'
-                            tags = list(m.tags) if m.tags else []
-                            if any(t in ('critical', 'high') for t in tags):
+                            tags = list(getattr(m, 'tags', []) or [])
+                            if any(str(t).lower() in ('critical', 'high') for t in tags):
                                 sev = 'high'
-                            if 'ransomware' in m.rule.lower() or 'ransom' in m.rule.lower():
+                            if 'ransomware' in rule.lower() or 'ransom' in rule.lower():
                                 sev = 'critical'
+
                             findings.append({
                                 'path': filepath,
+                                'original_path': filepath,
                                 'severity': sev,
-                                'reason': f'YARA rule matched: {m.rule}',
-                                'hash': h,
-                                'rule': m.rule,
+                                'threat_type': 'YARA',
+                                'reason': f'YARA rule matched: {rule}',
+                                'hash': file_hash,
+                                'sha256': file_hash,
+                                'rule': rule,
                                 'tags': tags,
+                                'quarantined': quarantine['quarantined'],
+                                'quarantine_path': quarantine['quarantine_path'],
+                                'quarantine_error': '' if quarantine['quarantined'] else quarantine['quarantine_error'],
                             })
                             self._threats_blocked += 1
+
+                        if quarantine['quarantined']:
+                            self._quarantined_count += 1
                     scanned += 1
                 except Exception:
                     continue
@@ -316,19 +366,16 @@ class LocalAgent:
             if not self._running:
                 break
             if os.path.isdir(dirpath):
-                findings = self._scan_directory(dirpath)
-                all_findings.extend(findings)
+                all_findings.extend(self._scan_directory(dirpath))
 
         if all_findings:
             self._last_findings = all_findings
             self._report(all_findings)
         else:
-            # Send a clean report so the server knows we're alive
             self._report([], report_type='heartbeat_scan')
 
     def _run(self):
         """Main agent loop — runs in a background thread."""
-        # Wait for server to be ready
         for _ in range(30):
             if not self._running:
                 return
@@ -340,7 +387,6 @@ class LocalAgent:
                 pass
             time.sleep(2)
 
-        # Register
         for attempt in range(5):
             if not self._running:
                 return
@@ -351,19 +397,13 @@ class LocalAgent:
         if not self._registered:
             return
 
-        # Main loop
         while self._running:
             try:
-                # Heartbeat
                 self._heartbeat()
-
-                # Scan cycle
                 self._scan_cycle()
-
             except Exception:
                 pass
 
-            # Wait for next cycle, polling for voice commands every 5 seconds
             for i in range(self.scan_interval):
                 if not self._running:
                     break
@@ -400,7 +440,6 @@ class LocalAgent:
         }
 
 
-# Global instance
 _local_agent = None
 
 
