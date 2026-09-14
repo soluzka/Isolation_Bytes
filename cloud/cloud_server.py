@@ -190,7 +190,8 @@ def _agent_trigger_scan_response():
     return jsonify({
         'ok': True,
         'success': True,
-        'status': 'accepted',
+        'status': 'success',
+        'accepted': True,
         'message_type': 'success',
         'message': message,
         'error': None,
