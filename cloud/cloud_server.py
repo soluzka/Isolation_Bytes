@@ -13,6 +13,53 @@ _agent_scan_state = {}
 _AGENT_SCAN_STALE_SECONDS = 30 * 60
 
 
+def _patch_public_auth_security():
+    """Allow public activation/login APIs without browser-session CSRF."""
+    public_auth_paths = {
+        '/api/user/login',
+        '/api/license/activate',
+        '/api/license/validate',
+        '/api/license/deactivate',
+    }
+    for key, handlers in list(app.before_request_funcs.items()):
+        patched = []
+        for handler in handlers:
+            if getattr(handler, '_public_auth_csrf_compat', False):
+                patched.append(handler)
+                continue
+            if getattr(handler, '__name__', '') != 'enforce_web_security':
+                patched.append(handler)
+                continue
+
+            def public_auth_security_wrapper(*args, _original=handler, **kwargs):
+                if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and request.path in public_auth_paths:
+                    return None
+                return _original(*args, **kwargs)
+
+            public_auth_security_wrapper._public_auth_csrf_compat = True
+            patched.append(public_auth_security_wrapper)
+        app.before_request_funcs[key] = patched
+
+
+def _patch_license_input_length():
+    """Do not truncate signed IB- license keys before RSA validation."""
+    original = getattr(_legacy, 'sanitize_text', None)
+    if not callable(original) or getattr(original, '_license_length_compat', False):
+        return
+
+    def license_safe_sanitize(value, *, max_length=512):
+        if isinstance(value, str) and value.lstrip().startswith('IB-') and max_length == 256:
+            return value.strip()
+        return original(value, max_length=max_length)
+
+    license_safe_sanitize._license_length_compat = True
+    _legacy.sanitize_text = license_safe_sanitize
+
+
+_patch_public_auth_security()
+_patch_license_input_length()
+
+
 def _canonical_path(path):
     if not isinstance(path, str) or not path.strip():
         return ''
