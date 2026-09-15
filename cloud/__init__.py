@@ -118,6 +118,33 @@ def _scrub_traffic_stats(response):
     return response
 
 
+def _scrub_connection_ips(value):
+    """Remove raw network addresses from browser-visible telemetry.
+
+    Security analysis still receives the original response internally; this
+    only rewrites the response after the legacy endpoint has produced it.
+    """
+    if isinstance(value, list):
+        return [_scrub_connection_ips(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+
+    scrubbed = dict(value)
+    for key in ('remote_ip', 'local_ip', 'ip_address'):
+        if key in scrubbed:
+            scrubbed[key] = '[protected]'
+    return {key: _scrub_connection_ips(item) for key, item in scrubbed.items()}
+
+
+def _scrub_device_telemetry(response):
+    """Hide raw IP fields in browser-visible connection/device telemetry."""
+    payload = response.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return response
+    response.set_json(_scrub_connection_ips(payload))
+    return response
+
+
 def _install_privacy_boundary(legacy):
     """Install machine-scoped access around the legacy cloud registry."""
     if getattr(legacy, '_user_device_privacy_installed', False):
@@ -170,6 +197,8 @@ def _install_privacy_boundary(legacy):
             return response
         if request.path == '/get_traffic_stats':
             return _scrub_traffic_stats(response)
+        if request.path in {'/get_c2_patterns', '/get_live_connections', '/api/network_devices'}:
+            return _scrub_device_telemetry(response)
         return response
 
     legacy._user_device_privacy_installed = True
