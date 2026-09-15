@@ -1,0 +1,128 @@
+"""Deliberate YARA + static-code + ML correlation entry point.
+
+This additive layer is designed for safe adoption without changing existing
+file enumeration. Analysis is read-only and never executes target code.
+Containment is considered successful only after post-action verification.
+"""
+from __future__ import annotations
+
+import logging
+import os
+from typing import Any, Dict, Optional
+
+from security.code_analysis_engine import analyze_file as analyze_code, to_ml_features
+from security.threat_level_engine import score_threat
+
+
+def _legacy_ml_features(analysis: Dict[str, Any]) -> Optional[Any]:
+    from ml_security import security_ml
+    signals = analysis.get("signals", {}) or {}
+    connection_data = {
+        "bytes_sent": min(float(analysis.get("size", 0)), 2_147_483_647.0),
+        "bytes_received": float(analysis.get("suspicious_strings", 0)),
+        "duration": float(analysis.get("entropy", 0.0)),
+        "port": 443 if signals.get("network_c2") else 0,
+        "protocol": 1 if signals.get("network_c2") else 0,
+        "connection_count": float(analysis.get("ast_calls", 0)),
+        "packet_rate": float(analysis.get("ast_imports", 0)),
+        "packet_size": float(analysis.get("ast_dynamic", 0)),
+        "state": 1 if signals.get("process_exec") else 0,
+        "service": 1 if signals.get("web_execution") else 0,
+        "geo": 1 if signals.get("credential_access") else 0,
+        "user_agent": 1 if signals.get("dynamic_code") else 0,
+    }
+    return security_ml.get_features(connection_data)
+
+
+def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        from ml_security import security_ml
+        features = _legacy_ml_features(analysis)
+        model = getattr(security_ml, "pipeline", None)
+        fitted_model = model.named_steps.get("model") if model is not None else None
+        expected = getattr(fitted_model, "n_features_in_", None)
+        if expected is not None and int(expected) != int(features.shape[1]):
+            return {"available": False, "reason": "model_feature_schema_mismatch"}
+        predictions, scores = security_ml.predict(features)
+        if scores is None or len(scores) == 0:
+            return {"available": False, "reason": "model_not_ready"}
+        return {
+            "available": True,
+            "prediction": int(predictions[0]) if predictions is not None else 0,
+            "decision_function": float(scores[0]),
+            "features": to_ml_features(analysis),
+        }
+    except Exception as exc:
+        logging.debug("Static-code ML correlation unavailable: %s", exc)
+        return {"available": False, "reason": "ml_error"}
+
+
+def analyze_file(filepath: str, *, timeout: int = 2) -> Dict[str, Any]:
+    """Correlate YARA, safe static code evidence, ML, and behavioral signals."""
+    from security.yara_scanner import get_highest_severity, scan_file_with_yara
+    matches = scan_file_with_yara(filepath, timeout=timeout)
+    analysis = analyze_code(filepath)
+    ml = _ml_signal(analysis)
+    signals = analysis.get("signals", {}) or {}
+    behavioral = {name: 75.0 for name, present in signals.items() if present}
+    severity = get_highest_severity(matches)
+    verdict = score_threat(
+        filepath,
+        yara_severity=severity,
+        yara_matches=matches,
+        ml_confidence=ml.get("decision_function") if ml.get("available") else None,
+        behavioral_signals=behavioral,
+    )
+    return {
+        "filepath": filepath,
+        "yara_matches": matches,
+        "yara_severity": severity,
+        "code_analysis": analysis,
+        "ml": ml,
+        "threat": verdict,
+    }
+
+
+def should_contain(result: Dict[str, Any]) -> bool:
+    """Contain only on a critical YARA or correlated critical verdict."""
+    threat = result.get("threat", {}) or {}
+    return bool(result.get("yara_severity") == "critical" or threat.get("level") == "critical")
+
+
+def _artifact_candidates(filepath: str) -> list[str]:
+    from quarantine_utils import QUARANTINE_FOLDER, basedir
+    basename = os.path.basename(filepath)
+    candidates: list[str] = []
+    for folder in (QUARANTINE_FOLDER, os.path.join(basedir, "failed_quarantine")):
+        if not os.path.isdir(folder):
+            continue
+        for name in os.listdir(folder):
+            if name == basename or name.startswith(basename + "_") or name.startswith(basename + "."):
+                candidates.append(os.path.join(folder, name))
+    return candidates
+
+
+def verify_containment(filepath: str) -> bool:
+    """Verify that the original path is gone and a containment artifact exists."""
+    if os.path.exists(filepath):
+        return False
+    return any(os.path.isfile(path) for path in _artifact_candidates(filepath))
+
+
+def quarantine_correlated(filepath: str, *, reason: str = "") -> bool:
+    """Correlate evidence, quarantine when warranted, then verify containment."""
+    result = analyze_file(filepath)
+    if not should_contain(result):
+        return False
+    try:
+        from quarantine_utils import quarantine_file
+        outcome = quarantine_file(filepath, reason=reason or result.get("yara_severity", "critical"))
+        if outcome is True:
+            return True
+        # Backward-compatible with the current quarantine API, which returns
+        # None. Verification prevents a successful-looking counter increment
+        # when encryption/move/delete actually failed.
+        return verify_containment(filepath)
+    except Exception as exc:
+        logging.error("Correlated quarantine failed for %s: %s", filepath, exc)
+        return verify_containment(filepath)
