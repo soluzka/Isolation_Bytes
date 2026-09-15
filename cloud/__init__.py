@@ -89,7 +89,7 @@ def _install_privacy_boundary(legacy):
 
     @legacy.app.after_request
     def _bind_machine_and_scrub_fallbacks(response):
-        """Bind successful web login to its machine and prevent server fallback leakage."""
+        """Bind successful web login and prevent cross-machine telemetry leaks."""
         if request.path == '/api/user/login' and response.status_code == 200:
             try:
                 payload = response.get_json(silent=True) or {}
@@ -99,9 +99,6 @@ def _install_privacy_boundary(legacy):
                     session['user_machine_id'] = str(machine_id).strip()
             except (TypeError, ValueError):
                 pass
-
-        if session.get('user_logged_in') and not _user_machine_id():
-            return response
 
         if not session.get('user_logged_in') or _user_is_admin():
             return response
@@ -124,6 +121,16 @@ def _install_privacy_boundary(legacy):
 
         owned_agents = scoped_get_agents()
         if owned_agents:
+            # Network IP addresses are retained for security analysis on the
+            # server, but the browser receives only an aggregate observation.
+            if request.path == '/get_traffic_stats':
+                active_ips = payload.pop('active_ips', [])
+                if isinstance(active_ips, list):
+                    payload['connections_observed'] = len(active_ips)
+                else:
+                    payload['connections_observed'] = int(payload.get('active_connections') or 0)
+                response.set_data(json.dumps(payload))
+                response.content_type = 'application/json'
             return response
 
         # A licensed user with no bound agent must never receive the server's
@@ -134,7 +141,6 @@ def _install_privacy_boundary(legacy):
                 'total_connections': 0,
                 'active_connections': 0,
                 'connections_observed': 0,
-                'active_ips': [],
                 'inbound': 0,
                 'outbound': 0,
                 'bytes_sent': 0,
@@ -148,15 +154,13 @@ def _install_privacy_boundary(legacy):
         elif request.path in {'/get_c2_patterns', '/get_live_connections'}:
             safe = {
                 'success': True,
-                'suspicious_connections': [] if request.path.endswith('patterns') else None,
-                'connections': [] if request.path.endswith('connections') else None,
                 'total': 0,
                 'timestamp': payload.get('timestamp'),
             }
-            if safe['suspicious_connections'] is None:
-                safe.pop('suspicious_connections')
-            if safe['connections'] is None:
-                safe.pop('connections')
+            if request.path.endswith('patterns'):
+                safe['suspicious_connections'] = []
+            else:
+                safe['connections'] = []
         elif request.path == '/api/network_devices':
             safe = {'success': True, 'devices': [], 'count': 0}
         else:
