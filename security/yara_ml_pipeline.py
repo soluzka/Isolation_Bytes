@@ -7,7 +7,6 @@ Containment is considered successful only after post-action verification.
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, Optional
 
 from security.code_analysis_engine import analyze_file as analyze_code, to_ml_features
@@ -39,7 +38,13 @@ def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
         from ml_security import security_ml
         features = _legacy_ml_features(analysis)
         model = getattr(security_ml, "pipeline", None)
-        fitted_model = model.named_steps.get("model") if model is not None else None
+        fitted_model = None
+        if model is not None:
+            named_steps = getattr(model, "named_steps", None)
+            if named_steps:
+                fitted_model = named_steps.get("model")
+            if fitted_model is None:
+                fitted_model = model
         expected = getattr(fitted_model, "n_features_in_", None)
         if expected is not None and int(expected) != int(features.shape[1]):
             return {"available": False, "reason": "model_feature_schema_mismatch"}
@@ -89,40 +94,17 @@ def should_contain(result: Dict[str, Any]) -> bool:
     return bool(result.get("yara_severity") == "critical" or threat.get("level") == "critical")
 
 
-def _artifact_candidates(filepath: str) -> list[str]:
-    from quarantine_utils import QUARANTINE_FOLDER, basedir
-    basename = os.path.basename(filepath)
-    candidates: list[str] = []
-    for folder in (QUARANTINE_FOLDER, os.path.join(basedir, "failed_quarantine")):
-        if not os.path.isdir(folder):
-            continue
-        for name in os.listdir(folder):
-            if name == basename or name.startswith(basename + "_") or name.startswith(basename + "."):
-                candidates.append(os.path.join(folder, name))
-    return candidates
-
-
-def verify_containment(filepath: str) -> bool:
-    """Verify that the original path is gone and a containment artifact exists."""
-    if os.path.exists(filepath):
-        return False
-    return any(os.path.isfile(path) for path in _artifact_candidates(filepath))
-
-
 def quarantine_correlated(filepath: str, *, reason: str = "") -> bool:
     """Correlate evidence, quarantine when warranted, then verify containment."""
     result = analyze_file(filepath)
     if not should_contain(result):
         return False
     try:
-        from quarantine_utils import quarantine_file
-        outcome = quarantine_file(filepath, reason=reason or result.get("yara_severity", "critical"))
-        if outcome is True:
-            return True
-        # Backward-compatible with the current quarantine API, which returns
-        # None. Verification prevents a successful-looking counter increment
-        # when encryption/move/delete actually failed.
-        return verify_containment(filepath)
+        from security.critical_containment import contain_critical_file
+        return contain_critical_file(
+            filepath,
+            reason=reason or result.get("yara_severity", "critical"),
+        )
     except Exception as exc:
         logging.error("Correlated quarantine failed for %s: %s", filepath, exc)
-        return verify_containment(filepath)
+        return False
