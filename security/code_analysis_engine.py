@@ -1,11 +1,4 @@
-"""Safe static code analysis for YARA/ML correlation.
-
-This module is intentionally additive: it never executes inspected code and it
-never changes the existing YARA scanner's decision by itself. It produces a
-small, stable feature vector from file structure, imports/strings, entropy,
-and source-code indicators so the ML layer can use evidence from the same file
-that YARA inspected.
-"""
+"""Safe static code analysis for YARA/ML correlation."""
 from __future__ import annotations
 
 import ast
@@ -18,18 +11,36 @@ from typing import Any, Dict, Iterable, List, Tuple
 
 from security.security_analysis_config import CODE_ANALYSIS_MAX_BYTES
 
-
 _ENTROPY_BUCKETS = 16
 
-
 _CODE_PATTERNS = {
-    "process_exec": re.compile(r"\b(?:subprocess\.(?:Popen|run|call)|os\.system|CreateProcess|WinExec)\b", re.I),
-    "memory_injection": re.compile(r"\b(?:VirtualAlloc(?:Ex)?|WriteProcessMemory|CreateRemoteThread|ptrace)\b", re.I),
-    "credential_access": re.compile(r"\b(?:sekurlsa|lsass|LogonUser|CredRead|keyring)\b", re.I),
-    "persistence": re.compile(r"\b(?:RunOnce|CurrentVersion\\Run|schtasks|crontab|systemctl\s+enable|Startup)\b", re.I),
-    "network_c2": re.compile(r"\b(?:socket\.socket|requests\.(?:get|post)|urllib\.request|WinHttp|InternetOpen|WebClient)\b", re.I),
-    "dynamic_code": re.compile(r"\b(?:eval|exec|compile|__import__|base64\.(?:b64decode|decodebytes))\b", re.I),
-    "web_execution": re.compile(r"(?:cmd\.exe|powershell(?:\.exe)?|/bin/(?:sh|bash)|Runtime\.getRuntime\(\))", re.I),
+    "process_exec": re.compile(
+        r"\b(?:subprocess\.(?:Popen|run|call)|os\.system|CreateProcess|WinExec)\b",
+        re.I,
+    ),
+    "memory_injection": re.compile(
+        r"\b(?:VirtualAlloc(?:Ex)?|WriteProcessMemory|CreateRemoteThread|ptrace)\b",
+        re.I,
+    ),
+    "credential_access": re.compile(
+        r"\b(?:sekurlsa|lsass|LogonUser|CredRead|keyring)\b", re.I
+    ),
+    "persistence": re.compile(
+        r"\b(?:RunOnce|CurrentVersion\\Run|schtasks|crontab|systemctl\s+enable|Startup)\b",
+        re.I,
+    ),
+    "network_c2": re.compile(
+        r"\b(?:socket\.socket|requests\.(?:get|post)|urllib\.request|WinHttp|InternetOpen|WebClient)\b",
+        re.I,
+    ),
+    "dynamic_code": re.compile(
+        r"\b(?:eval|exec|compile|__import__|base64\.(?:b64decode|decodebytes))\b",
+        re.I,
+    ),
+    "web_execution": re.compile(
+        r"(?:cmd\.exe|powershell(?:\.exe)?|/bin/(?:sh|bash)|Runtime\.getRuntime\(\))",
+        re.I,
+    ),
 }
 
 
@@ -40,34 +51,42 @@ def _entropy(data: bytes) -> float:
     for byte in data:
         counts[byte] += 1
     length = float(len(data))
-    return -sum((count / length) * math.log2(count / length) for count in counts if count)
+    return -sum(
+        (count / length) * math.log2(count / length)
+        for count in counts
+        if count
+    )
 
 
 def _string_stats(data: bytes) -> Tuple[int, int, int]:
     ascii_strings = re.findall(rb"[\x20-\x7e]{5,}", data)
     utf16_strings = re.findall(rb"(?:[\x20-\x7e]\x00){4,}", data)
-    suspicious = 0
-    for value in ascii_strings + utf16_strings:
-        text = value.decode("utf-8", errors="ignore")
-        if any(pattern.search(text) for pattern in _CODE_PATTERNS.values()):
-            suspicious += 1
+    suspicious = sum(
+        any(pattern.search(value.decode("utf-8", errors="ignore"))
+            for pattern in _CODE_PATTERNS.values())
+        for value in ascii_strings + utf16_strings
+    )
     return len(ascii_strings), len(utf16_strings), suspicious
 
 
 def _pe_import_count(data: bytes) -> int:
-    """Best-effort PE import presence without loading or executing the binary."""
+    """Best-effort PE import presence without loading or executing binaries."""
     if len(data) < 64 or data[:2] != b"MZ":
         return 0
     try:
         pe_offset = struct.unpack_from("<I", data, 0x3C)[0]
-        if pe_offset + 24 > len(data) or data[pe_offset:pe_offset + 4] != b"PE\x00\x00":
+        if pe_offset + 24 > len(data):
+            return 0
+        if data[pe_offset:pe_offset + 4] != b"PE\x00\x00":
             return 0
         optional_offset = pe_offset + 24
         magic = struct.unpack_from("<H", data, optional_offset)[0]
         data_dir_offset = optional_offset + (112 if magic == 0x20B else 96)
         if data_dir_offset + 16 > len(data):
             return 0
-        import_rva, import_size = struct.unpack_from("<II", data, data_dir_offset + 8)
+        import_rva, import_size = struct.unpack_from(
+            "<II", data, data_dir_offset + 8
+        )
         return int(bool(import_rva and import_size))
     except (IndexError, struct.error, ValueError):
         return 0
@@ -80,26 +99,26 @@ def _python_ast_features(data: bytes) -> Dict[str, int]:
     except (UnicodeDecodeError, SyntaxError, ValueError, MemoryError):
         return {"ast_imports": 0, "ast_calls": 0, "ast_dynamic": 0}
 
-    imports = 0
-    calls = 0
-    dynamic = 0
+    imports = calls = dynamic = 0
     for node in ast.walk(tree):
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             imports += 1
         elif isinstance(node, ast.Call):
             calls += 1
-            if isinstance(node.func, ast.Name) and node.func.id in {"eval", "exec", "compile", "__import__"}:
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id in {"eval", "exec", "compile", "__import__"}
+            ):
                 dynamic += 1
-    return {"ast_imports": imports, "ast_calls": calls, "ast_dynamic": dynamic}
+    return {
+        "ast_imports": imports,
+        "ast_calls": calls,
+        "ast_dynamic": dynamic,
+    }
 
 
 def analyze_file(filepath: str) -> Dict[str, Any]:
-    """Return bounded static-analysis evidence for *filepath*.
-
-    The function is read-only and never imports, parses, or executes the target
-    as a program. Large files are sampled from the beginning and end so the
-    feature extractor cannot become a hidden file-size bottleneck.
-    """
+    """Return bounded, read-only static-analysis evidence for a file."""
     result: Dict[str, Any] = {
         "path": os.path.abspath(filepath),
         "extension": os.path.splitext(filepath)[1].lower(),
@@ -132,16 +151,19 @@ def analyze_file(filepath: str) -> Dict[str, Any]:
     result["sha256"] = hashlib.sha256(data).hexdigest()
     result["entropy"] = round(_entropy(data), 4)
     ascii_count, utf16_count, suspicious_count = _string_stats(data)
-    result["ascii_strings"] = ascii_count
-    result["utf16_strings"] = utf16_count
-    result["suspicious_strings"] = suspicious_count
-    result["pe_import_present"] = _pe_import_count(data)
+    result.update({
+        "ascii_strings": ascii_count,
+        "utf16_strings": utf16_count,
+        "suspicious_strings": suspicious_count,
+        "pe_import_present": _pe_import_count(data),
+    })
     result.update(_python_ast_features(data))
 
     text = data.decode("utf-8", errors="ignore")
-    for name, pattern in _CODE_PATTERNS.items():
-        result["signals"][name] = int(bool(pattern.search(text)))
-
+    result["signals"] = {
+        name: int(bool(pattern.search(text)))
+        for name, pattern in _CODE_PATTERNS.items()
+    }
     return result
 
 
@@ -157,14 +179,16 @@ def code_evidence_score(analysis: Dict[str, Any]) -> float:
         "dynamic_code": 10.0,
         "web_execution": 15.0,
     }
-    score = sum(weight for name, weight in weights.items() if signals.get(name))
+    score = sum(
+        weight for name, weight in weights.items() if signals.get(name)
+    )
     score += min(float(analysis.get("suspicious_strings", 0)) * 2.0, 10.0)
     score += min(float(analysis.get("ast_dynamic", 0)) * 5.0, 10.0)
     return max(0.0, min(100.0, score))
 
 
 def to_ml_features(analysis: Dict[str, Any]) -> List[float]:
-    """Convert analysis evidence to a stable numeric vector for ML fusion."""
+    """Convert analysis evidence to a stable numeric ML vector."""
     signals = analysis.get("signals", {}) or {}
     return [
         float(analysis.get("size", 0)),
