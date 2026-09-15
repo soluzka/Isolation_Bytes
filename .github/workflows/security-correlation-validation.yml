@@ -1,0 +1,84 @@
+name: Security correlation validation
+
+on:
+  push:
+    branches:
+      - feature/issue-108-fail-closed-quarantine
+  pull_request:
+    branches:
+      - security-v2
+      - feature/issue-108-fail-closed-quarantine
+
+permissions:
+  contents: read
+
+jobs:
+  validate-security-correlation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install focused security dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install numpy scikit-learn joblib yara-python
+
+      - name: Compile changed security modules
+        run: |
+          python -m py_compile \
+            hash_verify.py \
+            ml_security.py \
+            threat_level_engine.py \
+            security/security_analysis_config.py \
+            security/code_analysis_engine.py \
+            security/file_discovery.py \
+            security/yara_ml_pipeline.py \
+            security/critical_containment.py
+
+      - name: Validate hash discovery and novelty ledger
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import tempfile
+
+          from hash_verify import HashVerifier
+          from security.file_discovery import FileDiscoveryLedger
+
+          with tempfile.TemporaryDirectory() as td:
+              db = os.path.join(td, 'discovery.sqlite3')
+              sample = os.path.join(td, 'sample.bin')
+              with open(sample, 'wb') as handle:
+                  handle.write(b'benign security-correlation smoke sample')
+
+              identity = HashVerifier.fingerprint_file(sample)
+              assert identity['sha256'] == hashlib.sha256(open(sample, 'rb').read()).hexdigest()
+              assert identity['size'] > 0
+
+              ledger = FileDiscoveryLedger(db)
+              first = ledger.observe(sample)
+              second = ledger.observe(sample)
+              assert first['is_new'] is True
+              assert second['is_new'] is False
+              assert second['sha256'] == first['sha256']
+              assert second['novelty_score'] < first['novelty_score']
+
+          print('hash identity and novelty discovery validation passed')
+          PY
+
+      - name: Validate threat-score normalization
+        run: |
+          python - <<'PY'
+          from security.yara_ml_pipeline import _normalise_anomaly_score
+
+          assert _normalise_anomaly_score(-0.2, -1) >= 0.6
+          assert 0.0 <= _normalise_anomaly_score(0.4, 1) <= 1.0
+          print('ML anomaly-score normalization validation passed')
+          PY
