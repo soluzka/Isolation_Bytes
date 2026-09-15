@@ -14,7 +14,12 @@ from security.security_analysis_config import (
     YARA_WEIGHT,
 )
 
-_LEVELS = ((80.0, "critical"), (60.0, "high"), (35.0, "medium"), (0.0, "low"))
+_LEVELS = (
+    (80.0, "critical"),
+    (60.0, "high"),
+    (35.0, "medium"),
+    (0.0, "low"),
+)
 
 
 def _clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
@@ -32,7 +37,13 @@ def _severity_score(severity: Any) -> float:
         return 0.0
     if isinstance(severity, (int, float)):
         return _clamp(float(severity))
-    return {"critical": 100.0, "high": 82.0, "medium": 55.0, "low": 25.0}.get(str(severity).strip().lower(), 0.0)
+    scores = {
+        "critical": 100.0,
+        "high": 82.0,
+        "medium": 55.0,
+        "low": 25.0,
+    }
+    return scores.get(str(severity).strip().lower(), 0.0)
 
 
 def _ml_score(confidence: Any) -> float:
@@ -74,39 +85,73 @@ class ThreatLevelEngine:
                 return name
         return "low"
 
-    def score(self, entity: str, *, yara_severity: Any = None,
-              yara_matches: Optional[Iterable[Any]] = None,
-              ml_confidence: Any = None, code_analysis_score: Any = None,
-              behavioral_signals: Optional[Mapping[str, Any]] = None,
-              behavior_score: Any = None, confirmed: bool = False) -> Dict[str, Any]:
-        key = str(entity or "unknown")
-        now = time.monotonic()
-        matches = list(yara_matches or [])
-        yara_values = [_severity_score(yara_severity)]
+    @staticmethod
+    def _yara_component(
+        severity: Any, matches: Iterable[Any]
+    ) -> float:
+        values = [_severity_score(severity)]
         for match in matches:
-            value = match.get("severity") if isinstance(match, Mapping) else getattr(match, "severity", None)
-            yara_values.append(_severity_score(value))
-        yara_component = max(yara_values, default=0.0)
-        ml_component = _ml_score(ml_confidence)
-        code_component = _clamp(code_analysis_score or 0.0)
+            value = (
+                match.get("severity")
+                if isinstance(match, Mapping)
+                else getattr(match, "severity", None)
+            )
+            values.append(_severity_score(value))
+        return max(values, default=0.0)
 
+    @staticmethod
+    def _behavior_components(
+        behavioral_signals: Optional[Mapping[str, Any]],
+        behavior_score: Any,
+    ) -> tuple[Dict[str, float], float]:
         details: Dict[str, float] = {}
-        if behavioral_signals:
-            for name, raw in behavioral_signals.items():
-                try:
-                    magnitude = _clamp(float(raw))
-                except (TypeError, ValueError):
-                    magnitude = 50.0 if raw else 0.0
-                details[str(name)] = magnitude
+        for name, raw in (behavioral_signals or {}).items():
+            try:
+                magnitude = _clamp(float(raw))
+            except (TypeError, ValueError):
+                magnitude = 50.0 if raw else 0.0
+            details[str(name)] = magnitude
+
         if behavior_score is not None:
             try:
                 value = float(behavior_score)
-                details["behavior_score"] = max(details.get("behavior_score", 0.0), _clamp(value * 100.0 if value <= 1 else value))
+                if value <= 1.0:
+                    value *= 100.0
+                details["behavior_score"] = max(
+                    details.get("behavior_score", 0.0), _clamp(value)
+                )
             except (TypeError, ValueError):
                 pass
-        behavior_component = max(details.values(), default=0.0)
+        return details, max(details.values(), default=0.0)
 
-        instantaneous = yara_component * YARA_WEIGHT + ml_component * ML_WEIGHT + code_component * CODE_ANALYSIS_WEIGHT + behavior_component * BEHAVIOR_WEIGHT
+    def score(
+        self,
+        entity: str,
+        *,
+        yara_severity: Any = None,
+        yara_matches: Optional[Iterable[Any]] = None,
+        ml_confidence: Any = None,
+        code_analysis_score: Any = None,
+        behavioral_signals: Optional[Mapping[str, Any]] = None,
+        behavior_score: Any = None,
+        confirmed: bool = False,
+    ) -> Dict[str, Any]:
+        key = str(entity or "unknown")
+        now = time.monotonic()
+        matches = list(yara_matches or [])
+        yara_component = self._yara_component(yara_severity, matches)
+        ml_component = _ml_score(ml_confidence)
+        code_component = _clamp(code_analysis_score or 0.0)
+        behavior_details, behavior_component = self._behavior_components(
+            behavioral_signals, behavior_score
+        )
+
+        instantaneous = (
+            yara_component * YARA_WEIGHT
+            + ml_component * ML_WEIGHT
+            + code_component * CODE_ANALYSIS_WEIGHT
+            + behavior_component * BEHAVIOR_WEIGHT
+        )
         if confirmed:
             instantaneous = max(instantaneous, 90.0)
 
@@ -119,10 +164,13 @@ class ThreatLevelEngine:
                 state.behavior[name] *= decay
                 if state.behavior[name] < 0.01:
                     del state.behavior[name]
-            for name, magnitude in details.items():
+            for name, magnitude in behavior_details.items():
                 state.behavior[name] = state.behavior.get(name, 0.0) + magnitude
             state.last_seen = now
-            state.score = state.score * (1.0 - self.ema_alpha) + instantaneous * self.ema_alpha
+            state.score = (
+                state.score * (1.0 - self.ema_alpha)
+                + instantaneous * self.ema_alpha
+            )
             if confirmed:
                 state.score = max(state.score, 90.0)
             score = _clamp(state.score)
@@ -136,7 +184,7 @@ class ThreatLevelEngine:
                 "ml_score": round(ml_component, 2),
                 "code_analysis_score": round(code_component, 2),
                 "behavior_score": round(behavior_component, 2),
-                "behavioral_signals": details,
+                "behavioral_signals": behavior_details,
                 "signals": {
                     "yara": round(yara_component / 100.0, 4),
                     "ml": round(ml_component / 100.0, 4),
@@ -154,10 +202,22 @@ class ThreatLevelEngine:
         with self._lock:
             state = self._states.get(str(entity))
             if not state:
-                return {"entity": str(entity), "score": 0.0, "normalized_score": 0.0, "level": "low"}
+                return {
+                    "entity": str(entity),
+                    "score": 0.0,
+                    "normalized_score": 0.0,
+                    "level": "low",
+                }
             elapsed = max(0.0, time.monotonic() - state.last_seen)
-            score = _clamp(state.score * math.exp(-elapsed / self.decay_seconds))
-            return {"entity": str(entity), "score": round(score, 2), "normalized_score": round(score / 100.0, 4), "level": self.level(score)}
+            score = _clamp(
+                state.score * math.exp(-elapsed / self.decay_seconds)
+            )
+            return {
+                "entity": str(entity),
+                "score": round(score, 2),
+                "normalized_score": round(score / 100.0, 4),
+                "level": self.level(score),
+            }
 
     def reset(self, entity: Optional[str] = None) -> None:
         with self._lock:
