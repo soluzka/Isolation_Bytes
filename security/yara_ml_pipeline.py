@@ -63,25 +63,28 @@ def _normalise_anomaly_score(decision_function: Any, prediction: Any) -> float:
     return max(confidence, 0.60) if prediction == -1 else confidence
 
 
-def _file_ml_features(analysis: Dict[str, Any], model: Any) -> Optional[Any]:
-    """Select the file schema when supported, otherwise use legacy schema."""
+def _file_ml_features(
+    analysis: Dict[str, Any], matches: Any, model: Any
+) -> Optional[Any]:
+    """Select the file schema when supported, otherwise use the legacy schema."""
     from ml_security import security_ml
 
-    expected = _model_expected_features(model)
-    if expected == 18:
-        features = security_ml.get_file_features(analysis.get("filepath", ""))
-        return features
+    if _model_expected_features(model) == 18:
+        return security_ml.get_file_features(
+            analysis.get("filepath", analysis.get("path", "")),
+            yara_matches=matches,
+        )
     return _legacy_ml_features(analysis)
 
 
-def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
+def _ml_signal(analysis: Dict[str, Any], matches: Any) -> Dict[str, Any]:
     if not ML_CORRELATION_ENABLED:
         return {"available": False, "reason": "disabled_by_configuration"}
     try:
         from ml_security import security_ml
 
         model = getattr(security_ml, "pipeline", None)
-        features = _file_ml_features(analysis, model)
+        features = _file_ml_features(analysis, matches, model)
         if not _ml_model_ready(model, features):
             return {"available": False, "reason": "model_not_ready_or_schema_mismatch"}
 
@@ -102,9 +105,14 @@ def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
         return {"available": False, "reason": "ml_error"}
 
 
-def _discovery_evidence(filepath: str, matches: Any, severity: str,
-                        code_score: float, ml: Dict[str, Any],
-                        threat: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _discovery_evidence(
+    filepath: str,
+    matches: Any,
+    severity: str,
+    code_score: float,
+    ml: Dict[str, Any],
+    threat: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
     if not FILE_DISCOVERY_ENABLED:
         return None
     try:
@@ -124,8 +132,12 @@ def _discovery_evidence(filepath: str, matches: Any, severity: str,
         return None
 
 
-def correlate_evidence(filepath: str, matches: Any,
-                       *, analysis: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def correlate_evidence(
+    filepath: str,
+    matches: Any,
+    *,
+    analysis: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Correlate one YARA result with all non-executing evidence sources."""
     if analysis is None:
         analysis = (
@@ -135,19 +147,22 @@ def correlate_evidence(filepath: str, matches: Any,
         )
     analysis.setdefault("filepath", filepath)
 
-    ml = _ml_signal(analysis)
+    ml = _ml_signal(analysis, matches)
     signals = analysis.get("signals", {}) or {}
     behavioral = {name: 75.0 for name, present in signals.items() if present}
     code_score = code_evidence_score(analysis) if CODE_ANALYSIS_ENABLED else 0.0
 
     from security.yara_scanner import get_highest_severity
+
     severity = get_highest_severity(matches)
     confirmed = CRITICAL_YARA_AUTHORITATIVE and severity == "critical"
     threat = score_threat(
         filepath,
         yara_severity=severity,
         yara_matches=matches,
-        ml_confidence=(ml.get("anomaly_confidence") if ml.get("available") else None),
+        ml_confidence=(
+            ml.get("anomaly_confidence") if ml.get("available") else None
+        ),
         code_analysis_score=code_score,
         behavioral_signals=behavioral,
         confirmed=confirmed,
@@ -178,7 +193,10 @@ def analyze_file(filepath: str, *, timeout: int = 2) -> Dict[str, Any]:
 def should_contain(result: Dict[str, Any]) -> bool:
     """Contain critical YARA hits or critical correlated verdicts."""
     threat = result.get("threat", {}) or {}
-    return result.get("yara_severity") == "critical" or threat.get("level") == "critical"
+    return (
+        result.get("yara_severity") == "critical"
+        or threat.get("level") == "critical"
+    )
 
 
 def _artifact_candidates(filepath: str) -> list[str]:
@@ -247,6 +265,7 @@ def quarantine_correlated(filepath: str, *, reason: str = "") -> bool:
     if sha256 and FILE_DISCOVERY_ENABLED:
         try:
             from security.file_discovery import ledger
+
             ledger.mark_contained(sha256, True)
         except Exception as exc:
             logging.debug("Could not mark discovered identity contained: %s", exc)
