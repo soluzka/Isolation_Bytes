@@ -1,11 +1,4 @@
-"""Persistent file-discovery ledger for YARA/ML correlation.
-
-The ledger answers a different question from malware signatures:
-"Have we seen these exact bytes before, and how did the evidence around them
-change?" It uses the repository's HashVerifier for streaming content identity
-and stores observations in a small SQLite database. Hashes are identities, not
-malware verdicts; YARA, static analysis, ML, and behavior remain the evidence.
-"""
+"""Persistent file-discovery ledger for YARA/ML correlation."""
 from __future__ import annotations
 
 import json
@@ -42,22 +35,14 @@ class FileDiscoveryLedger:
         with self._lock, self._connect() as db:
             db.execute("""
                 CREATE TABLE IF NOT EXISTS file_observations (
-                    sha256 TEXT PRIMARY KEY,
-                    sha512 TEXT NOT NULL,
-                    sha3_256 TEXT NOT NULL,
-                    sha3_512 TEXT NOT NULL,
-                    size INTEGER NOT NULL,
-                    extension TEXT NOT NULL,
-                    path TEXT NOT NULL,
-                    first_seen REAL NOT NULL,
-                    last_seen REAL NOT NULL,
-                    seen_count INTEGER NOT NULL DEFAULT 1,
-                    yara_severity TEXT NOT NULL DEFAULT '',
-                    yara_rules TEXT NOT NULL DEFAULT '[]',
-                    code_score REAL NOT NULL DEFAULT 0.0,
-                    ml_score REAL NOT NULL DEFAULT 0.0,
-                    threat_level TEXT NOT NULL DEFAULT 'low',
-                    novelty_score REAL NOT NULL DEFAULT 1.0,
+                    sha256 TEXT PRIMARY KEY, sha512 TEXT NOT NULL,
+                    sha3_256 TEXT NOT NULL, sha3_512 TEXT NOT NULL,
+                    size INTEGER NOT NULL, extension TEXT NOT NULL,
+                    path TEXT NOT NULL, first_seen REAL NOT NULL,
+                    last_seen REAL NOT NULL, seen_count INTEGER NOT NULL DEFAULT 1,
+                    yara_severity TEXT NOT NULL DEFAULT '', yara_rules TEXT NOT NULL DEFAULT '[]',
+                    code_score REAL NOT NULL DEFAULT 0.0, ml_score REAL NOT NULL DEFAULT 0.0,
+                    threat_level TEXT NOT NULL DEFAULT 'low', novelty_score REAL NOT NULL DEFAULT 1.0,
                     contained INTEGER NOT NULL DEFAULT 0
                 )
             """)
@@ -65,83 +50,47 @@ class FileDiscoveryLedger:
             db.execute("CREATE INDEX IF NOT EXISTS idx_file_observations_last_seen ON file_observations(last_seen)")
             db.commit()
 
-    def observe(
-        self,
-        filepath: str,
-        *,
-        yara_severity: str = "",
-        yara_rules: Optional[Iterable[str]] = None,
-        code_score: float = 0.0,
-        ml_score: float = 0.0,
-        threat_level: str = "low",
-        contained: bool = False,
-    ) -> Dict[str, Any]:
-        """Fingerprint and record a file, returning its novelty/evidence state."""
+    def observe(self, filepath: str, *, yara_severity: str = "",
+                yara_rules: Optional[Iterable[str]] = None, code_score: float = 0.0,
+                ml_score: float = 0.0, threat_level: str = "low", contained: bool = False) -> Dict[str, Any]:
+        """Fingerprint and record exact content without loading the whole file."""
         identity = HashVerifier.fingerprint_file(filepath)
         now = time.time()
         extension = os.path.splitext(filepath)[1].lower()
         rules = sorted({str(rule) for rule in (yara_rules or []) if rule})
-
         with self._lock, self._connect() as db:
-            row = db.execute(
-                "SELECT seen_count, first_seen, size, path FROM file_observations WHERE sha256 = ?",
-                (identity['sha256'],),
-            ).fetchone()
+            row = db.execute("SELECT seen_count, first_seen FROM file_observations WHERE sha256 = ?",
+                             (identity['sha256'],)).fetchone()
             is_new = row is None
-            if is_new:
-                novelty = 1.0
-                seen_count = 1
-                first_seen = now
-            else:
-                seen_count = int(row[0]) + 1
-                first_seen = float(row[1])
-                # Exact content identity is already established by SHA-256.
-                # Reappearance becomes less novel while remaining fully tracked.
-                novelty = 1.0 / min(seen_count, 20)
-
-            db.execute(
-                """
+            seen_count = 1 if is_new else int(row[0]) + 1
+            first_seen = now if is_new else float(row[1])
+            novelty = 1.0 if is_new else 1.0 / min(seen_count, 20)
+            db.execute("""
                 INSERT INTO file_observations
-                (sha256, sha512, sha3_256, sha3_512, size, extension, path,
-                 first_seen, last_seen, seen_count, yara_severity, yara_rules,
-                 code_score, ml_score, threat_level, novelty_score, contained)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (sha256,sha512,sha3_256,sha3_512,size,extension,path,first_seen,last_seen,
+                 seen_count,yara_severity,yara_rules,code_score,ml_score,threat_level,novelty_score,contained)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(sha256) DO UPDATE SET
-                    sha512=excluded.sha512,
-                    sha3_256=excluded.sha3_256,
-                    sha3_512=excluded.sha3_512,
-                    size=excluded.size,
-                    extension=excluded.extension,
-                    path=excluded.path,
-                    last_seen=excluded.last_seen,
-                    seen_count=excluded.seen_count,
-                    yara_severity=excluded.yara_severity,
-                    yara_rules=excluded.yara_rules,
-                    code_score=excluded.code_score,
-                    ml_score=excluded.ml_score,
-                    threat_level=excluded.threat_level,
-                    novelty_score=excluded.novelty_score,
-                    contained=excluded.contained
-                """,
-                (
-                    identity['sha256'], identity['sha512'], identity['sha3_256'], identity['sha3_512'],
-                    identity['size'], extension, os.path.abspath(filepath), first_seen, now,
-                    seen_count, yara_severity or '', json.dumps(rules), float(code_score or 0.0),
-                    float(ml_score or 0.0), threat_level or 'low', novelty, int(bool(contained)),
-                ),
-            )
+                 sha512=excluded.sha512,sha3_256=excluded.sha3_256,sha3_512=excluded.sha3_512,
+                 size=excluded.size,extension=excluded.extension,path=excluded.path,last_seen=excluded.last_seen,
+                 seen_count=excluded.seen_count,yara_severity=excluded.yara_severity,yara_rules=excluded.yara_rules,
+                 code_score=excluded.code_score,ml_score=excluded.ml_score,threat_level=excluded.threat_level,
+                 novelty_score=excluded.novelty_score,contained=excluded.contained
+            """, (identity['sha256'], identity['sha512'], identity['sha3_256'], identity['sha3_512'],
+                  identity['size'], extension, os.path.abspath(filepath), first_seen, now, seen_count,
+                  yara_severity or '', json.dumps(rules), float(code_score or 0.0), float(ml_score or 0.0),
+                  threat_level or 'low', novelty, int(bool(contained))))
             db.commit()
+        return {**identity, 'path': os.path.abspath(filepath), 'extension': extension,
+                'is_new': is_new, 'seen_count': seen_count, 'novelty_score': novelty,
+                'first_seen': first_seen, 'last_seen': now}
 
-        return {
-            **identity,
-            'path': os.path.abspath(filepath),
-            'extension': extension,
-            'is_new': is_new,
-            'seen_count': seen_count,
-            'novelty_score': novelty,
-            'first_seen': first_seen,
-            'last_seen': now,
-        }
+    def mark_contained(self, sha256: str, contained: bool = True) -> bool:
+        with self._lock, self._connect() as db:
+            cursor = db.execute("UPDATE file_observations SET contained = ? WHERE sha256 = ?",
+                                (int(bool(contained)), str(sha256).lower()))
+            db.commit()
+            return cursor.rowcount > 0
 
     def lookup(self, sha256: str) -> Optional[Dict[str, Any]]:
         with self._lock, self._connect() as db:
@@ -161,5 +110,4 @@ ledger = FileDiscoveryLedger()
 
 
 def discover_file(filepath: str, **evidence: Any) -> Dict[str, Any]:
-    """Convenience entry point used by the correlated scanner."""
     return ledger.observe(filepath, **evidence)
