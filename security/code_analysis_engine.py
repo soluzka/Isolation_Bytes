@@ -1,7 +1,7 @@
 """Safe static code analysis for YARA/ML correlation.
 
 This module is intentionally additive: it never executes inspected code and it
-never changes the existing YARA scanner's decision by itself.  It produces a
+never changes the existing YARA scanner's decision by itself. It produces a
 small, stable feature vector from file structure, imports/strings, entropy,
 and source-code indicators so the ML layer can use evidence from the same file
 that YARA inspected.
@@ -16,12 +16,12 @@ import re
 import struct
 from typing import Any, Dict, Iterable, List, Tuple
 
+from security.security_analysis_config import CODE_ANALYSIS_MAX_BYTES
 
-MAX_ANALYSIS_BYTES = 5 * 1024 * 1024
+
 _ENTROPY_BUCKETS = 16
 
 
-# Deliberately conservative indicators.  These are evidence, not verdicts.
 _CODE_PATTERNS = {
     "process_exec": re.compile(r"\b(?:subprocess\.(?:Popen|run|call)|os\.system|CreateProcess|WinExec)\b", re.I),
     "memory_injection": re.compile(r"\b(?:VirtualAlloc(?:Ex)?|WriteProcessMemory|CreateRemoteThread|ptrace)\b", re.I),
@@ -55,7 +55,7 @@ def _string_stats(data: bytes) -> Tuple[int, int, int]:
 
 
 def _pe_import_count(data: bytes) -> int:
-    """Best-effort PE import count without loading or executing the binary."""
+    """Best-effort PE import presence without loading or executing the binary."""
     if len(data) < 64 or data[:2] != b"MZ":
         return 0
     try:
@@ -68,12 +68,7 @@ def _pe_import_count(data: bytes) -> int:
         if data_dir_offset + 16 > len(data):
             return 0
         import_rva, import_size = struct.unpack_from("<II", data, data_dir_offset + 8)
-        if not import_rva or not import_size:
-            return 0
-        # We intentionally only expose a bounded presence/count signal here;
-        # resolving RVAs requires a full PE parser and is outside this safe,
-        # lightweight feature extractor.
-        return 1
+        return int(bool(import_rva and import_size))
     except (IndexError, struct.error, ValueError):
         return 0
 
@@ -102,7 +97,7 @@ def analyze_file(filepath: str) -> Dict[str, Any]:
     """Return bounded static-analysis evidence for *filepath*.
 
     The function is read-only and never imports, parses, or executes the target
-    as a program.  Large files are sampled from the beginning and end so the
+    as a program. Large files are sampled from the beginning and end so the
     feature extractor cannot become a hidden file-size bottleneck.
     """
     result: Dict[str, Any] = {
@@ -124,12 +119,13 @@ def analyze_file(filepath: str) -> Dict[str, Any]:
     try:
         result["size"] = os.path.getsize(filepath)
         with open(filepath, "rb") as handle:
-            if result["size"] <= MAX_ANALYSIS_BYTES:
-                data = handle.read(MAX_ANALYSIS_BYTES)
+            if result["size"] <= CODE_ANALYSIS_MAX_BYTES:
+                data = handle.read(CODE_ANALYSIS_MAX_BYTES)
             else:
-                head = handle.read(MAX_ANALYSIS_BYTES // 2)
-                handle.seek(max(0, result["size"] - MAX_ANALYSIS_BYTES // 2))
-                data = head + handle.read(MAX_ANALYSIS_BYTES // 2)
+                half = CODE_ANALYSIS_MAX_BYTES // 2
+                head = handle.read(half)
+                handle.seek(max(0, result["size"] - half))
+                data = head + handle.read(half)
     except (OSError, IOError):
         return result
 
@@ -147,6 +143,24 @@ def analyze_file(filepath: str) -> Dict[str, Any]:
         result["signals"][name] = int(bool(pattern.search(text)))
 
     return result
+
+
+def code_evidence_score(analysis: Dict[str, Any]) -> float:
+    """Convert static-code indicators into a bounded corroboration score."""
+    signals = analysis.get("signals", {}) or {}
+    weights = {
+        "process_exec": 15.0,
+        "memory_injection": 25.0,
+        "credential_access": 20.0,
+        "persistence": 15.0,
+        "network_c2": 15.0,
+        "dynamic_code": 10.0,
+        "web_execution": 15.0,
+    }
+    score = sum(weight for name, weight in weights.items() if signals.get(name))
+    score += min(float(analysis.get("suspicious_strings", 0)) * 2.0, 10.0)
+    score += min(float(analysis.get("ast_dynamic", 0)) * 5.0, 10.0)
+    return max(0.0, min(100.0, score))
 
 
 def to_ml_features(analysis: Dict[str, Any]) -> List[float]:
