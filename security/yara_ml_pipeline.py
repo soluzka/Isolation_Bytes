@@ -1,12 +1,14 @@
-"""Deliberate YARA + static-code + ML correlation entry point.
+"""Deliberate YARA + code-analysis + ML + exact-file discovery pipeline.
 
-Analysis is read-only and never executes target code. Critical YARA remains
-authoritative, while static-code and ML evidence provide corroboration.
+The pipeline is additive: YARA remains the signature authority, the existing
+ML model is used only when its feature schema is actually compatible, static
+analysis never executes a target, and the discovery ledger records every
+examined identity without treating a hash itself as a malware verdict.
 """
 from __future__ import annotations
 
 import logging
-import os
+import math
 from typing import Any, Dict, Optional
 
 from security.code_analysis_engine import analyze_file as analyze_code
@@ -49,6 +51,21 @@ def _ml_model_ready(model: Any, features: Any) -> bool:
     return expected is None or int(expected) == int(features.shape[1])
 
 
+def _normalise_anomaly_score(decision_function: Any, prediction: Any) -> float:
+    """Convert IsolationForest output into anomaly confidence [0,1]."""
+    try:
+        score = float(decision_function)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(score):
+        return 0.0
+    # IsolationForest: negative decision scores are more anomalous.
+    confidence = max(0.0, min(1.0, 0.5 - score))
+    if prediction == -1:
+        confidence = max(confidence, 0.60)
+    return confidence
+
+
 def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
     if not ML_CORRELATION_ENABLED:
         return {"available": False, "reason": "disabled_by_configuration"}
@@ -61,10 +78,13 @@ def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
         predictions, scores = security_ml.predict(features)
         if scores is None or len(scores) == 0:
             return {"available": False, "reason": "model_not_ready"}
+        prediction = int(predictions[0]) if predictions is not None else 0
+        decision = float(scores[0])
         return {
             "available": True,
-            "prediction": int(predictions[0]) if predictions is not None else 0,
-            "decision_function": float(scores[0]),
+            "prediction": prediction,
+            "decision_function": decision,
+            "anomaly_confidence": _normalise_anomaly_score(decision, prediction),
             "features": to_ml_features(analysis),
         }
     except Exception as exc:
@@ -73,12 +93,7 @@ def _ml_signal(analysis: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def correlate_evidence(filepath: str, matches, *, analysis: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Correlate already-collected YARA matches with safe code and ML evidence.
-
-    This entry point deliberately accepts existing YARA matches so callers do
-    not scan the same file twice. Code evidence is independent of the legacy
-    14-feature ML model and is fused explicitly by the threat engine.
-    """
+    """Correlate existing YARA matches with static code, ML, and file novelty."""
     analysis = analysis if analysis is not None else (
         analyze_code(filepath) if CODE_ANALYSIS_ENABLED else {"signals": {}, "size": 0}
     )
@@ -93,11 +108,29 @@ def correlate_evidence(filepath: str, matches, *, analysis: Optional[Dict[str, A
         filepath,
         yara_severity=severity,
         yara_matches=matches,
-        ml_confidence=ml.get("decision_function") if ml.get("available") else None,
+        ml_confidence=ml.get("anomaly_confidence") if ml.get("available") else None,
         code_analysis_score=code_score,
         behavioral_signals=behavioral,
         confirmed=bool(CRITICAL_YARA_AUTHORITATIVE and severity == "critical"),
     )
+
+    rules = [getattr(match, "rule", "") for match in matches or []]
+    discovery = None
+    try:
+        from security.file_discovery import discover_file
+        discovery = discover_file(
+            filepath,
+            yara_severity=severity,
+            yara_rules=rules,
+            code_score=code_score,
+            ml_score=ml.get("anomaly_confidence", 0.0) if ml.get("available") else 0.0,
+            threat_level=verdict.get("level", "low"),
+        )
+    except Exception as exc:
+        # Discovery is observability/correlation support. Never turn a failed
+        # ledger write into a scan failure or a weaker malware decision.
+        logging.debug("File discovery ledger unavailable: %s", exc)
+
     return {
         "filepath": filepath,
         "yara_matches": matches,
@@ -105,34 +138,45 @@ def correlate_evidence(filepath: str, matches, *, analysis: Optional[Dict[str, A
         "code_analysis": analysis,
         "code_analysis_score": code_score,
         "ml": ml,
+        "discovery": discovery,
         "threat": verdict,
     }
 
 
 def analyze_file(filepath: str, *, timeout: int = 2) -> Dict[str, Any]:
-    """Scan once with YARA, then correlate that evidence with code and ML."""
+    """Scan once with YARA, then correlate the exact same evidence."""
     from security.yara_scanner import scan_file_with_yara
     matches = scan_file_with_yara(filepath, timeout=timeout)
     return correlate_evidence(filepath, matches)
 
 
 def should_contain(result: Dict[str, Any]) -> bool:
-    """Contain critical YARA hits or critical correlated verdicts."""
+    """Contain critical YARA or a critical multi-signal correlated verdict."""
     threat = result.get("threat", {}) or {}
     return result.get("yara_severity") == "critical" or threat.get("level") == "critical"
 
 
 def quarantine_correlated(filepath: str, *, reason: str = "") -> bool:
-    """Correlate evidence, contain when warranted, then verify containment."""
+    """Correlate, contain when warranted, then mark the exact identity contained."""
     result = analyze_file(filepath)
     if not should_contain(result):
         return False
     try:
         from security.critical_containment import contain_critical_file
-        return contain_critical_file(
+        success = bool(contain_critical_file(
             filepath,
             reason=reason or result.get("yara_severity", "critical"),
-        )
+        ))
+        if success:
+            discovery = result.get("discovery") or {}
+            sha256 = discovery.get("sha256")
+            if sha256:
+                try:
+                    from security.file_discovery import ledger
+                    ledger.mark_contained(sha256, True)
+                except Exception:
+                    pass
+        return success
     except Exception as exc:
         logging.error("Correlated containment failed for %s: %s", filepath, exc)
         return False
