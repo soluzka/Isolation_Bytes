@@ -7,6 +7,13 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Mapping, Optional
 
+from security.security_analysis_config import (
+    BEHAVIOR_WEIGHT,
+    CODE_ANALYSIS_WEIGHT,
+    ML_WEIGHT,
+    YARA_WEIGHT,
+)
+
 _LEVELS = ((80.0, "critical"), (60.0, "high"), (35.0, "medium"), (0.0, "low"))
 
 
@@ -25,9 +32,7 @@ def _severity_score(severity: Any) -> float:
         return 0.0
     if isinstance(severity, (int, float)):
         return _clamp(float(severity))
-    return {"critical": 100.0, "high": 82.0, "medium": 55.0, "low": 25.0}.get(
-        str(severity).strip().lower(), 0.0
-    )
+    return {"critical": 100.0, "high": 82.0, "medium": 55.0, "low": 25.0}.get(str(severity).strip().lower(), 0.0)
 
 
 def _ml_score(confidence: Any) -> float:
@@ -54,11 +59,11 @@ class _State:
 
 
 class ThreatLevelEngine:
-    """Thread-safe fusion of static signatures, ML, and behavior."""
+    """Thread-safe fusion of signatures, ML, static code, and behavior."""
 
     def __init__(self, decay_seconds: float = 300.0, ema_alpha: float = 0.35):
         self.decay_seconds = max(1.0, float(decay_seconds))
-        self.ema_alpha = _clamp(ema_alpha, 0.01, 1.0) / 100.0 if float(ema_alpha) > 1 else _clamp(ema_alpha, 0.01, 1.0)
+        self.ema_alpha = _clamp(float(ema_alpha), 0.01, 1.0)
         self._states: Dict[str, _State] = {}
         self._lock = threading.RLock()
 
@@ -69,17 +74,11 @@ class ThreatLevelEngine:
                 return name
         return "low"
 
-    def score(
-        self,
-        entity: str,
-        *,
-        yara_severity: Any = None,
-        yara_matches: Optional[Iterable[Any]] = None,
-        ml_confidence: Any = None,
-        behavioral_signals: Optional[Mapping[str, Any]] = None,
-        behavior_score: Any = None,
-        confirmed: bool = False,
-    ) -> Dict[str, Any]:
+    def score(self, entity: str, *, yara_severity: Any = None,
+              yara_matches: Optional[Iterable[Any]] = None,
+              ml_confidence: Any = None, code_analysis_score: Any = None,
+              behavioral_signals: Optional[Mapping[str, Any]] = None,
+              behavior_score: Any = None, confirmed: bool = False) -> Dict[str, Any]:
         key = str(entity or "unknown")
         now = time.monotonic()
         matches = list(yara_matches or [])
@@ -89,6 +88,7 @@ class ThreatLevelEngine:
             yara_values.append(_severity_score(value))
         yara_component = max(yara_values, default=0.0)
         ml_component = _ml_score(ml_confidence)
+        code_component = _clamp(code_analysis_score or 0.0)
 
         details: Dict[str, float] = {}
         if behavioral_signals:
@@ -100,12 +100,13 @@ class ThreatLevelEngine:
                 details[str(name)] = magnitude
         if behavior_score is not None:
             try:
-                details["behavior_score"] = max(details.get("behavior_score", 0.0), _clamp(float(behavior_score) * 100.0 if float(behavior_score) <= 1 else float(behavior_score)))
+                value = float(behavior_score)
+                details["behavior_score"] = max(details.get("behavior_score", 0.0), _clamp(value * 100.0 if value <= 1 else value))
             except (TypeError, ValueError):
                 pass
         behavior_component = max(details.values(), default=0.0)
 
-        instantaneous = yara_component * 0.50 + ml_component * 0.25 + behavior_component * 0.25
+        instantaneous = yara_component * YARA_WEIGHT + ml_component * ML_WEIGHT + code_component * CODE_ANALYSIS_WEIGHT + behavior_component * BEHAVIOR_WEIGHT
         if confirmed:
             instantaneous = max(instantaneous, 90.0)
 
@@ -133,15 +134,20 @@ class ThreatLevelEngine:
                 "level": self.level(score),
                 "yara_score": round(yara_component, 2),
                 "ml_score": round(ml_component, 2),
+                "code_analysis_score": round(code_component, 2),
                 "behavior_score": round(behavior_component, 2),
                 "behavioral_signals": details,
-                "signals": {"yara": round(yara_component / 100.0, 4), "ml": round(ml_component / 100.0, 4), "behavior": round(behavior_component / 100.0, 4)},
+                "signals": {
+                    "yara": round(yara_component / 100.0, 4),
+                    "ml": round(ml_component / 100.0, 4),
+                    "code_analysis": round(code_component / 100.0, 4),
+                    "behavior": round(behavior_component / 100.0, 4),
+                },
                 "confirmed": bool(confirmed),
                 "timestamp": time.time(),
             }
 
     def update(self, entity: str, **signals: Any) -> Dict[str, Any]:
-        """Backward-compatible entry point used by older monitoring loops."""
         return self.score(entity, **signals)
 
     def get(self, entity: str) -> Dict[str, Any]:
