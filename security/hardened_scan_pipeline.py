@@ -8,9 +8,10 @@ media containers receive the same static inspection as other files.
 
 Security rule sources are treated as inert research assets when they live in
 this project's ``security/yara_rules`` directory. They are still inspected
-and reported, but are never automatically quarantined merely because their
-own detection strings match. This exception is deliberately path-scoped and
-must not be used as a general malware allow-list.
+and reported. Only YARA evidence produced by scanning the rule source itself
+is discounted for containment; behavioral and ML evidence remains eligible
+to trigger quarantine. This exception is deliberately path-scoped and must
+not be used as a general malware allow-list.
 """
 from __future__ import annotations
 
@@ -161,6 +162,16 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         ml_confidence=ml_confidence,
         antivirus_confirmed=False,
     )
+    independent_decision = (
+        quarantine_decision(
+            evidence,
+            yara_severity="",
+            ml_confidence=ml_confidence,
+            antivirus_confirmed=False,
+        )
+        if research_asset
+        else decision
+    )
 
     result: Dict[str, object] = {
         "path": path,
@@ -179,13 +190,17 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         "ml_confidence": ml_confidence,
         "server_context": evidence.server_context,
         "security_research_asset": research_asset,
+        "research_asset_yara_only": bool(research_asset and decision["quarantine"] and not independent_decision["quarantine"]),
         "quarantine": False,
         "quarantine_verified": False,
         "status": "clean_or_uncorroborated",
     }
 
-    if quarantine and decision["quarantine"] and not research_asset:
-        ok, method = _contain(path, "corroborated multi-signal malware detection")
+    if quarantine and independent_decision["quarantine"]:
+        ok, method = _contain(
+            path,
+            "corroborated multi-signal malware detection" + ("; independent of research-rule self-match" if research_asset else ""),
+        )
         result["quarantine"] = ok
         result["quarantine_verified"] = ok and not os.path.exists(path)
         result["containment_method"] = method
