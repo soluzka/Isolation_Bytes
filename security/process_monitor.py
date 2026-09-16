@@ -36,33 +36,19 @@ def _normalize(path):
 
 
 def _is_windows_system_binary(path):
-    """Return True only for a binary physically under trusted Windows roots."""
     if not path:
         return False
     p = _normalize(path)
-    roots = []
     system_root = os.environ.get('SystemRoot', r'C:\\Windows')
-    roots.extend([
+    for root in (
         os.path.join(system_root, 'System32'),
         os.path.join(system_root, 'SysWOW64'),
         os.path.join(system_root, 'WinSxS'),
-    ])
-    for root in roots:
+    ):
         r = _normalize(root)
         if r and (p == r or p.startswith(r + os.sep)):
             return True
     return False
-
-
-def _is_current_user(username):
-    if not username:
-        return False
-    try:
-        import getpass
-        current = getpass.getuser().lower()
-        return current in username.lower()
-    except Exception:
-        return False
 
 
 def _command_line(proc):
@@ -90,9 +76,9 @@ def _parent_details(proc):
 def _suspicious_command_line(command_line):
     value = (command_line or '').lower()
     patterns = (
-        r'\\icacls(?:\.exe)?\\?\s+.*\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
+        r'\\icacls(?:\.exe)?\s+.*\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
         r'\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
-        r'(?:powershell|pwsh)(?:\.exe)?[^\r\n]*(?:-enc|-encodedcommand|downloadstring|invoke-expression|iex\b)',
+        r'(?:powershell|pwsh)(?:\.exe)?[^\r\n]*(?:-enc|-encodedcommand|downloadstring|invoke-expression|\biex\b)',
         r'(?:rundll32|regsvr32|mshta|wscript|cscript|installutil)(?:\.exe)?[^\r\n]*(?:http|https|\\\\|/)',
         r'(?:schtasks|sc)(?:\.exe)?[^\r\n]*(?:create|create\s+service)',
     )
@@ -100,11 +86,6 @@ def _suspicious_command_line(command_line):
 
 
 def _enable_process_auditing():
-    """Best-effort enablement of Security 4688 success auditing on Windows.
-
-    This is intentionally limited to Process Creation success auditing. Failure
-    auditing is not needed for detection and is not enabled here.
-    """
     if sys.platform != 'win32':
         return False, 'not_windows'
     try:
@@ -126,12 +107,11 @@ def _enable_process_auditing():
 
 
 def _event4688_loop(event_callback):
-    """Poll Windows Security 4688 events and correlate parent/child context."""
+    """Poll Windows Security 4688 events and correlate child/parent context."""
     if sys.platform != 'win32':
         return
     try:
         import win32evtlog
-        import win32con
     except ImportError:
         logging.warning('pywin32 unavailable; Windows 4688 telemetry disabled')
         return
@@ -165,8 +145,6 @@ def _event4688_loop(event_callback):
                 if int(getattr(event, 'EventID', 0)) & 0xFFFF != 4688:
                     continue
                 strings = list(getattr(event, 'StringInserts', ()) or ())
-                # Windows 4688 insertion ordering: subject fields, new process
-                # fields, creator fields, token/elevation fields, then command line
                 data = {
                     'event_id': 4688,
                     'record_number': record,
@@ -176,37 +154,57 @@ def _event4688_loop(event_callback):
                     'new_process_name': strings[5] if len(strings) > 5 else None,
                     'creator_process_id': strings[7] if len(strings) > 7 else None,
                     'creator_process_name': strings[8] if len(strings) > 8 else None,
-                    'command_line': strings[-1] if strings else None,
+                    'command_line': strings[9] if len(strings) > 9 else (strings[-1] if strings else None),
                     'audit_status': audit_status,
                 }
                 command_hits = _suspicious_command_line(data['command_line'])
-                if command_hits:
-                    data['suspicious_command_indicators'] = command_hits
-                    data['severity_hint'] = 'high'
+                if not command_hits:
+                    continue
+                data['suspicious_command_indicators'] = command_hits
+                data['severity_hint'] = 'high'
+                try:
+                    pid = int(str(data.get('new_process_id') or ''), 0)
+                    proc = psutil.Process(pid)
+                    data['exe'] = proc.exe()
+                    data['pid'] = pid
+                    data.update(_parent_details(proc))
+                    # Scan loaded module paths for a suspicious process. This is
+                    # path-only telemetry; the module is never executed.
+                    modules = []
                     try:
-                        pid_text = str(data.get('new_process_id') or '')
-                        pid = int(pid_text, 0)
-                        proc = psutil.Process(pid)
-                        data['exe'] = proc.exe()
-                        data['pid'] = pid
-                        data.update(_parent_details(proc))
-                    except (ValueError, psutil.Error, OSError):
+                        for mapping in proc.memory_maps(grouped=True):
+                            module = getattr(mapping, 'path', '')
+                            if module and os.path.isfile(module):
+                                modules.append(module)
+                    except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
                         pass
-                    try:
-                        emit({'type': 'process_creation_suspicious', **data})
-                    except Exception:
-                        logging.exception('Process telemetry callback failed')
-                else:
-                    # Report every process creation only when explicitly requested
-                    # by the caller; this keeps cloud traffic manageable.
-                    if os.environ.get('ISOLATION_REPORT_ALL_PROCESS_CREATION', '').lower() in {'1', 'true', 'yes'}:
-                        try:
-                            emit({'type': 'process_created', **data})
-                        except Exception:
-                            logging.exception('Process telemetry callback failed')
+                    data['loaded_modules'] = modules[:256]
+                except (ValueError, psutil.Error, OSError):
+                    pass
+                try:
+                    emit({'type': 'process_creation_suspicious', **data})
+                except Exception:
+                    logging.exception('Process telemetry callback failed')
         except Exception as exc:
             logging.warning('Windows process telemetry error: %s', exc)
         time.sleep(3)
+
+
+def _host_snapshot_loop(event_callback):
+    """Periodically collect read-only persistence and boot-state inventory."""
+    try:
+        from security.host_telemetry import collect_persistence_snapshot
+    except Exception as exc:
+        logging.warning('Host telemetry unavailable: %s', exc)
+        return
+    while True:
+        try:
+            snapshot = collect_persistence_snapshot()
+            if event_callback:
+                event_callback(snapshot)
+        except Exception as exc:
+            logging.warning('Persistence telemetry error: %s', exc)
+        time.sleep(300)
 
 
 def start_process_creation_telemetry(event_callback=None):
@@ -216,23 +214,12 @@ def start_process_creation_telemetry(event_callback=None):
             return
         _TELEMETRY_STARTED = True
     if sys.platform == 'win32':
-        threading.Thread(
-            target=_event4688_loop,
-            args=(event_callback,),
-            name='process-creation-telemetry',
-            daemon=True,
-        ).start()
+        threading.Thread(target=_event4688_loop, args=(event_callback,), name='process-creation-telemetry', daemon=True).start()
+    threading.Thread(target=_host_snapshot_loop, args=(event_callback,), name='host-persistence-telemetry', daemon=True).start()
 
 
 def scan_running_processes(scan_func, terminate_on_malware=True, block_connections=True, event_callback=None):
-    """Scan accessible running processes, including privileged/system processes.
-
-    The previous implementation limited scans to the current user's processes
-    and excluded ProgramData/other privileged locations. That left a major gap:
-    a service, scheduled task, or malware running as SYSTEM could be invisible.
-    We now attempt every accessible process executable, while treating Windows
-    system binaries as scan targets rather than assuming they are trustworthy.
-    """
+    """Scan accessible running processes, including privileged/system processes."""
     start_process_creation_telemetry(event_callback)
 
     def emit(event_type, **details):
@@ -252,14 +239,10 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
             if not exe or not os.path.isfile(exe) or pid in scanned:
                 continue
             scanned.add(pid)
-
             parent = _parent_details(proc)
             cmdline = _command_line(proc)
-            emit(
-                'process_scanned', pid=pid, name=name, exe=exe,
-                username=username, command_line=cmdline,
-                system_binary=_is_windows_system_binary(exe), **parent,
-            )
+            emit('process_scanned', pid=pid, name=name, exe=exe, username=username,
+                 command_line=cmdline, system_binary=_is_windows_system_binary(exe), **parent)
             result = scan_func(exe)
             if not result or len(result) < 3:
                 logging.error(f'Unexpected scan result format for {exe}: {result}')
@@ -313,7 +296,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
 
 
 def block_ip(ip):
-    """Block the given IP using Windows Firewall (netsh advfirewall)."""
+    """Block an IP using Windows Firewall (netsh advfirewall)."""
     import ipaddress
     try:
         ip = str(ipaddress.ip_address(str(ip).strip()))
