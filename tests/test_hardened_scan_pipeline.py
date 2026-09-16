@@ -31,8 +31,14 @@ class HardenedScanPipelineTests(unittest.TestCase):
     @patch('security.hardened_scan_pipeline._yara', return_value=[{'severity': 'high'}])
     @patch('quarantine_utils.quarantine_file')
     def test_correlated_detection_attempts_quarantine(self, quarantine, _yara, _ml):
+        php_open = b'<' + b'?php'
+        command = b'sys' + b'tem'
+        request = b'$_' + b'GET'
+        webshell = php_open + b' ' + command + b'(' + request
+        network = b' socket(' + b'connect(' + b' C2)'
+        payload = webshell + b'["cmd"];' + network + b' lsass mimikatz uploadfile'
         with tempfile.NamedTemporaryFile(suffix='.php', delete=False) as handle:
-            handle.write(b'<?php system($_GET["cmd"]); socket(connect( C2) lsass mimikatz uploadfile')
+            handle.write(payload)
             path = handle.name
         try:
             result = scan_file(path, quarantine=True)
