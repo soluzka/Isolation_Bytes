@@ -1,3 +1,4 @@
+import hashlib
 import os
 import sys
 import time
@@ -8,6 +9,8 @@ import threading
 import re
 
 import psutil
+
+from utils.subprocess_safe import safe_run
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
 
@@ -39,7 +42,7 @@ def _is_windows_system_binary(path):
     if not path:
         return False
     p = _normalize(path)
-    system_root = os.environ.get('SystemRoot', r'C:\\Windows')
+    system_root = os.environ.get('SystemRoot', r'C:\Windows')
     for root in (
         os.path.join(system_root, 'System32'),
         os.path.join(system_root, 'SysWOW64'),
@@ -73,14 +76,28 @@ def _parent_details(proc):
         return {}
 
 
+def _sha256(path):
+    """Hash a file without executing or modifying it."""
+    try:
+        digest = hashlib.sha256()
+        with open(path, 'rb') as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except (OSError, PermissionError):
+        return None
+
+
 def _suspicious_command_line(command_line):
     value = (command_line or '').lower()
     patterns = (
         r'\\icacls(?:\.exe)?\s+.*\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
         r'\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
         r'(?:powershell|pwsh)(?:\.exe)?[^\r\n]*(?:-enc|-encodedcommand|downloadstring|invoke-expression|\biex\b)',
-        r'(?:rundll32|regsvr32|mshta|wscript|cscript|installutil)(?:\.exe)?[^\r\n]*(?:http|https|\\\\|/)',
+        r'(?:rundll32|regsvr32|mshta|wscript|cscript|installutil|wmic|msiexec|certutil|bitsadmin)(?:\.exe)?[^\r\n]*(?:http|https|\\\\|/urlcache|/transfer|/decode|/i\s)',
         r'(?:schtasks|sc)(?:\.exe)?[^\r\n]*(?:create|create\s+service)',
+        r'(?:reg|reg\.exe)\s+(?:add|import)\s+.*(?:\\run(?:once)?(?:\\|$)|\\services\\)',
+        r'(?:cmd|cmd\.exe)[^\r\n]*/c[^\r\n]*(?:powershell|certutil|bitsadmin|rundll32|regsvr32|mshta)',
     )
     return [pattern for pattern in patterns if re.search(pattern, value)]
 
@@ -89,7 +106,7 @@ def _enable_process_auditing():
     if sys.platform != 'win32':
         return False, 'not_windows'
     try:
-        result = subprocess.run(
+        result = safe_run(
             ['auditpol', '/set', '/subcategory:Process Creation', '/success:enable'],
             check=False,
             creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
@@ -167,9 +184,8 @@ def _event4688_loop(event_callback):
                     proc = psutil.Process(pid)
                     data['exe'] = proc.exe()
                     data['pid'] = pid
+                    data['sha256'] = _sha256(data['exe'])
                     data.update(_parent_details(proc))
-                    # Scan loaded module paths for a suspicious process. This is
-                    # path-only telemetry; the module is never executed.
                     modules = []
                     try:
                         for mapping in proc.memory_maps(grouped=True):
@@ -241,13 +257,22 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
             scanned.add(pid)
             parent = _parent_details(proc)
             cmdline = _command_line(proc)
+            indicators = _suspicious_command_line(cmdline)
+            sha256 = _sha256(exe)
             emit('process_scanned', pid=pid, name=name, exe=exe, username=username,
-                 command_line=cmdline, system_binary=_is_windows_system_binary(exe), **parent)
+                 command_line=cmdline, system_binary=_is_windows_system_binary(exe),
+                 sha256=sha256, suspicious_command_indicators=indicators, **parent)
             result = scan_func(exe)
             if not result or len(result) < 3:
                 logging.error(f'Unexpected scan result format for {exe}: {result}')
                 continue
             scan_success, malware_found, msg = result
+            if indicators and not malware_found:
+                # Behavioral evidence is useful even when static/YARA/ML scans
+                # have no signature for the payload. Do not claim it is malware.
+                emit('behavioral_suspicion', pid=pid, name=name, exe=exe,
+                     username=username, command_line=cmdline,
+                     suspicious_command_indicators=indicators, sha256=sha256, **parent)
             if not scan_success:
                 logging.warning(f'Scan failed for {exe}: {msg}')
                 emit('process_scan_error', pid=pid, name=name, exe=exe, message=msg)
@@ -255,7 +280,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
             if malware_found:
                 logging.warning(f'Malware found in process {name} (PID: {pid}), exe: {exe}. {msg}')
                 emit('malware_found', pid=pid, name=name, exe=exe, username=username,
-                     command_line=cmdline, message=msg, **parent)
+                     command_line=cmdline, sha256=sha256, message=msg, **parent)
                 if terminate_on_malware:
                     try:
                         p = psutil.Process(pid)
@@ -285,7 +310,7 @@ def scan_running_processes(scan_func, terminate_on_malware=True, block_connectio
                 if matches:
                     logging.warning(f'[RTP][PROC] YARA match detected in process EXE: {exe} (PID: {pid}, Name: {name})')
                     emit('yara_match', pid=pid, name=name, exe=exe, username=username,
-                         command_line=cmdline, yara_matches=matches, **parent)
+                         command_line=cmdline, sha256=sha256, yara_matches=matches, **parent)
             except Exception as e:
                 logging.error(f'[RTP][PROC] Error running YARA scan on process EXE {exe}: {e}')
 
@@ -304,15 +329,13 @@ def block_ip(ip):
         logging.error(f'Refusing to block invalid IP: {ip!r}')
         return
     try:
-        subprocess.run([
-            NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
-            f'name=Block_{ip}', 'dir=out', 'action=block', f'remoteip={ip}'
-        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([
-            NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
-            f'name=Block_{ip}', 'dir=in', 'action=block', f'remoteip={ip}'
-        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
-            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for direction in ('out', 'in'):
+            safe_run(
+                [
+                    NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
+                    f'name=Block_{ip}', f'dir={direction}', 'action=block', f'remoteip={ip}'
+                ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
     except Exception as e:
         logging.error(f'Failed to block IP {ip}: {e}')
