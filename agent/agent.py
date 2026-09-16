@@ -42,9 +42,10 @@ except Exception as exc:
     print(f'Could not load threat_level_engine: {exc}')
 
 try:
-    from network_blocking import block_ip, should_auto_block_ip
+    from network_blocking import block_ip, is_windows_admin, should_auto_block_ip
 except Exception as exc:
     block_ip = None
+    is_windows_admin = None
     should_auto_block_ip = None
     print(f'Could not load network_blocking: {exc}')
 
@@ -237,8 +238,18 @@ def network_monitor_loop():
                     ipaddress.ip_address(ip)
                 except ValueError:
                     continue
+
                 port_signal = port in c2_ports
                 known_blocked = ip in blocked_ips
+                pid = getattr(conn, 'pid', None)
+                owner = None
+                owner_error = None
+                if pid:
+                    try:
+                        owner = psutil.Process(pid).exe()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError) as exc:
+                        owner_error = str(exc)
+
                 assessment = _assess(
                     f'network:{ip}',
                     behavioral_signals={
@@ -248,15 +259,36 @@ def network_monitor_loop():
                     },
                 )
                 confirmed_c2 = known_blocked or (port_signal and assessment.get('score', 0.0) >= 0.85)
-                if confirmed_c2 and block_ip is not None and should_auto_block_ip is not None:
-                    if should_auto_block_ip(ip, threat_level=assessment, confirmed_c2=True):
-                        ok, msg = block_ip(ip, reason=f"confirmed C2; threat={assessment.get('score', 0):.2f}")
-                        if ok:
+                firewall_blocked = False
+                firewall_result = 'not_attempted'
+                admin = is_windows_admin() if is_windows_admin is not None else False
+
+                if confirmed_c2:
+                    if block_ip is None or should_auto_block_ip is None:
+                        firewall_result = 'network_blocking module unavailable'
+                    elif not admin:
+                        firewall_result = 'Windows Firewall blocking requires Administrator privileges'
+                    elif should_auto_block_ip(ip, threat_level=assessment, confirmed_c2=True):
+                        firewall_blocked, firewall_result = block_ip(
+                            ip,
+                            reason=f"confirmed C2; threat={assessment.get('score', 0):.2f}",
+                        )
+                        if firewall_blocked:
                             blocked_ips.add(ip)
-                if known_blocked or port_signal or assessment.get('level') in ('high', 'critical'):
+
+                if known_blocked or port_signal or assessment.get('level') in ('high', 'critical') or confirmed_c2:
                     _post('/agent/report', {
-                        'device_id': DEVICE_ID, 'type': 'network_alert',
-                        'remote_ip': ip, 'remote_port': port, 'pid': conn.pid,
+                        'device_id': DEVICE_ID,
+                        'type': 'network_alert',
+                        'remote_ip': ip,
+                        'remote_port': port,
+                        'pid': pid,
+                        'process_owner': owner,
+                        'process_owner_error': owner_error,
+                        'confirmed_c2': confirmed_c2,
+                        'firewall_blocked': firewall_blocked,
+                        'firewall_result': firewall_result,
+                        'administrator': admin,
                         'reason': 'confirmed C2' if confirmed_c2 else ('blocked ip' if known_blocked else f'c2 port {port}'),
                         'threat_assessment': assessment,
                     })
