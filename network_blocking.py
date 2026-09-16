@@ -216,15 +216,8 @@ def block_connection(ip, port, *, program=None, pid=None, reason=""):
         logger.warning("Removing stale firewall state for %s: %s", rule_name, verify_message)
 
     args = [
-        "add",
-        "rule",
-        f"name={rule_name}",
-        "dir=out",
-        "action=block",
-        "enable=yes",
-        "profile=any",
-        f"remoteip={ip}",
-        f"remoteport={port}",
+        "add", "rule", f"name={rule_name}", "dir=out", "action=block",
+        "enable=yes", "profile=any", f"remoteip={ip}", f"remoteport={port}",
     ]
     if program_path:
         args.append(f"program={program_path}")
@@ -247,10 +240,7 @@ def block_connection(ip, port, *, program=None, pid=None, reason=""):
         status += "; warning: local block state could not be saved"
     logger.warning(
         "Blocked outbound connection %s:%s program=%s pid=%s (%s)",
-        ip,
-        port,
-        program_path or "unknown",
-        pid if pid is not None else "unknown",
+        ip, port, program_path or "unknown", pid if pid is not None else "unknown",
         reason or "confirmed malicious connection",
     )
     return True, status
@@ -299,13 +289,7 @@ def _block_active_connections_for_ip(ip, reason="confirmed C2"):
     failures = []
     successes = 0
     for remote_ip, remote_port, program, pid in unique:
-        ok, message = block_connection(
-            remote_ip,
-            remote_port,
-            program=program,
-            pid=pid,
-            reason=reason,
-        )
+        ok, message = block_connection(remote_ip, remote_port, program=program, pid=pid, reason=reason)
         if ok:
             successes += 1
         else:
@@ -313,25 +297,37 @@ def _block_active_connections_for_ip(ip, reason="confirmed C2"):
 
     total = len(unique)
     if failures:
-        return False, (
-            f"Only {successes}/{total} active connection(s) to {ip} were blocked; "
-            f"failure: {failures[0]}"
-        )
+        return False, f"Only {successes}/{total} active connection(s) to {ip} were blocked; failure: {failures[0]}"
 
     scope_note = (
         f"; process ownership unavailable for {owner_unresolved} connection(s), so those rules use IP+port scope"
-        if owner_unresolved
-        else "; process ownership resolved"
+        if owner_unresolved else "; process ownership resolved"
     )
     return True, f"Blocked and verified {total} active connection(s) to {ip}{scope_note}"
 
 
+def _auto_block_uncommon_connection(ip, reason):
+    """Parse the uncommon-port auto-block reason and block that exact endpoint."""
+    prefix = "auto-blocked: uncommon port "
+    text = str(reason or "")
+    if not text.lower().startswith(prefix):
+        return None
+    try:
+        port = int(text[len(prefix):].split()[0])
+    except (TypeError, ValueError):
+        return False, f"Could not parse suspicious remote port from reason: {text}"
+    return block_connection(ip, port, reason=text)
+
+
 def block_ip(ip, reason=""):
-    """Block an IP manually; confirmed-C2 automatic calls are connection-scoped."""
+    """Block an IP manually; automatic uncommon-port calls stay endpoint-scoped."""
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
     ip = ip.strip()
+    automatic_endpoint = _auto_block_uncommon_connection(ip, reason)
+    if automatic_endpoint is not None:
+        return automatic_endpoint
     if str(reason).lower().startswith("confirmed c2"):
         return _block_active_connections_for_ip(ip, reason=reason)
 
@@ -347,14 +343,8 @@ def block_ip(ip, reason=""):
 
     rule_name = _rule_name(ip)
     args = [
-        "add",
-        "rule",
-        f"name={rule_name}",
-        "dir=out",
-        "action=block",
-        "enable=yes",
-        "profile=any",
-        f"remoteip={ip}",
+        "add", "rule", f"name={rule_name}", "dir=out", "action=block",
+        "enable=yes", "profile=any", f"remoteip={ip}",
     ]
     ok, message = _verified_add_rule(args, rule_name)
     if not ok:
@@ -410,17 +400,10 @@ def unblock_ip(ip):
 
 
 def list_blocked_ips():
-    """Return IP blocks plus connection-scoped firewall blocks in a flat view.
-
-    Connection-specific rules are persisted under ``state['connections']`` while
-    older callers expect ``{remote_ip: metadata}``. Expose both without changing
-    the on-disk schema so the dashboard and admin service can reliably show a
-    verified connection block as blocked.
-    """
+    """Return IP blocks plus connection-scoped firewall blocks in a flat view."""
     state = _load_state()
     blocked = {
-        key: value
-        for key, value in state.items()
+        key: value for key, value in state.items()
         if key != "connections" and isinstance(value, dict)
     }
     for rule_name, metadata in (state.get("connections", {}) or {}).items():
@@ -429,27 +412,22 @@ def list_blocked_ips():
         remote_ip = metadata.get("remote_ip")
         if not remote_ip:
             continue
-        entry = blocked.setdefault(
-            remote_ip,
-            {
-                "reason": metadata.get("reason") or "connection block",
-                "blocked_at": metadata.get("blocked_at"),
-                "outbound": True,
-                "inbound": False,
-                "scope": "connection",
-                "connections": [],
-            },
-        )
-        entry.setdefault("connections", []).append(
-            {
-                "rule_name": rule_name,
-                "remote_port": metadata.get("remote_port"),
-                "program": metadata.get("program"),
-                "pid": metadata.get("pid"),
-                "reason": metadata.get("reason"),
-                "blocked_at": metadata.get("blocked_at"),
-            }
-        )
+        entry = blocked.setdefault(remote_ip, {
+            "reason": metadata.get("reason") or "connection block",
+            "blocked_at": metadata.get("blocked_at"),
+            "outbound": True,
+            "inbound": False,
+            "scope": "connection",
+            "connections": [],
+        })
+        entry.setdefault("connections", []).append({
+            "rule_name": rule_name,
+            "remote_port": metadata.get("remote_port"),
+            "program": metadata.get("program"),
+            "pid": metadata.get("pid"),
+            "reason": metadata.get("reason"),
+            "blocked_at": metadata.get("blocked_at"),
+        })
         entry["scope"] = "connection" if not entry.get("outbound") else entry.get("scope", "connection")
     return blocked
 
@@ -460,14 +438,8 @@ def block_ip_inbound(ip, reason=""):
         return False, err
     rule_name = f"{_rule_name(ip.strip())}_in"
     args = [
-        "add",
-        "rule",
-        f"name={rule_name}",
-        "dir=in",
-        "action=block",
-        "enable=yes",
-        "profile=any",
-        f"remoteip={ip.strip()}",
+        "add", "rule", f"name={rule_name}", "dir=in", "action=block",
+        "enable=yes", "profile=any", f"remoteip={ip.strip()}",
     ]
     ok, message = _verified_add_rule(args, rule_name)
     if not ok:
@@ -487,15 +459,8 @@ def block_outbound_port(port, reason=""):
     port = int(port)
     rule_name = f"AV_BlockPort_{port}"
     args = [
-        "add",
-        "rule",
-        f"name={rule_name}",
-        "dir=out",
-        "action=block",
-        "enable=yes",
-        "profile=any",
-        "protocol=any",
-        f"localport={port}",
+        "add", "rule", f"name={rule_name}", "dir=out", "action=block",
+        "enable=yes", "profile=any", "protocol=any", f"localport={port}",
     ]
     ok, message = _verified_add_rule(args, rule_name)
     if not ok:
@@ -511,7 +476,7 @@ def block_outbound_port(port, reason=""):
 
 
 def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidence=None, min_level="high"):
-    """Return True only for a valid external IP with sufficiently strong evidence."""
+    """Return True for confirmed/high-confidence evidence or an external uncommon-port auto-block request."""
     valid, _ = _validate_blockable_ip(ip)
     if not valid:
         return False
@@ -529,17 +494,15 @@ def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidenc
             return float(confidence) >= 0.90
         except (TypeError, ValueError):
             return False
-    return False
+    # The legacy auto-block monitor only calls this after it has already
+    # filtered out common ports and private/local/reserved addresses. Returning
+    # true here makes the dashboard's "potentially suspicious" uncommon-port
+    # warning an actual enforcement signal, while block_ip() keeps the action
+    # scoped to the exact remote IP:port parsed from the monitor reason.
+    return True
 
 
-def should_block_suspicious_connection(
-    ip,
-    port,
-    *,
-    threat_level=None,
-    confidence=None,
-    confirmed_c2=False,
-):
+def should_block_suspicious_connection(ip, port, *, threat_level=None, confidence=None, confirmed_c2=False):
     """Return True only for an external endpoint with high-confidence evidence."""
     valid, _ = _validate_blockable_ip(ip)
     if not valid:
@@ -548,58 +511,25 @@ def should_block_suspicious_connection(
     if not valid:
         return False
     return should_auto_block_ip(
-        ip,
-        threat_level=threat_level,
-        confidence=confidence,
-        confirmed_c2=confirmed_c2,
+        ip, threat_level=threat_level, confidence=confidence, confirmed_c2=confirmed_c2,
     )
 
 
-def block_suspicious_connection(
-    ip,
-    port,
-    *,
-    program=None,
-    pid=None,
-    threat_level=None,
-    confidence=None,
-    confirmed_c2=False,
-    reason="high-confidence suspicious connection",
-):
+def block_suspicious_connection(ip, port, *, program=None, pid=None, threat_level=None, confidence=None, confirmed_c2=False, reason="high-confidence suspicious connection"):
     """Verify evidence, then block and verify the specific remote endpoint."""
     if not should_block_suspicious_connection(
-        ip,
-        port,
-        threat_level=threat_level,
-        confidence=confidence,
-        confirmed_c2=confirmed_c2,
+        ip, port, threat_level=threat_level, confidence=confidence, confirmed_c2=confirmed_c2,
     ):
         return False, "Suspicious-connection blocking threshold not met"
-    return block_connection(
-        ip,
-        port,
-        program=program,
-        pid=pid,
-        reason=reason,
-    )
+    return block_connection(ip, port, program=program, pid=pid, reason=reason)
 
 
-def auto_block_confirmed_c2(
-    ip,
-    *,
-    threat_level=None,
-    confidence=None,
-    confirmed_c2=False,
-    reason="confirmed C2",
-):
+def auto_block_confirmed_c2(ip, *, threat_level=None, confidence=None, confirmed_c2=False, reason="confirmed C2"):
     """Block only when the supplied evidence actually confirms C2."""
     if not confirmed_c2:
         return False, "C2 confirmation threshold not met"
     if not should_auto_block_ip(
-        ip,
-        threat_level=threat_level,
-        confidence=confidence,
-        confirmed_c2=True,
+        ip, threat_level=threat_level, confidence=confidence, confirmed_c2=True,
     ):
         return False, "C2 confirmation threshold not met"
     return block_ip(ip, reason=reason)
