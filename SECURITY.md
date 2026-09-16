@@ -7,7 +7,7 @@ The current project version is **1.0.966.0**.
 
 | Version | Supported |
 | ------- | --------- |
-| 1.8.950.x | Yes |
+| 1.8.951.x | Yes |
 | Older releases | No |
 
 Update to the latest release before reporting an issue that may already be fixed.
