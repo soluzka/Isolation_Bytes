@@ -5,17 +5,38 @@ watcher. It is non-executing, scans recursively without a file-count or
 100-MiB ceiling, and uses streaming behavioral evidence plus YARA/ML signals.
 Audio/video files are not blanket-excluded: YARA is invoked directly here so
 media containers receive the same static inspection as other files.
+
+Security rule sources are treated as inert research assets when they live in
+this project's ``security/yara_rules`` directory. They are still inspected
+and reported, but are never automatically quarantined merely because their
+own detection strings match. This exception is deliberately path-scoped and
+must not be used as a general malware allow-list.
 """
 from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Dict, Iterable, List
 
 from security.behavioral_malware_detector import analyze_file, quarantine_decision
 
 
 TRAVERSAL_EXCLUSIONS = {"proc", "sys", "dev"}
+_RULE_SOURCE_SUFFIXES = {".yar", ".yara"}
+_REPOSITORY_ROOT = Path(__file__).resolve().parent.parent
+_SECURITY_RULE_ROOT = (_REPOSITORY_ROOT / "security" / "yara_rules").resolve()
+
+
+def _is_security_rule_asset(path: str) -> bool:
+    """Return True only for YARA source files in this repository's rule tree."""
+    try:
+        candidate = Path(path).resolve()
+        return candidate.suffix.lower() in _RULE_SOURCE_SUFFIXES and (
+            candidate == _SECURITY_RULE_ROOT or _SECURITY_RULE_ROOT in candidate.parents
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def iter_files(target: str) -> Iterable[str]:
@@ -128,6 +149,7 @@ def _contain(path: str, reason: str) -> tuple[bool, str]:
 def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     """Scan one file and optionally contain only corroborated detections."""
     path = os.path.abspath(path)
+    research_asset = _is_security_rule_asset(path)
     evidence = analyze_file(path)
     matches = _yara(path)
     yara_severity = _yara_severity(matches)
@@ -156,17 +178,20 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         "yara_matches": len(matches or []),
         "ml_confidence": ml_confidence,
         "server_context": evidence.server_context,
+        "security_research_asset": research_asset,
         "quarantine": False,
         "quarantine_verified": False,
         "status": "clean_or_uncorroborated",
     }
 
-    if quarantine and decision["quarantine"]:
+    if quarantine and decision["quarantine"] and not research_asset:
         ok, method = _contain(path, "corroborated multi-signal malware detection")
         result["quarantine"] = ok
         result["quarantine_verified"] = ok and not os.path.exists(path)
         result["containment_method"] = method
         result["status"] = "quarantined" if result["quarantine_verified"] else "containment_unverified"
+    elif research_asset and (evidence.suspicious or matches):
+        result["status"] = "security_research_asset_review"
     elif evidence.suspicious or matches:
         result["status"] = "suspicious_review_or_corroboration"
 
