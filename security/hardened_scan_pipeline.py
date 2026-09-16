@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List
 
 from security.behavioral_malware_detector import analyze_file, quarantine_decision
 
@@ -25,31 +25,25 @@ def iter_files(target: str) -> Iterable[str]:
         return
     if not os.path.isdir(target):
         return
-    for root, dirs, files in os.walk(target):
-        dirs[:] = [d for d in dirs if d not in TRAVERSAL_EXCLUSIONS]
+
+    def _on_walk_error(exc: OSError) -> None:
+        logging.error("Unable to traverse %s: %s", getattr(exc, "filename", target), exc)
+
+    for root, dirs, files in os.walk(target, onerror=_on_walk_error):
+        dirs[:] = [d for d in dirs if d.lower() not in TRAVERSAL_EXCLUSIONS]
         for name in files:
             path = os.path.join(root, name)
             try:
                 if os.path.isfile(path):
                     yield path
-            except OSError:
-                logging.exception("Unable to stat candidate: %s", path)
+            except OSError as exc:
+                logging.error("Unable to stat candidate %s: %s", path, exc)
 
 
 def _yara(path: str):
-    """Run the rule sets directly, bypassing extension-based skip lists.
-
-    The older security.yara_scanner.scan_file_with_yara() API intentionally
-    remains available for compatibility, but the authoritative pipeline does
-    not call it because it previously skipped audio/video extensions. Rules
-    are matched against the path for large files and therefore do not require
-    loading an entire large object into Python memory.
-    """
+    """Run rule sets directly without extension-based media exclusions."""
     try:
-        from security.yara_scanner import (
-            load_yara_rules,
-            _classify_filetype,
-        )
+        from security.yara_scanner import load_yara_rules, _classify_filetype
         import warnings
         import yara
 
@@ -71,8 +65,6 @@ def _yara(path: str):
                 break
             except yara.Error as exc:
                 logging.error("YARA rule error scanning %s: %s", path, exc)
-        # Apply the scanner's explicit/adaptive noise policy after matching;
-        # importantly, do not apply its media-extension early return.
         try:
             from security.yara_scanner import NOISY_RULE_NAMES
             matches = [m for m in matches if getattr(m, "rule", "") not in NOISY_RULE_NAMES]
@@ -109,17 +101,11 @@ def _yara_severity(matches) -> str:
         return highest
 
 
-def _ml_confidence(path: str) -> float:
-    """Use existing ML only when fitted; ML failures are neutral."""
+def _ml_confidence(path: str, yara_matches=None) -> float:
+    """Use the ML model's file-specific feature path when fitted."""
     try:
         from ml_security import security_ml
-        if not security_ml._is_fitted():
-            return 0.0
-        features = security_ml.get_features({"path": path, "filename": os.path.basename(path)})
-        _, scores = security_ml.predict(features)
-        if scores is None:
-            return 0.0
-        return max(0.0, min(1.0, 0.5 - float(scores[0])))
+        return float(security_ml.file_anomaly_confidence(path, yara_matches=yara_matches))
     except Exception:
         return 0.0
 
@@ -131,9 +117,6 @@ def _contain(path: str, reason: str) -> tuple[bool, str]:
         ok = bool(quarantine_and_verify(path, reason=reason))
         return ok, "verified_quarantine"
     except Exception:
-        # Keep compatibility with quarantine_utils while preserving fail-closed
-        # reporting: an exception or a surviving original path is never called
-        # a successful quarantine.
         try:
             from quarantine_utils import quarantine_file
             quarantine_file(path, reason=reason)
@@ -148,7 +131,7 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     evidence = analyze_file(path)
     matches = _yara(path)
     yara_severity = _yara_severity(matches)
-    ml_confidence = _ml_confidence(path)
+    ml_confidence = _ml_confidence(path, yara_matches=matches)
 
     decision = quarantine_decision(
         evidence,
@@ -191,9 +174,13 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
 
 
 def scan_target(target: str, *, quarantine: bool = True) -> List[Dict[str, object]]:
-    """Scan a file or directory recursively, preserving inaccessible-file errors."""
+    """Scan a file or directory recursively, preserving scan errors."""
     results: List[Dict[str, object]] = []
-    for path in iter_files(os.path.abspath(target)):
+    target = os.path.abspath(target)
+    if not os.path.exists(target):
+        return [{"path": target, "status": "scan_error", "error": "target does not exist"}]
+
+    for path in iter_files(target):
         try:
             results.append(scan_file(path, quarantine=quarantine))
         except (PermissionError, OSError) as exc:
