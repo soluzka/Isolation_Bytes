@@ -1,17 +1,16 @@
 """Adaptive YARA gating.
 
 Broad rules remain loaded and scanned, but are treated as corroborating evidence
-until the file has enough independent evidence to justify activating them.
-Rule reputation then learns from clean and confirmed-malware outcomes.
+until independent evidence activates them. Rule reputation learns from clean and
+confirmed-malware outcomes; an otherwise suppressed rule can be reactivated for
+the current decision when independent evidence says it is needed.
 """
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Mapping, Optional
+from typing import Iterable, Mapping
 
-# These rules are intentionally *not* removed from the rule corpus.  The set is
-# imported lazily so this module cannot create a yara_scanner <-> reputation
-# import cycle.
+
 def _seed_noisy_rules() -> set[str]:
     try:
         from security.yara_scanner import NOISY_RULE_NAMES
@@ -28,6 +27,17 @@ def _rule_name(match) -> str:
     return str(getattr(match, "rule", "") or "")
 
 
+def _independent_evidence(behavioral_score: float, ml_confidence: float,
+                          code_analysis_score: float, confirmed: bool) -> bool:
+    """Whether non-YARA evidence is strong enough to activate broad rules."""
+    return (
+        float(behavioral_score or 0.0) >= 55.0
+        or float(ml_confidence or 0.0) >= 0.80
+        or float(code_analysis_score or 0.0) >= 55.0
+        or bool(confirmed)
+    )
+
+
 def filter_for_decision(
     matches: Iterable[object],
     *,
@@ -36,34 +46,37 @@ def filter_for_decision(
     code_analysis_score: float = 0.0,
     confirmed: bool = False,
 ) -> list[object]:
-    """Return matches eligible to drive the containment decision.
+    """Return YARA matches eligible to drive containment.
 
-    Broad rules are promoted when independent evidence is strong. Otherwise
-    they stay visible as telemetry but do not become a standalone quarantine
-    trigger. Dynamically unsuppressed rules are always eligible.
+    Every match is still observed by the scanner. Broad/static-noisy rules are
+    merely held as telemetry until independent evidence activates them. A rule
+    suppressed by reputation is also reactivated for the current decision when
+    strong behavioral/ML/code evidence or confirmation says it is needed. This
+    prevents reputation suppression from masking a genuinely changing threat.
     """
     try:
         from security.rule_reputation import is_suppressed
     except Exception:
         is_suppressed = lambda _name: False
 
-    independent = (
-        float(behavioral_score or 0.0) >= 55.0
-        or float(ml_confidence or 0.0) >= 0.80
-        or float(code_analysis_score or 0.0) >= 55.0
-        or confirmed
+    independent = _independent_evidence(
+        behavioral_score, ml_confidence, code_analysis_score, confirmed
     )
     result: list[object] = []
     for match in matches or []:
         name = _rule_name(match)
-        if is_suppressed(name):
-            # A rule suppressed by reputation stays out unless a confirmed
-            # malware result explicitly reactivates it.
-            if confirmed:
-                result.append(match)
+        suppressed = bool(is_suppressed(name))
+
+        # Dynamic suppression is not an absolute block: strong independent
+        # evidence reactivates the rule for this scan.
+        if suppressed and not independent:
             continue
+
+        # Static broad/noisy rules remain scanned and observable, but cannot
+        # independently cause containment. Independent evidence promotes them.
         if is_broad_rule(name) and not independent:
             continue
+
         result.append(match)
     return result
 
@@ -82,8 +95,12 @@ def record_clean_matches(matches: Iterable[object]) -> None:
 def record_confirmed_malware(matches: Iterable[object]) -> None:
     try:
         from security.rule_reputation import confirm_malware_hit
-        names = [_rule_name(match) for match in matches or []]
-        confirm_malware_hit(name for name in names if name)
+        names = {_rule_name(match) for match in matches or []}
+        names.discard("")
+        # Pass actual rule-name strings, not a generator, so every matched rule
+        # is reliably recorded and dynamically unsuppressed by reputation.
+        if names:
+            confirm_malware_hit(names)
     except Exception as exc:
         logging.debug("Adaptive YARA malware-hit recording unavailable: %s", exc)
 
