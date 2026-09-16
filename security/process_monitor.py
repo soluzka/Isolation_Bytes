@@ -1,14 +1,16 @@
-import psutil
 import os
-import logging
 import sys
+import time
+import logging
 import subprocess
 import shutil
+import threading
+import re
+
+import psutil
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
 
-# --- Windows subprocess window suppression ---
-import sys
 if sys.platform == 'win32':
     DETACHED_PROCESS = 0x00000008
     CREATE_NO_WINDOW = 0x08000000
@@ -16,123 +18,302 @@ else:
     DETACHED_PROCESS = 0
     CREATE_NO_WINDOW = 0
 
+_TELEMETRY_STARTED = False
+_TELEMETRY_LOCK = threading.Lock()
+
+
 def get_basedir():
     if getattr(sys, 'frozen', False):
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
-def scan_running_processes(scan_func, terminate_on_malware=True, block_connections=True, event_callback=None):
-    """
-    Scan all running processes owned by the current user and running from user-created folders (not Windows defaults/system).
 
-    event_callback: optional callable invoked with a dict for each notable
-    event (process scanned, malware found, process terminated, connection
-    blocked, YARA match). Callers that don't need this can omit it -- this
-    is purely additive so existing callers are unaffected.
+def _normalize(path):
+    try:
+        return os.path.normcase(os.path.abspath(path))
+    except (OSError, TypeError, ValueError):
+        return ''
+
+
+def _is_windows_system_binary(path):
+    """Return True only for a binary physically under trusted Windows roots."""
+    if not path:
+        return False
+    p = _normalize(path)
+    roots = []
+    system_root = os.environ.get('SystemRoot', r'C:\\Windows')
+    roots.extend([
+        os.path.join(system_root, 'System32'),
+        os.path.join(system_root, 'SysWOW64'),
+        os.path.join(system_root, 'WinSxS'),
+    ])
+    for root in roots:
+        r = _normalize(root)
+        if r and (p == r or p.startswith(r + os.sep)):
+            return True
+    return False
+
+
+def _is_current_user(username):
+    if not username:
+        return False
+    try:
+        import getpass
+        current = getpass.getuser().lower()
+        return current in username.lower()
+    except Exception:
+        return False
+
+
+def _command_line(proc):
+    try:
+        return ' '.join(proc.cmdline() or [])
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+        return ''
+
+
+def _parent_details(proc):
+    try:
+        parent = proc.parent()
+        if parent is None:
+            return {}
+        return {
+            'parent_pid': parent.pid,
+            'parent_name': parent.name(),
+            'parent_exe': parent.exe(),
+            'parent_cmdline': _command_line(parent),
+        }
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+        return {}
+
+
+def _suspicious_command_line(command_line):
+    value = (command_line or '').lower()
+    patterns = (
+        r'\\icacls(?:\.exe)?\\?\s+.*\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
+        r'\\windows\\system32\\(?:advapi32|kernel32|ntdll)\.dll.*?/grant\s+administrators:\(f\)',
+        r'(?:powershell|pwsh)(?:\.exe)?[^\r\n]*(?:-enc|-encodedcommand|downloadstring|invoke-expression|iex\b)',
+        r'(?:rundll32|regsvr32|mshta|wscript|cscript|installutil)(?:\.exe)?[^\r\n]*(?:http|https|\\\\|/)',
+        r'(?:schtasks|sc)(?:\.exe)?[^\r\n]*(?:create|create\s+service)',
+    )
+    return [pattern for pattern in patterns if re.search(pattern, value)]
+
+
+def _enable_process_auditing():
+    """Best-effort enablement of Security 4688 success auditing on Windows.
+
+    This is intentionally limited to Process Creation success auditing. Failure
+    auditing is not needed for detection and is not enabled here.
     """
+    if sys.platform != 'win32':
+        return False, 'not_windows'
+    try:
+        result = subprocess.run(
+            ['auditpol', '/set', '/subcategory:Process Creation', '/success:enable'],
+            check=False,
+            creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode == 0:
+            return True, 'enabled'
+        return False, (result.stderr or result.stdout or f'rc={result.returncode}').strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        return False, str(exc)
+
+
+def _event4688_loop(event_callback):
+    """Poll Windows Security 4688 events and correlate parent/child context."""
+    if sys.platform != 'win32':
+        return
+    try:
+        import win32evtlog
+        import win32con
+    except ImportError:
+        logging.warning('pywin32 unavailable; Windows 4688 telemetry disabled')
+        return
+
+    ok, audit_status = _enable_process_auditing()
+    emit = event_callback or (lambda event: None)
+    last_record = 0
+    try:
+        handle = win32evtlog.OpenEventLog(None, 'Security')
+        flags = win32evtlog.EVENTLOG_BACKWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+        events = win32evtlog.ReadEventLog(handle, flags, 0) or []
+        if events:
+            last_record = max(int(getattr(e, 'RecordNumber', 0)) for e in events)
+        win32evtlog.CloseEventLog(handle)
+    except Exception as exc:
+        logging.warning('Unable to initialize Windows 4688 telemetry: %s', exc)
+        return
+
+    logging.info('Windows process telemetry started (audit=%s, status=%s)', ok, audit_status)
+    while True:
+        try:
+            handle = win32evtlog.OpenEventLog(None, 'Security')
+            flags = win32evtlog.EVENTLOG_FORWARDS_READ | win32evtlog.EVENTLOG_SEQUENTIAL_READ
+            events = win32evtlog.ReadEventLog(handle, flags, 0) or []
+            win32evtlog.CloseEventLog(handle)
+            for event in events:
+                record = int(getattr(event, 'RecordNumber', 0))
+                if record <= last_record:
+                    continue
+                last_record = max(last_record, record)
+                if int(getattr(event, 'EventID', 0)) & 0xFFFF != 4688:
+                    continue
+                strings = list(getattr(event, 'StringInserts', ()) or ())
+                # Windows 4688 insertion ordering: subject fields, new process
+                # fields, creator fields, token/elevation fields, then command line
+                data = {
+                    'event_id': 4688,
+                    'record_number': record,
+                    'time_created': str(getattr(event, 'TimeGenerated', '')),
+                    'subject_user': strings[1] if len(strings) > 1 else None,
+                    'new_process_id': strings[4] if len(strings) > 4 else None,
+                    'new_process_name': strings[5] if len(strings) > 5 else None,
+                    'creator_process_id': strings[7] if len(strings) > 7 else None,
+                    'creator_process_name': strings[8] if len(strings) > 8 else None,
+                    'command_line': strings[-1] if strings else None,
+                    'audit_status': audit_status,
+                }
+                command_hits = _suspicious_command_line(data['command_line'])
+                if command_hits:
+                    data['suspicious_command_indicators'] = command_hits
+                    data['severity_hint'] = 'high'
+                    try:
+                        pid_text = str(data.get('new_process_id') or '')
+                        pid = int(pid_text, 0)
+                        proc = psutil.Process(pid)
+                        data['exe'] = proc.exe()
+                        data['pid'] = pid
+                        data.update(_parent_details(proc))
+                    except (ValueError, psutil.Error, OSError):
+                        pass
+                    try:
+                        emit({'type': 'process_creation_suspicious', **data})
+                    except Exception:
+                        logging.exception('Process telemetry callback failed')
+                else:
+                    # Report every process creation only when explicitly requested
+                    # by the caller; this keeps cloud traffic manageable.
+                    if os.environ.get('ISOLATION_REPORT_ALL_PROCESS_CREATION', '').lower() in {'1', 'true', 'yes'}:
+                        try:
+                            emit({'type': 'process_created', **data})
+                        except Exception:
+                            logging.exception('Process telemetry callback failed')
+        except Exception as exc:
+            logging.warning('Windows process telemetry error: %s', exc)
+        time.sleep(3)
+
+
+def start_process_creation_telemetry(event_callback=None):
+    global _TELEMETRY_STARTED
+    with _TELEMETRY_LOCK:
+        if _TELEMETRY_STARTED:
+            return
+        _TELEMETRY_STARTED = True
+    if sys.platform == 'win32':
+        threading.Thread(
+            target=_event4688_loop,
+            args=(event_callback,),
+            name='process-creation-telemetry',
+            daemon=True,
+        ).start()
+
+
+def scan_running_processes(scan_func, terminate_on_malware=True, block_connections=True, event_callback=None):
+    """Scan accessible running processes, including privileged/system processes.
+
+    The previous implementation limited scans to the current user's processes
+    and excluded ProgramData/other privileged locations. That left a major gap:
+    a service, scheduled task, or malware running as SYSTEM could be invisible.
+    We now attempt every accessible process executable, while treating Windows
+    system binaries as scan targets rather than assuming they are trustworthy.
+    """
+    start_process_creation_telemetry(event_callback)
+
     def emit(event_type, **details):
         if event_callback:
             try:
                 event_callback({'type': event_type, **details})
             except Exception as e:
-                # A misbehaving callback shouldn't abort the process scan, but
-                # silently swallowing the error makes such bugs invisible.
                 logging.debug(f'event_callback raised for event {event_type!r}: {e}')
 
-    import getpass
-    current_user = getpass.getuser()
-    import pathlib
-    import re
-
-    # Define Windows default/system folders to exclude
-    _win = os.environ.get('SYSTEMROOT', r'C:\\Windows')
-    _pf = os.environ.get('ProgramFiles', r'C:\\Program Files')
-    _pf86 = os.environ.get('ProgramFiles(x86)', r'C:\\Program Files (x86)')
-    _pd = os.environ.get('ProgramData', r'C:\\ProgramData')
-    _up = os.environ.get('USERPROFILE', r'C:\\Users\\Default')
-    _up_dir = os.path.dirname(_up) if _up else r'C:\\Users'
-    SYSTEM_FOLDERS = [
-        _win,
-        _pf,
-        _pf86,
-        _pd,
-        os.path.join(_up_dir, 'Default'),
-        os.path.join(_up_dir, 'Public'),
-        os.path.join(_up_dir, 'All Users'),
-        os.path.join(_up_dir, 'defaultuser0'),
-    ]
-    SYSTEM_FOLDERS = [os.path.normcase(f) for f in SYSTEM_FOLDERS]
-
-    # Helper to check if a path is under any system folder
-    def is_system_folder(path):
-        np = os.path.normcase(os.path.abspath(path))
-        return any(np.startswith(sf) for sf in SYSTEM_FOLDERS)
-
+    scanned = set()
     for proc in psutil.process_iter(['pid', 'name', 'exe', 'username']):
         try:
-            exe = proc.info.get('exe', None)
-            pid = proc.info.get('pid', None)
-            name = proc.info.get('name', None)
-            username = proc.info.get('username', None)
-            if exe and os.path.isfile(exe):
-                if username is None or (current_user.lower() not in username.lower()):
-                    continue  # Not the current user's process
-                if is_system_folder(exe):
-                    continue  # Skip system/Windows default folders
-                # Only scan user processes from user-created folders
-                emit('process_scanned', pid=pid, name=name, exe=exe, malware_found=False)
-                result = scan_func(exe)
-                if result and len(result) >= 3:  # Ensure result tuple has enough elements
-                    if isinstance(result, (tuple, list)) and len(result) >= 3:
-                        scan_success, malware_found, msg = result
-                    else:
-                        logging.error(f'Unexpected scan result format for {exe}: {result}')
-                        continue
-                    if not scan_success:
-                        logging.warning(f'Scan failed for {exe}: {msg}')
-                    elif malware_found:
-                        logging.warning(f'Malware found in process {name} (PID: {pid}), exe: {exe}. {msg}')
-                        emit('malware_found', pid=pid, name=name, exe=exe, message=msg)
-                        if terminate_on_malware:
-                            try:
-                                p = psutil.Process(pid)
-                                p.terminate()
-                                p.wait(timeout=5)
-                                logging.warning(f'Terminated process {name} (PID: {pid}) due to malware.')
-                                emit('process_terminated', pid=pid, name=name, exe=exe)
-                            except Exception as e:
-                                logging.error(f'Failed to terminate process {pid}: {e}')
-                        if block_connections:
-                            try:
-                                # Find all connections for this process and block remote IPs
-                                p = psutil.Process(pid)
-                                for conn in psutil.net_connections(kind='inet'):
-                                    if conn.pid == pid:
-                                        if conn.raddr:
-                                            remote_ip = conn.raddr.ip
-                                            block_ip(remote_ip)
-                                            logging.warning(f'Blocked IP {remote_ip} for process {name} (PID: {pid})')
-                                            emit('connection_blocked', pid=pid, name=name, remote_ip=remote_ip)
-                            except Exception as e:
-                                logging.error(f'Failed to block connections for process {pid}: {e}')
-                    else:
-                        logging.info(f'Process {name} (PID: {pid}) is clean.')
-                    # YARA scan
-                    try:
-                        from security.yara_scanner import scan_file_with_yara
-                        if scan_file_with_yara(exe):
-                            logging.warning(f'[RTP][PROC] YARA match detected in process EXE: {exe} (PID: {pid}, Name: {name})')
-                            emit('yara_match', pid=pid, name=name, exe=exe)
-                    except Exception as e:
-                        logging.error(f'[RTP][PROC] Error running YARA scan on process EXE {exe}: {e}')
+            exe = proc.info.get('exe')
+            pid = proc.info.get('pid')
+            name = proc.info.get('name')
+            username = proc.info.get('username')
+            if not exe or not os.path.isfile(exe) or pid in scanned:
+                continue
+            scanned.add(pid)
 
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            parent = _parent_details(proc)
+            cmdline = _command_line(proc)
+            emit(
+                'process_scanned', pid=pid, name=name, exe=exe,
+                username=username, command_line=cmdline,
+                system_binary=_is_windows_system_binary(exe), **parent,
+            )
+            result = scan_func(exe)
+            if not result or len(result) < 3:
+                logging.error(f'Unexpected scan result format for {exe}: {result}')
+                continue
+            scan_success, malware_found, msg = result
+            if not scan_success:
+                logging.warning(f'Scan failed for {exe}: {msg}')
+                emit('process_scan_error', pid=pid, name=name, exe=exe, message=msg)
+                continue
+            if malware_found:
+                logging.warning(f'Malware found in process {name} (PID: {pid}), exe: {exe}. {msg}')
+                emit('malware_found', pid=pid, name=name, exe=exe, username=username,
+                     command_line=cmdline, message=msg, **parent)
+                if terminate_on_malware:
+                    try:
+                        p = psutil.Process(pid)
+                        p.terminate()
+                        p.wait(timeout=5)
+                        logging.warning(f'Terminated process {name} (PID: {pid}) due to malware.')
+                        emit('process_terminated', pid=pid, name=name, exe=exe)
+                    except Exception as e:
+                        logging.error(f'Failed to terminate process {pid}: {e}')
+                if block_connections:
+                    try:
+                        p = psutil.Process(pid)
+                        for conn in psutil.net_connections(kind='inet'):
+                            if conn.pid == pid and conn.raddr:
+                                remote_ip = conn.raddr.ip
+                                block_ip(remote_ip)
+                                logging.warning(f'Blocked IP {remote_ip} for process {name} (PID: {pid})')
+                                emit('connection_blocked', pid=pid, name=name, remote_ip=remote_ip)
+                    except Exception as e:
+                        logging.error(f'Failed to block connections for process {pid}: {e}')
+            else:
+                logging.info(f'Process {name} (PID: {pid}) is clean.')
+
+            try:
+                from security.yara_scanner import scan_file_with_yara
+                matches = scan_file_with_yara(exe)
+                if matches:
+                    logging.warning(f'[RTP][PROC] YARA match detected in process EXE: {exe} (PID: {pid}, Name: {name})')
+                    emit('yara_match', pid=pid, name=name, exe=exe, username=username,
+                         command_line=cmdline, yara_matches=matches, **parent)
+            except Exception as e:
+                logging.error(f'[RTP][PROC] Error running YARA scan on process EXE {exe}: {e}')
+
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             continue
+        except Exception as e:
+            logging.debug('Process scan error: %s', e)
+
 
 def block_ip(ip):
-    """
-    Block the given IP using Windows Firewall (netsh advfirewall). Only works with admin privileges.
-    """
+    """Block the given IP using Windows Firewall (netsh advfirewall)."""
     import ipaddress
     try:
         ip = str(ipaddress.ip_address(str(ip).strip()))
@@ -140,13 +321,15 @@ def block_ip(ip):
         logging.error(f'Refusing to block invalid IP: {ip!r}')
         return
     try:
-        subprocess.run([  # nosem; nosec B603
+        subprocess.run([
             NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=out', 'action=block', f'remoteip={ip}'
-        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        subprocess.run([  # nosem; nosec B603
+        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run([
             NETSH_PATH, 'advfirewall', 'firewall', 'add', 'rule',
             f'name=Block_{ip}', 'dir=in', 'action=block', f'remoteip={ip}'
-        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        ], check=True, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception as e:
         logging.error(f'Failed to block IP {ip}: {e}')
