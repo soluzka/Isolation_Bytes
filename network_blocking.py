@@ -1,10 +1,10 @@
 """Windows Firewall outbound/inbound blocking with fail-closed verification.
 
-Automatic blocking is gated on confirmed C2 evidence rather than a weak port-only
-heuristic. Windows firewall changes require Administrator privileges and every
-successful rule creation is verified before the operation is reported as blocked.
-Automatic C2 response is scoped to active remote IP/port connections and, when
-available, the owning executable; it never falls back to an IP-wide rule.
+Automatic blocking is gated on confirmed C2 or high-confidence suspicious evidence.
+Windows firewall changes require Administrator privileges and every successful rule
+creation is verified before the operation is reported as blocked. Automatic
+responses are scoped to active remote IP/port connections and, when available,
+the owning executable; they never fall back to an IP-wide rule.
 """
 from __future__ import annotations
 
@@ -210,7 +210,7 @@ def block_connection(ip, port, *, program=None, pid=None, reason=""):
     if existing:
         verified, verify_message = _firewall_rule_exists(rule_name)
         if verified:
-            return True, f"Connection is already blocked by {rule_name}"
+            return True, f"Connection is already blocked by {rule_name}; firewall rule verified"
         state.get("connections", {}).pop(rule_name, None)
         _save_state(state)
         logger.warning("Removing stale firewall state for %s: %s", rule_name, verify_message)
@@ -470,7 +470,7 @@ def block_outbound_port(port, reason=""):
 
 
 def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidence=None, min_level="high"):
-    """Return True only for a valid external IP with confirmed C2 evidence."""
+    """Return True only for a valid external IP with sufficiently strong evidence."""
     valid, _ = _validate_blockable_ip(ip)
     if not valid:
         return False
@@ -482,13 +482,65 @@ def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidenc
             score = float(threat_level.get("score", 0.0) or 0.0)
         except (TypeError, ValueError):
             score = 0.0
-        return level in {"critical", "high"} and score >= 0.65
+        return level in {"critical", "high"} and score >= 0.85
     if confidence is not None:
         try:
             return float(confidence) >= 0.90
         except (TypeError, ValueError):
             return False
     return False
+
+
+def should_block_suspicious_connection(
+    ip,
+    port,
+    *,
+    threat_level=None,
+    confidence=None,
+    confirmed_c2=False,
+):
+    """Return True only for an external endpoint with high-confidence evidence."""
+    valid, _ = _validate_blockable_ip(ip)
+    if not valid:
+        return False
+    valid, _ = _validate_port(port)
+    if not valid:
+        return False
+    return should_auto_block_ip(
+        ip,
+        threat_level=threat_level,
+        confidence=confidence,
+        confirmed_c2=confirmed_c2,
+    )
+
+
+def block_suspicious_connection(
+    ip,
+    port,
+    *,
+    program=None,
+    pid=None,
+    threat_level=None,
+    confidence=None,
+    confirmed_c2=False,
+    reason="high-confidence suspicious connection",
+):
+    """Verify evidence, then block and verify the specific remote endpoint."""
+    if not should_block_suspicious_connection(
+        ip,
+        port,
+        threat_level=threat_level,
+        confidence=confidence,
+        confirmed_c2=confirmed_c2,
+    ):
+        return False, "Suspicious-connection blocking threshold not met"
+    return block_connection(
+        ip,
+        port,
+        program=program,
+        pid=pid,
+        reason=reason,
+    )
 
 
 def auto_block_confirmed_c2(
@@ -500,11 +552,13 @@ def auto_block_confirmed_c2(
     reason="confirmed C2",
 ):
     """Block only when the supplied evidence actually confirms C2."""
+    if not confirmed_c2:
+        return False, "C2 confirmation threshold not met"
     if not should_auto_block_ip(
         ip,
         threat_level=threat_level,
         confidence=confidence,
-        confirmed_c2=confirmed_c2,
+        confirmed_c2=True,
     ):
         return False, "C2 confirmation threshold not met"
     return block_ip(ip, reason=reason)
