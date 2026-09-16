@@ -171,6 +171,11 @@ class ThreatLevelEngine:
                 state.score * (1.0 - self.ema_alpha)
                 + instantaneous * self.ema_alpha
             )
+            # A configured C2 port is an explicit network indicator. Treat it as
+            # confirmed network evidence so the first detection reaches the
+            # high-confidence blocking path instead of merely raising an alert.
+            if behavior_details.get("known_c2_port", 0.0) > 0.0:
+                state.score = max(state.score, 90.0)
             if confirmed:
                 state.score = max(state.score, 90.0)
             score = _clamp(state.score)
