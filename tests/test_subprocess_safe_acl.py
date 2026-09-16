@@ -1,21 +1,33 @@
 import os
+import pytest
 
 from utils.subprocess_safe import _validate_cmd
 
 
-def test_core_system32_full_control_grant_is_normalized():
-    if os.name != 'nt':
-        # The guard is Windows-specific; exercise the same normalization logic
-        # by temporarily calling the validator with the Windows-style path.
-        return
+def test_core_system32_acl_change_is_blocked():
     cmd = [
         'icacls.exe',
         r'C:\Windows\System32\ntdll.dll',
         '/grant',
         'Administrators:(F)',
     ]
-    normalized = _validate_cmd(cmd)
-    assert normalized[3] == 'Administrators:(RX)'
+    if os.name == 'nt':
+        with pytest.raises(PermissionError):
+            _validate_cmd(cmd)
+    else:
+        # The production guard is Windows-only; on non-Windows this validator
+        # still validates the command structure without emulating Windows ACLs.
+        assert _validate_cmd(cmd) == cmd
+
+
+def test_core_system32_acl_change_is_blocked_for_other_core_dlls():
+    for dll in ('advapi32.dll', 'kernel32.dll'):
+        cmd = ['icacls.exe', rf'C:\Windows\System32\{dll}', '/grant', 'Administrators:(F)']
+        if os.name == 'nt':
+            with pytest.raises(PermissionError):
+                _validate_cmd(cmd)
+        else:
+            assert _validate_cmd(cmd) == cmd
 
 
 def test_non_core_acl_grant_is_unchanged():
@@ -25,5 +37,4 @@ def test_non_core_acl_grant_is_unchanged():
         '/grant',
         'Administrators:(F)',
     ]
-    normalized = _validate_cmd(cmd)
-    assert normalized == cmd
+    assert _validate_cmd(cmd) == cmd
