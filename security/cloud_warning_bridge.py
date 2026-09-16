@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import ipaddress
 import logging
+import sys
 import threading
 import time
 
@@ -41,7 +42,14 @@ def _candidate(ip, port, process):
 def _run():
     while True:
         try:
-            cloud = __import__("cloud.cloud_server_original", fromlist=["_get_agents", "commands"])
+            # Only attach when the cloud server is already loaded in this
+            # process. Never import cloud_server_original from a standalone
+            # Windows agent just because the security package was imported.
+            cloud = sys.modules.get("cloud.cloud_server_original")
+            if cloud is None:
+                time.sleep(2)
+                continue
+
             agents = cloud._get_agents()
             commands = cloud.commands
             blocked = getattr(cloud, "_blocked_ips", set())
@@ -64,7 +72,11 @@ def _run():
                     if ip in blocked:
                         continue
 
-                    reason = f"Auto-blocked: dashboard warning - Browser on non-standard port {port}" if str(process).lower() in _BROWSER_PROCESSES and int(port) not in _SUSPICIOUS_PORTS else f"Auto-blocked: dashboard suspicious endpoint {ip}:{port}"
+                    reason = (
+                        f"Auto-blocked: dashboard warning - Browser on non-standard port {port}"
+                        if str(process).lower() in _BROWSER_PROCESSES and int(port) not in _SUSPICIOUS_PORTS
+                        else f"Auto-blocked: dashboard suspicious endpoint {ip}:{port}"
+                    )
                     pending = commands.setdefault(device_id, [])
                     duplicate = any(
                         isinstance(cmd, dict)
@@ -85,15 +97,19 @@ def _run():
                         pass
                     logger.warning("Queued warning auto-block for %s: %s:%s (%s)", device_id, ip, port, process)
         except Exception:
-            # Cloud module may not be fully imported yet; retry on next pass.
             logger.debug("Cloud warning bridge waiting for runtime agent state", exc_info=True)
         time.sleep(2)
 
 
 def start():
+    """Start the cloud warning bridge once per process."""
     global _STARTED
     if _STARTED:
         return False
     _STARTED = True
-    threading.Thread(target=_run, name="isolation-bytes-cloud-warning-bridge", daemon=True).start()
+    threading.Thread(
+        target=_run,
+        name="isolation-bytes-cloud-warning-bridge",
+        daemon=True,
+    ).start()
     return True
