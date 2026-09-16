@@ -410,7 +410,48 @@ def unblock_ip(ip):
 
 
 def list_blocked_ips():
-    return _load_state()
+    """Return IP blocks plus connection-scoped firewall blocks in a flat view.
+
+    Connection-specific rules are persisted under ``state['connections']`` while
+    older callers expect ``{remote_ip: metadata}``. Expose both without changing
+    the on-disk schema so the dashboard and admin service can reliably show a
+    verified connection block as blocked.
+    """
+    state = _load_state()
+    blocked = {
+        key: value
+        for key, value in state.items()
+        if key != "connections" and isinstance(value, dict)
+    }
+    for rule_name, metadata in (state.get("connections", {}) or {}).items():
+        if not isinstance(metadata, dict):
+            continue
+        remote_ip = metadata.get("remote_ip")
+        if not remote_ip:
+            continue
+        entry = blocked.setdefault(
+            remote_ip,
+            {
+                "reason": metadata.get("reason") or "connection block",
+                "blocked_at": metadata.get("blocked_at"),
+                "outbound": True,
+                "inbound": False,
+                "scope": "connection",
+                "connections": [],
+            },
+        )
+        entry.setdefault("connections", []).append(
+            {
+                "rule_name": rule_name,
+                "remote_port": metadata.get("remote_port"),
+                "program": metadata.get("program"),
+                "pid": metadata.get("pid"),
+                "reason": metadata.get("reason"),
+                "blocked_at": metadata.get("blocked_at"),
+            }
+        )
+        entry["scope"] = "connection" if not entry.get("outbound") else entry.get("scope", "connection")
+    return blocked
 
 
 def block_ip_inbound(ip, reason=""):
