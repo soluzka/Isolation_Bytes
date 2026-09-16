@@ -1,9 +1,9 @@
 """Windows Firewall outbound/inbound blocking with safe validation.
 
 Automatic blocking is deliberately gated on a *confirmed* C2 assessment rather
-than a weak port-only heuristic. Connection-specific blocking can additionally
-scope a rule to the responsible program, remote IP, and remote port so a
-confirmed malicious connection does not unnecessarily block unrelated traffic.
+than a weak port-only heuristic. Automatic C2 response scopes firewall rules to
+active remote IP/port connections and, when available, the owning executable.
+Manual ``block_ip`` calls without a confirmed-C2 reason retain IP-wide behavior.
 """
 import ipaddress
 import json
@@ -116,12 +116,131 @@ def _run_netsh(args):
     return False, f'netsh failed: {combined or "unknown error"}'
 
 
+def block_connection(ip, port, *, program=None, pid=None, reason=''):
+    """Block one outbound remote endpoint, optionally scoped to one executable."""
+    valid, err = _validate_blockable_ip(ip)
+    if not valid:
+        return False, err
+    valid, err = _validate_port(port)
+    if not valid:
+        return False, err
+    valid, program_path = _validate_program(program)
+    if not valid:
+        return False, err
+    if pid is not None:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            return False, f'Invalid PID: {pid!r}'
+        if pid <= 0:
+            return False, f'Invalid PID: {pid!r}'
+
+    ip = ip.strip()
+    port = int(port)
+    rule_name = _connection_rule_name(ip, port, program_path)
+    state = _load_state()
+    existing = state.get('connections', {}).get(rule_name)
+    if existing:
+        return True, f'Connection is already blocked by {rule_name}'
+
+    args = [
+        'add', 'rule',
+        f'name={rule_name}',
+        'dir=out', 'action=block', 'enable=yes',
+        'profile=any', f'remoteip={ip}', f'remoteport={port}',
+    ]
+    if program_path:
+        args.append(f'program={program_path}')
+
+    ok, msg = _run_netsh(args)
+    if not ok:
+        return False, msg
+
+    state.setdefault('connections', {})[rule_name] = {
+        'remote_ip': ip,
+        'remote_port': port,
+        'program': program_path,
+        'pid': pid,
+        'reason': reason or 'confirmed malicious connection',
+        'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    if not _save_state(state):
+        return True, f'Blocked connection {ip}:{port}; warning: local block state could not be saved'
+    logger.warning(
+        'Blocked outbound connection %s:%s program=%s pid=%s (%s)',
+        ip, port, program_path or 'any', pid if pid is not None else 'unknown',
+        reason or 'confirmed malicious connection',
+    )
+    return True, f'Blocked connection {ip}:{port}'
+
+
+def _block_active_connections_for_ip(ip, reason='confirmed C2'):
+    """Apply connection-scoped rules to active connections for a confirmed C2 IP."""
+    try:
+        import psutil
+    except Exception as exc:
+        return False, f'Cannot inspect active connections: {exc}'
+
+    matches = []
+    try:
+        connections = psutil.net_connections(kind='inet')
+    except Exception as exc:
+        return False, f'Cannot enumerate active connections: {exc}'
+
+    for conn in connections:
+        remote = getattr(conn, 'raddr', None)
+        remote_ip = getattr(remote, 'ip', None)
+        remote_port = getattr(remote, 'port', None)
+        if remote_ip != ip or not remote_port:
+            continue
+        program = None
+        pid = getattr(conn, 'pid', None)
+        if pid:
+            try:
+                program = psutil.Process(pid).exe()
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess, OSError):
+                program = None
+        matches.append((remote_ip, remote_port, program, pid))
+
+    if not matches:
+        return False, f'No active connection to {ip} was found; refusing IP-wide automatic fallback'
+
+    failures = []
+    successes = 0
+    seen = set()
+    for remote_ip, remote_port, program, pid in matches:
+        key = (remote_ip, remote_port, program)
+        if key in seen:
+            continue
+        seen.add(key)
+        ok, msg = block_connection(
+            remote_ip,
+            remote_port,
+            program=program,
+            pid=pid,
+            reason=reason,
+        )
+        if ok:
+            successes += 1
+        else:
+            failures.append(msg)
+
+    if successes:
+        if failures:
+            return True, f'Blocked {successes} connection(s); {len(failures)} failed: {failures[0]}'
+        return True, f'Blocked {successes} active connection(s) to {ip}'
+    return False, failures[0] if failures else f'No connection could be blocked for {ip}'
+
+
 def block_ip(ip, reason=''):
-    """Block outbound traffic to an externally routable IP."""
+    """Block an IP manually; confirmed-C2 automatic calls are connection-scoped."""
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
     ip = ip.strip()
+    if str(reason).lower().startswith('confirmed c2'):
+        return _block_active_connections_for_ip(ip, reason=reason)
+
     state = _load_state()
     existing = state.get(ip)
     if existing and existing.get('outbound', True):
@@ -148,64 +267,8 @@ def block_ip(ip, reason=''):
     return True, f'Blocked {ip}'
 
 
-def block_connection(ip, port, *, program=None, pid=None, reason=''):
-    """Block only one outbound remote endpoint, optionally scoped to one program."""
-    valid, err = _validate_blockable_ip(ip)
-    if not valid:
-        return False, err
-    valid, err = _validate_port(port)
-    if not valid:
-        return False, err
-    valid, program_path = _validate_program(program)
-    if not valid:
-        return False, err
-    if pid is not None:
-        try:
-            pid = int(pid)
-        except (TypeError, ValueError):
-            return False, f'Invalid PID: {pid!r}'
-        if pid <= 0:
-            return False, f'Invalid PID: {pid!r}'
-
-    ip = ip.strip()
-    rule_name = _connection_rule_name(ip, int(port), program_path)
-    state = _load_state()
-    existing = state.get('connections', {}).get(rule_name)
-    if existing:
-        return True, f'Connection is already blocked by {rule_name}'
-
-    args = [
-        'add', 'rule',
-        f'name={rule_name}',
-        'dir=out', 'action=block', 'enable=yes',
-        'profile=any', f'remoteip={ip}', f'remoteport={int(port)}',
-    ]
-    if program_path:
-        args.append(f'program={program_path}')
-
-    ok, msg = _run_netsh(args)
-    if not ok:
-        return False, msg
-
-    state.setdefault('connections', {})[rule_name] = {
-        'remote_ip': ip,
-        'remote_port': int(port),
-        'program': program_path,
-        'pid': pid,
-        'reason': reason or 'confirmed malicious connection',
-        'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-    }
-    if not _save_state(state):
-        return True, f'Blocked connection {ip}:{int(port)}; warning: local block state could not be saved'
-    logger.warning(
-        'Blocked outbound connection %s:%s program=%s pid=%s (%s)',
-        ip, int(port), program_path or 'any', pid if pid is not None else 'unknown', reason or 'confirmed malicious connection',
-    )
-    return True, f'Blocked connection {ip}:{int(port)}'
-
-
 def unblock_ip(ip):
-    """Remove both inbound and outbound firewall rules for an IP."""
+    """Remove IP-wide rules and all stored connection rules for an IP."""
     valid, err = _validate_blockable_ip(ip)
     if not valid:
         return False, err
@@ -215,11 +278,22 @@ def unblock_ip(ip):
         ok, msg = _run_netsh(['delete', 'rule', f'name={_rule_name(ip)}{suffix}'])
         if not ok and 'not found' not in msg.lower() and 'no rules match' not in msg.lower():
             errors.append(msg)
+
+    state = _load_state()
+    connections = state.get('connections', {})
+    for rule_name, metadata in list(connections.items()):
+        if metadata.get('remote_ip') != ip:
+            continue
+        ok, msg = _run_netsh(['delete', 'rule', f'name={rule_name}'])
+        if not ok and 'not found' not in msg.lower() and 'no rules match' not in msg.lower():
+            errors.append(msg)
+        else:
+            connections.pop(rule_name, None)
+    state['connections'] = connections
+
     if errors:
         return False, errors[0]
-    state = _load_state()
     state.pop(ip, None)
-    state.get('connections', {})
     _save_state(state)
     return True, f'Unblocked {ip}'
 
@@ -289,7 +363,7 @@ def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidenc
 
 
 def auto_block_confirmed_c2(ip, *, threat_level=None, confidence=None, reason='confirmed C2'):
-    """Convenience gate for IP-wide blocking of confirmed C2."""
+    """Convenience gate for connection-scoped automatic C2 blocking."""
     if not should_auto_block_ip(ip, threat_level=threat_level, confidence=confidence, confirmed_c2=True):
         return False, 'C2 confirmation threshold not met'
     return block_ip(ip, reason=reason)
