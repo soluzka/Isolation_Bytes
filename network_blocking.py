@@ -1,7 +1,9 @@
-"""Windows Firewall outbound/inbound IP blocking with safe validation.
+"""Windows Firewall outbound/inbound blocking with safe validation.
 
 Automatic blocking is deliberately gated on a *confirmed* C2 assessment rather
-than a weak port-only heuristic. Manual calls to block_ip remain available.
+than a weak port-only heuristic. Connection-specific blocking can additionally
+scope a rule to the responsible program, remote IP, and remote port so a
+confirmed malicious connection does not unnecessarily block unrelated traffic.
 """
 import ipaddress
 import json
@@ -10,16 +12,22 @@ import os
 import shutil
 import subprocess
 import time
-from typing import Any, Mapping, Optional
+from typing import Mapping
 
 NETSH_PATH = shutil.which('netsh') or 'netsh'
 logger = logging.getLogger('network_blocking')
 _STATE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'blocked_ips.json')
 _RULE_PREFIX = 'AV_Block_'
+_CONNECTION_RULE_PREFIX = 'AV_BlockConn_'
 
 
 def _rule_name(ip):
     return f'{_RULE_PREFIX}{ip}'
+
+
+def _connection_rule_name(ip, port, program=None):
+    safe_program = os.path.basename(program).replace(' ', '_') if program else 'any'
+    return f'{_CONNECTION_RULE_PREFIX}{ip}_{port}_{safe_program}'[:240]
 
 
 def _load_state():
@@ -59,6 +67,31 @@ def _validate_blockable_ip(ip):
     if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast or addr.is_unspecified:
         return False, f'Refusing to block {value}: it is a local/reserved address'
     return True, None
+
+
+def _validate_port(port):
+    if isinstance(port, bool):
+        return False, 'Port must be an integer'
+    try:
+        value = int(port)
+    except (TypeError, ValueError):
+        return False, f'Invalid port: {port!r}'
+    if not 1 <= value <= 65535:
+        return False, f'Invalid port: {port!r}'
+    return True, None
+
+
+def _validate_program(program):
+    if program is None:
+        return True, None
+    if not isinstance(program, str) or not program.strip():
+        return False, 'Program path must be a non-empty string when provided'
+    path = os.path.abspath(program.strip())
+    if not os.path.isfile(path):
+        return False, f'Program does not exist: {path}'
+    if not os.access(path, os.R_OK):
+        return False, f'Program is not readable: {path}'
+    return True, path
 
 
 def _run_netsh(args):
@@ -110,11 +143,65 @@ def block_ip(ip, reason=''):
         'inbound': bool(existing and existing.get('inbound')),
     }
     if not _save_state(state):
-        # Do not claim a durable block-list state if persistence failed. The
-        # firewall rule itself is still active, so report that accurately.
         return True, f'Blocked {ip}; warning: local block state could not be saved'
     logger.warning('Blocked outbound connections to %s (%s)', ip, reason or 'manual block')
     return True, f'Blocked {ip}'
+
+
+def block_connection(ip, port, *, program=None, pid=None, reason=''):
+    """Block only one outbound remote endpoint, optionally scoped to one program."""
+    valid, err = _validate_blockable_ip(ip)
+    if not valid:
+        return False, err
+    valid, err = _validate_port(port)
+    if not valid:
+        return False, err
+    valid, program_path = _validate_program(program)
+    if not valid:
+        return False, err
+    if pid is not None:
+        try:
+            pid = int(pid)
+        except (TypeError, ValueError):
+            return False, f'Invalid PID: {pid!r}'
+        if pid <= 0:
+            return False, f'Invalid PID: {pid!r}'
+
+    ip = ip.strip()
+    rule_name = _connection_rule_name(ip, int(port), program_path)
+    state = _load_state()
+    existing = state.get('connections', {}).get(rule_name)
+    if existing:
+        return True, f'Connection is already blocked by {rule_name}'
+
+    args = [
+        'add', 'rule',
+        f'name={rule_name}',
+        'dir=out', 'action=block', 'enable=yes',
+        'profile=any', f'remoteip={ip}', f'remoteport={int(port)}',
+    ]
+    if program_path:
+        args.append(f'program={program_path}')
+
+    ok, msg = _run_netsh(args)
+    if not ok:
+        return False, msg
+
+    state.setdefault('connections', {})[rule_name] = {
+        'remote_ip': ip,
+        'remote_port': int(port),
+        'program': program_path,
+        'pid': pid,
+        'reason': reason or 'confirmed malicious connection',
+        'blocked_at': time.strftime('%Y-%m-%d %H:%M:%S'),
+    }
+    if not _save_state(state):
+        return True, f'Blocked connection {ip}:{int(port)}; warning: local block state could not be saved'
+    logger.warning(
+        'Blocked outbound connection %s:%s program=%s pid=%s (%s)',
+        ip, int(port), program_path or 'any', pid if pid is not None else 'unknown', reason or 'confirmed malicious connection',
+    )
+    return True, f'Blocked connection {ip}:{int(port)}'
 
 
 def unblock_ip(ip):
@@ -132,6 +219,7 @@ def unblock_ip(ip):
         return False, errors[0]
     state = _load_state()
     state.pop(ip, None)
+    state.get('connections', {})
     _save_state(state)
     return True, f'Unblocked {ip}'
 
@@ -182,12 +270,7 @@ def block_outbound_port(port, reason=''):
 
 
 def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidence=None, min_level='high'):
-    """Return True only for a valid external IP with confirmed C2 evidence.
-
-    A boolean ``confirmed_c2`` is required unless an assessment mapping is
-    supplied. This prevents the old uncommon-port heuristic from becoming an
-    automatic firewall action.
-    """
+    """Return True only for a valid external IP with confirmed C2 evidence."""
     valid, _ = _validate_blockable_ip(ip)
     if not valid:
         return False
@@ -206,7 +289,7 @@ def should_auto_block_ip(ip, *, threat_level=None, confirmed_c2=False, confidenc
 
 
 def auto_block_confirmed_c2(ip, *, threat_level=None, confidence=None, reason='confirmed C2'):
-    """Convenience gate for the agent/network monitor."""
+    """Convenience gate for IP-wide blocking of confirmed C2."""
     if not should_auto_block_ip(ip, threat_level=threat_level, confidence=confidence, confirmed_c2=True):
         return False, 'C2 confirmation threshold not met'
     return block_ip(ip, reason=reason)
