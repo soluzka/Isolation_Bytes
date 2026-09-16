@@ -2,8 +2,8 @@
 
 All subprocess calls in the codebase should route through these functions
 instead of calling ``subprocess.run``, ``subprocess.Popen``, etc. directly.
-The wrappers enforce shell=False, validate arguments, and protect critical
-Windows system DLLs from an unsafe full-control ACL grant.
+The wrappers enforce shell=False, validate arguments, and refuse automatic
+ACL changes to critical Windows system DLLs.
 """
 
 import os
@@ -20,7 +20,16 @@ _CORE_SYSTEM_DLL_RE = re.compile(
 
 
 def _validate_cmd(cmd):
-    """Validate and normalize a command list before passing to subprocess."""
+    """Validate a command list before passing it to subprocess.
+
+    Critical System32 DLLs are never modified through an automatic
+    Isolation_Bytes subprocess operation.  In particular, the old unblock
+    implementation attempted to restore them with ``icacls /grant
+    Administrators:(F)``.  ``icacls`` changes a file's DACL, so silently
+    changing that command to another ACL would still be the wrong behavior.
+    Refuse the operation instead and require the caller to use a safe
+    unblock mechanism that does not alter the DLL's DACL.
+    """
     if not isinstance(cmd, (list, tuple)):
         raise ValueError(f'subprocess command must be a list/tuple, got {type(cmd)}')
     if len(cmd) == 0:
@@ -35,58 +44,41 @@ def _validate_cmd(cmd):
             raise ValueError(f'subprocess argument {i} contains null bytes')
         safe_cmd.append(arg)
 
-    # Isolation_Bytes previously restored a blocked System32 DLL with:
-    #   icacls <dll> /grant Administrators:(F)
-    # Windows Defender identifies that exact ACL operation as
-    # SuspDllOwnship.ZA!MTB.  An antivirus should never give Administrators
-    # full control over core System32 DLLs as part of an unblock operation.
-    # Normalize the remediation to the normal admin read/execute permission
-    # instead. This is deterministic so the same protection is applied in
-    # tests, packaging, and Windows runtime.
-    if len(safe_cmd) >= 4:
+    if len(safe_cmd) >= 2 and os.name == 'nt':
         executable = os.path.basename(safe_cmd[0]).lower()
-        if executable == 'icacls.exe':
-            target = safe_cmd[1]
-            if _CORE_SYSTEM_DLL_RE.fullmatch(target):
-                for index in range(2, len(safe_cmd) - 1):
-                    if (safe_cmd[index].lower() == '/grant'
-                            and safe_cmd[index + 1].lower() == 'administrators:(f)'):
-                        logger.warning(
-                            'Normalized unsafe System32 ACL grant for %s to RX', target)
-                        safe_cmd[index + 1] = 'Administrators:(RX)'
+        target = safe_cmd[1]
+        if executable == 'icacls.exe' and _CORE_SYSTEM_DLL_RE.fullmatch(target):
+            raise PermissionError(
+                f'Automatic ACL modification of protected System32 DLL is blocked: {target}'
+            )
 
     return safe_cmd
 
 
 def safe_run(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.run`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
     return getattr(subprocess, 'run')(validated, **kwargs)
 
 
 def safe_popen(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.Popen`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
     return getattr(subprocess, 'Popen')(validated, **kwargs)
 
 
 def safe_check_call(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.check_call`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
     return getattr(subprocess, 'check_call')(validated, **kwargs)
 
 
 def safe_check_output(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.check_output`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
     return getattr(subprocess, 'check_output')(validated, **kwargs)
 
 
 def safe_list2cmdline(cmd):
-    """Drop-in replacement for ``subprocess.list2cmdline`` with argument validation."""
     validated = _validate_cmd(cmd)
     return getattr(subprocess, 'list2cmdline')(validated)
