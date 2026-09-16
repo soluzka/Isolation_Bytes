@@ -41,9 +41,9 @@ def _validate_cmd(cmd):
     # SuspDllOwnship.ZA!MTB.  An antivirus should never give Administrators
     # full control over core System32 DLLs as part of an unblock operation.
     # Normalize the remediation to the normal admin read/execute permission
-    # instead.  This also prevents a future caller from accidentally
-    # reintroducing the same unsafe operation through the shared wrapper.
-    if len(safe_cmd) >= 4 and os.name == 'nt':
+    # instead. This is deterministic so the same protection is applied in
+    # tests, packaging, and Windows runtime.
+    if len(safe_cmd) >= 4:
         executable = os.path.basename(safe_cmd[0]).lower()
         if executable == 'icacls.exe':
             target = safe_cmd[1]
