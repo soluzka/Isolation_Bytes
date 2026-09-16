@@ -11,6 +11,8 @@ import platform
 import sys
 from typing import Any, Dict, List
 
+from utils.subprocess_safe import safe_run
+
 
 def _registry_run_keys() -> List[Dict[str, Any]]:
     if sys.platform != 'win32':
@@ -59,11 +61,10 @@ def _scheduled_tasks() -> List[Dict[str, Any]]:
     if sys.platform != 'win32':
         return []
     try:
-        import subprocess
-        result = subprocess.run(
+        result = safe_run(
             ['schtasks', '/query', '/fo', 'CSV', '/nh'],
             check=False, capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            creationflags=getattr(__import__('subprocess'), 'CREATE_NO_WINDOW', 0),
         )
         if result.returncode != 0:
             return [{'type': 'scheduled_task_inventory_error', 'error': result.stderr.strip() or f'rc={result.returncode}'}]
@@ -82,11 +83,10 @@ def _services() -> List[Dict[str, Any]]:
     if sys.platform != 'win32':
         return []
     try:
-        import subprocess
-        result = subprocess.run(
+        result = safe_run(
             ['sc', 'query', 'type=', 'service', 'state=', 'all'],
             check=False, capture_output=True, text=True, timeout=30,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            creationflags=getattr(__import__('subprocess'), 'CREATE_NO_WINDOW', 0),
         )
         if result.returncode != 0:
             return [{'type': 'service_inventory_error', 'error': result.stderr.strip() or f'rc={result.returncode}'}]
