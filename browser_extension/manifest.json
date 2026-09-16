@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Antivirus Phishing Protection",
-  "version": "1.8.950.0",
+  "version": "1.8.951.0",
   "description": "Protects against phishing by scanning URLs in real time.",
   "permissions": [
     "tabs",
