@@ -1,0 +1,82 @@
+name: Sync release version
+
+on:
+  push:
+    branches:
+      - security-v2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out security-v2
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+          fetch-depth: 1
+
+      - name: Synchronize embedded version strings
+        id: sync
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+
+          version_file = Path("version.txt")
+          version = version_file.read_text(encoding="utf-8").strip()
+          if not version:
+              raise SystemExit("version.txt is empty")
+
+          previous = "1.8.950.0"
+          previous_android_code = "18950000"
+          new_android_code = "18951000"
+
+          skip_dirs = {".git", ".github/workflows"}
+          changed = []
+          binary_suffixes = {
+              ".png", ".jpg", ".jpeg", ".gif", ".ico", ".webp", ".bmp",
+              ".exe", ".dll", ".pfx", ".zip", ".7z", ".apk", ".msix",
+              ".gguf", ".onnx", ".joblib", ".pkl", ".bin"
+          }
+
+          for path in Path(".").rglob("*"):
+              if not path.is_file():
+                  continue
+              if any(part in skip_dirs for part in path.parts):
+                  continue
+              if path.suffix.lower() in binary_suffixes:
+                  continue
+              try:
+                  text = path.read_text(encoding="utf-8")
+              except (UnicodeDecodeError, OSError):
+                  continue
+
+              updated = text.replace(previous, version)
+              if path.as_posix() == "android/app/build.gradle":
+                  updated = updated.replace(previous_android_code, new_android_code)
+              if updated != text:
+                  path.write_text(updated, encoding="utf-8")
+                  changed.append(path.as_posix())
+
+          print(f"Release version: {version}")
+          print(f"Updated {len(changed)} file(s):")
+          for path in changed:
+              print(f"  - {path}")
+
+      - name: Commit synchronized versions
+        if: steps.sync.outcome == 'success'
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "All version strings are already synchronized."
+            exit 0
+          fi
+          git add -A
+          git commit -m "Synchronize all release versions to $(tr -d '\r\n' < version.txt)"
+          git push origin HEAD:security-v2
