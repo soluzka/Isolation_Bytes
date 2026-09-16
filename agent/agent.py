@@ -42,11 +42,19 @@ except Exception as exc:
     print(f'Could not load threat_level_engine: {exc}')
 
 try:
-    from network_blocking import block_ip, is_windows_admin, should_auto_block_ip
+    from network_blocking import (
+        block_ip,
+        block_suspicious_connection,
+        is_windows_admin,
+        should_auto_block_ip,
+        should_block_suspicious_connection,
+    )
 except Exception as exc:
     block_ip = None
+    block_suspicious_connection = None
     is_windows_admin = None
     should_auto_block_ip = None
+    should_block_suspicious_connection = None
     print(f'Could not load network_blocking: {exc}')
 
 try:
@@ -251,32 +259,50 @@ def network_monitor_loop():
                         owner_error = str(exc)
 
                 assessment = _assess(
-                    f'network:{ip}',
+                    f'network:{ip}:{port}',
                     behavioral_signals={
                         'known_blocked_ip': 1.0 if known_blocked else 0.0,
                         'known_c2_port': 0.75 if port_signal else 0.0,
-                        'repeated_remote_connection': 0.25 if conn.status == 'ESTABLISHED' else 0.0,
+                        'repeated_remote_connection': 0.25 if getattr(conn, 'status', '') == 'ESTABLISHED' else 0.0,
                     },
                 )
                 confirmed_c2 = known_blocked or (port_signal and assessment.get('score', 0.0) >= 0.85)
+                suspicious_connection = (
+                    assessment.get('level') in ('high', 'critical')
+                    and assessment.get('score', 0.0) >= 0.85
+                ) or confirmed_c2
                 firewall_blocked = False
                 firewall_result = 'not_attempted'
                 admin = is_windows_admin() if is_windows_admin is not None else False
 
-                if confirmed_c2:
-                    if block_ip is None or should_auto_block_ip is None:
-                        firewall_result = 'network_blocking module unavailable'
+                if suspicious_connection:
+                    if block_suspicious_connection is None or should_block_suspicious_connection is None:
+                        firewall_result = 'network_blocking suspicious-endpoint path unavailable'
                     elif not admin:
                         firewall_result = 'Windows Firewall blocking requires Administrator privileges'
-                    elif should_auto_block_ip(ip, threat_level=assessment, confirmed_c2=True):
-                        firewall_blocked, firewall_result = block_ip(
+                    elif should_block_suspicious_connection(
+                        ip,
+                        port,
+                        threat_level=assessment,
+                        confirmed_c2=confirmed_c2,
+                    ):
+                        firewall_blocked, firewall_result = block_suspicious_connection(
                             ip,
-                            reason=f"confirmed C2; threat={assessment.get('score', 0):.2f}",
+                            port,
+                            program=owner,
+                            pid=pid,
+                            threat_level=assessment,
+                            confirmed_c2=confirmed_c2,
+                            reason=(
+                                f"confirmed C2; threat={assessment.get('score', 0):.2f}"
+                                if confirmed_c2
+                                else f"high-confidence suspicious connection; threat={assessment.get('score', 0):.2f}"
+                            ),
                         )
                         if firewall_blocked:
                             blocked_ips.add(ip)
 
-                if known_blocked or port_signal or assessment.get('level') in ('high', 'critical') or confirmed_c2:
+                if known_blocked or port_signal or assessment.get('level') in ('high', 'critical') or suspicious_connection:
                     _post('/agent/report', {
                         'device_id': DEVICE_ID,
                         'type': 'network_alert',
@@ -286,10 +312,15 @@ def network_monitor_loop():
                         'process_owner': owner,
                         'process_owner_error': owner_error,
                         'confirmed_c2': confirmed_c2,
+                        'suspicious_connection': suspicious_connection,
                         'firewall_blocked': firewall_blocked,
                         'firewall_result': firewall_result,
                         'administrator': admin,
-                        'reason': 'confirmed C2' if confirmed_c2 else ('blocked ip' if known_blocked else f'c2 port {port}'),
+                        'reason': (
+                            'confirmed C2' if confirmed_c2
+                            else ('high-confidence suspicious connection' if suspicious_connection
+                                  else ('blocked ip' if known_blocked else f'c2 port {port}'))
+                        ),
                         'threat_assessment': assessment,
                     })
         except Exception as exc:
