@@ -100,6 +100,26 @@ class NetworkBlockingTests(unittest.TestCase):
             reason='high-confidence suspicious connection',
         )
 
+    def test_connection_scoped_blocks_appear_in_blocked_listing(self):
+        state = {
+            'connections': {
+                'AV_BlockConn_203.0.113.10_8443_bad.exe': {
+                    'remote_ip': '203.0.113.10',
+                    'remote_port': 8443,
+                    'program': 'C:/bad.exe',
+                    'pid': 101,
+                    'reason': 'high-confidence suspicious connection',
+                    'blocked_at': '2026-09-16 01:00:00',
+                }
+            }
+        }
+        with patch.object(network_blocking, '_load_state', return_value=state):
+            blocked = network_blocking.list_blocked_ips()
+        self.assertIn('203.0.113.10', blocked)
+        self.assertEqual(blocked['203.0.113.10']['scope'], 'connection')
+        self.assertEqual(blocked['203.0.113.10']['connections'][0]['remote_port'], 8443)
+        self.assertEqual(blocked['203.0.113.10']['connections'][0]['program'], 'C:/bad.exe')
+
     def test_auto_block_requires_actual_confirmation(self):
         ok, message = network_blocking.auto_block_confirmed_c2(
             '203.0.113.10', threat_level={'level': 'medium', 'score': 0.5}, confirmed_c2=False
