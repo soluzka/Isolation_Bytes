@@ -50,8 +50,13 @@ class HardenedScanPipelineTests(unittest.TestCase):
 
     @patch('security.hardened_scan_pipeline._ml_confidence', return_value=0.9)
     @patch('security.hardened_scan_pipeline._yara', return_value=[{'severity': 'critical'}])
+    @patch('security.hardened_scan_pipeline.quarantine_decision')
     @patch('quarantine_utils.quarantine_file')
-    def test_yara_rule_sources_are_reported_but_not_quarantined(self, quarantine, _yara, _ml):
+    def test_yara_rule_source_self_match_does_not_bypass_independent_quarantine(self, quarantine, decision, _yara, _ml):
+        decision.side_effect = [
+            {'quarantine': True},
+            {'quarantine': True},
+        ]
         with tempfile.TemporaryDirectory() as root:
             rule_root = Path(root) / 'yara_rules'
             rule_root.mkdir()
@@ -60,6 +65,23 @@ class HardenedScanPipelineTests(unittest.TestCase):
             with patch('security.hardened_scan_pipeline._SECURITY_RULE_ROOT', rule_root.resolve()):
                 result = scan_file(str(path), quarantine=True)
             self.assertTrue(result['security_research_asset'])
+            self.assertFalse(result['research_asset_yara_only'])
+            self.assertTrue(result['quarantine'])
+            quarantine.assert_called_once()
+
+    @patch('security.hardened_scan_pipeline._ml_confidence', return_value=0.9)
+    @patch('security.hardened_scan_pipeline._yara', return_value=[{'severity': 'critical'}])
+    @patch('quarantine_utils.quarantine_file')
+    def test_yara_rule_sources_are_reported_but_not_quarantined_by_self_match(self, quarantine, _yara, _ml):
+        with tempfile.TemporaryDirectory() as root:
+            rule_root = Path(root) / 'yara_rules'
+            rule_root.mkdir()
+            path = rule_root / 'research_rule.yar'
+            path.write_text('rule research_fixture { condition: true }', encoding='utf-8')
+            with patch('security.hardened_scan_pipeline._SECURITY_RULE_ROOT', rule_root.resolve()):
+                result = scan_file(str(path), quarantine=True)
+            self.assertTrue(result['security_research_asset'])
+            self.assertTrue(result['research_asset_yara_only'])
             self.assertFalse(result['quarantine'])
             self.assertEqual(result['status'], 'security_research_asset_review')
             quarantine.assert_not_called()
