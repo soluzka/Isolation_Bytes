@@ -22,6 +22,24 @@ class ThreatLevelEngineTests(unittest.TestCase):
         self.assertGreater(high['score'], low['score'])
         self.assertEqual(low['signals']['yara'], 0.0)
 
+    def test_known_c2_port_immediately_reaches_blocking_threshold(self):
+        engine = ThreatLevelEngine(ema_alpha=0.35)
+        result = engine.update(
+            'network:203.0.113.10:8443',
+            behavioral_signals={'known_c2_port': 0.75},
+        )
+        self.assertGreaterEqual(result['score'], 90.0)
+        self.assertEqual(result['level'], 'critical')
+        self.assertEqual(result['behavioral_signals']['known_c2_port'], 0.75)
+
+    def test_non_c2_network_signal_does_not_force_critical(self):
+        engine = ThreatLevelEngine(ema_alpha=0.35)
+        result = engine.update(
+            'network:203.0.113.20:443',
+            behavioral_signals={'repeated_remote_connection': 0.25},
+        )
+        self.assertLess(result['score'], 80.0)
+
 
 if __name__ == '__main__':
     unittest.main()
