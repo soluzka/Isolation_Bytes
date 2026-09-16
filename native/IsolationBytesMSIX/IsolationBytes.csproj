@@ -10,7 +10,7 @@
     <AssemblyTitle>Isolation Bytes</AssemblyTitle>
     <AssemblyProduct>Isolation Bytes</AssemblyProduct>
     <AssemblyCompany>soluzka</AssemblyCompany>
-    <Version>1.8.950.0</Version>
+    <Version>1.8.951.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
 
     <!-- MSIX packaging settings -->
