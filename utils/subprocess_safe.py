@@ -2,40 +2,30 @@
 
 All subprocess calls in the codebase should route through these functions
 instead of calling ``subprocess.run``, ``subprocess.Popen``, etc. directly.
-The wrappers enforce:
-
-* ``shell=False`` — the command must be a list of strings, never a shell string
-* Every argument is validated to be a ``str`` (no ``None``, ``bytes``, etc.)
-* No null bytes in any argument (prevents argument truncation attacks)
-
-This satisfies SAST tools (Opengrep/Semgrep/Bandit) that flag subprocess
-calls with non-static arguments, because the command list is validated and
-sanitized inside this module before being passed to the underlying
-``subprocess`` call.
+The wrappers enforce shell=False, validate arguments, and protect critical
+Windows system DLLs from an unsafe full-control ACL grant.
 """
 
 import os
+import re
 import subprocess
 import logging
 
 logger = logging.getLogger(__name__)
 
+_CORE_SYSTEM_DLL_RE = re.compile(
+    r"^(?:[A-Za-z]:)?[\\/]Windows[\\/]System32[\\/](?:advapi32|kernel32|ntdll)\.dll$",
+    re.IGNORECASE,
+)
+
 
 def _validate_cmd(cmd):
-    """Validate and sanitize a command list before passing to subprocess.
-
-    Returns the validated command list.  Raises ``ValueError`` if the
-    command is unsafe.
-
-    Because ``shell=False`` is always enforced, shell metacharacters such
-    as ``(``, ``)``, ``&``, ``|`` etc. are **not** dangerous — the OS
-    executes the path directly without shell interpretation.  The only
-    validation needed is type checking and null-byte rejection.
-    """
+    """Validate and normalize a command list before passing to subprocess."""
     if not isinstance(cmd, (list, tuple)):
         raise ValueError(f'subprocess command must be a list/tuple, got {type(cmd)}')
     if len(cmd) == 0:
         raise ValueError('subprocess command must not be empty')
+
     safe_cmd = []
     for i, arg in enumerate(cmd):
         if not isinstance(arg, str):
@@ -44,53 +34,59 @@ def _validate_cmd(cmd):
         if '\x00' in arg:
             raise ValueError(f'subprocess argument {i} contains null bytes')
         safe_cmd.append(arg)
+
+    # Isolation_Bytes previously restored a blocked System32 DLL with:
+    #   icacls <dll> /grant Administrators:(F)
+    # Windows Defender identifies that exact ACL operation as
+    # SuspDllOwnship.ZA!MTB.  An antivirus should never give Administrators
+    # full control over core System32 DLLs as part of an unblock operation.
+    # Normalize the remediation to the normal admin read/execute permission
+    # instead.  This also prevents a future caller from accidentally
+    # reintroducing the same unsafe operation through the shared wrapper.
+    if len(safe_cmd) >= 4 and os.name == 'nt':
+        executable = os.path.basename(safe_cmd[0]).lower()
+        if executable == 'icacls.exe':
+            target = safe_cmd[1]
+            if _CORE_SYSTEM_DLL_RE.fullmatch(target):
+                for index in range(2, len(safe_cmd) - 1):
+                    if (safe_cmd[index].lower() == '/grant'
+                            and safe_cmd[index + 1].lower() == 'administrators:(f)'):
+                        logger.warning(
+                            'Normalized unsafe System32 ACL grant for %s to RX', target)
+                        safe_cmd[index + 1] = 'Administrators:(RX)'
+
     return safe_cmd
 
 
 def safe_run(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.run`` with argument validation.
-
-    Forces ``shell=False`` and validates every argument.  Accepts the same
-    keyword arguments as ``subprocess.run``.
-    """
+    """Drop-in replacement for ``subprocess.run`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
-    _run = getattr(subprocess, 'run')
-    return _run(validated, **kwargs)
+    return getattr(subprocess, 'run')(validated, **kwargs)
 
 
 def safe_popen(cmd, **kwargs):
-    """Drop-in replacement for ``subprocess.Popen`` with argument validation.
-
-    Forces ``shell=False`` and validates every argument.
-    """
+    """Drop-in replacement for ``subprocess.Popen`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
-    _popen = getattr(subprocess, 'Popen')
-    return _popen(validated, **kwargs)
+    return getattr(subprocess, 'Popen')(validated, **kwargs)
 
 
 def safe_check_call(cmd, **kwargs):
     """Drop-in replacement for ``subprocess.check_call`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
-    _check_call = getattr(subprocess, 'check_call')
-    return _check_call(validated, **kwargs)
+    return getattr(subprocess, 'check_call')(validated, **kwargs)
 
 
 def safe_check_output(cmd, **kwargs):
     """Drop-in replacement for ``subprocess.check_output`` with argument validation."""
     validated = _validate_cmd(cmd)
     kwargs['shell'] = False
-    _check_output = getattr(subprocess, 'check_output')
-    return _check_output(validated, **kwargs)
+    return getattr(subprocess, 'check_output')(validated, **kwargs)
 
 
 def safe_list2cmdline(cmd):
-    """Drop-in replacement for ``subprocess.list2cmdline`` with argument validation.
-
-    Validates the command list before converting to a command-line string.
-    """
+    """Drop-in replacement for ``subprocess.list2cmdline`` with argument validation."""
     validated = _validate_cmd(cmd)
-    _list2cmdline = getattr(subprocess, 'list2cmdline')
-    return _list2cmdline(validated)
+    return getattr(subprocess, 'list2cmdline')(validated)
