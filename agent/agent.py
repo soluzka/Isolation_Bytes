@@ -30,6 +30,12 @@ except Exception as exc:
     print(f'Could not load yara_scanner: {exc}')
 
 try:
+    from security.hardened_scan_pipeline import scan_target as hardened_scan_target
+except Exception as exc:
+    hardened_scan_target = None
+    print(f'Could not load hardened scan pipeline: {exc}')
+
+try:
     from threat_level_engine import threat_level_engine
 except Exception as exc:
     threat_level_engine = None
@@ -55,7 +61,7 @@ CLOUD_API_KEY = os.environ.get('CLOUD_API_KEY', '').strip()
 
 
 def _get_device_id():
-    default = os.path.join(os.environ.get('ProgramData', r'C:\\ProgramData'), 'AntivirusServer')
+    default = os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'), 'AntivirusServer')
     runtime_dir = os.path.expandvars(os.environ.get('ANTIVIRUS_RUNTIME_DIR', default))
     lic_path = Path(runtime_dir) / 'credentials.lic'
     if lic_path.exists():
@@ -121,7 +127,6 @@ def _safe_yara_severity(matches):
 
 
 def _scan_ml_confidence(path, yara_matches=None):
-    """Best-effort ML confidence. A missing/unfitted model is neutral, not malicious."""
     try:
         from ml_security import security_ml
         if not os.path.isfile(path) or not security_ml._is_fitted():
@@ -130,10 +135,7 @@ def _scan_ml_confidence(path, yara_matches=None):
         _, scores = security_ml.predict(features)
         if scores is None:
             return 0.0
-        score = float(scores[0])
-        # IsolationForest decision_function is positive for inliers and negative
-        # for anomalies. Map a useful anomaly range to 0..1.
-        return max(0.0, min(1.0, 0.5 - score))
+        return max(0.0, min(1.0, 0.5 - float(scores[0])))
     except Exception:
         return 0.0
 
@@ -150,35 +152,15 @@ def _assess(entity_id, *, yara_matches=None, ml_confidence=0.0, behavioral_signa
 
 
 def scan_target(target):
-    findings = []
+    """Route file and recursive directory scans through the hardened pipeline."""
     if not target or not os.path.exists(target):
         return [{'error': f'target not found: {target}'}]
-    if os.path.isfile(target):
-        yara_matches = None
-        if scan_utils is not None:
-            try:
-                success, found, msg = scan_utils.scan_file_for_viruses(target)
-                findings.append({'path': target, 'success': success, 'malware_found': found, 'message': msg})
-            except Exception as exc:
-                findings.append({'path': target, 'scan_error': str(exc)})
-        if scan_file_with_yara is not None:
-            try:
-                yara_matches = scan_file_with_yara(target)
-                if yara_matches:
-                    findings.append({'path': target, 'yara_matches': yara_matches})
-            except Exception as exc:
-                findings.append({'path': target, 'yara_error': str(exc)})
-        assessment = _assess(target, yara_matches=yara_matches,
-                             ml_confidence=_scan_ml_confidence(target, yara_matches),
-                             behavioral_signals={'file_in_user_path': os.path.expandvars(r'%USERPROFILE%').lower() in target.lower()})
-        findings.append({'path': target, 'threat_assessment': assessment})
-    elif os.path.isdir(target) and scan_utils is not None:
-        try:
-            results = scan_utils.scan_all_folders_with_yara([target])
-            findings.extend([{'message': r} for r in results])
-        except Exception as exc:
-            findings.append({'error': str(exc)})
-    return findings
+    if hardened_scan_target is None:
+        return [{'error': 'hardened scan pipeline unavailable', 'target': target}]
+    try:
+        return hardened_scan_target(target, quarantine=True)
+    except Exception as exc:
+        return [{'error': f'hardened scan failed: {exc}', 'target': target}]
 
 
 def handle_command(cmd):
@@ -255,7 +237,6 @@ def network_monitor_loop():
                     ipaddress.ip_address(ip)
                 except ValueError:
                     continue
-
                 port_signal = port in c2_ports
                 known_blocked = ip in blocked_ips
                 assessment = _assess(
@@ -266,14 +247,12 @@ def network_monitor_loop():
                         'repeated_remote_connection': 0.25 if conn.status == 'ESTABLISHED' else 0.0,
                     },
                 )
-
                 confirmed_c2 = known_blocked or (port_signal and assessment.get('score', 0.0) >= 0.85)
                 if confirmed_c2 and block_ip is not None and should_auto_block_ip is not None:
                     if should_auto_block_ip(ip, threat_level=assessment, confirmed_c2=True):
                         ok, msg = block_ip(ip, reason=f"confirmed C2; threat={assessment.get('score', 0):.2f}")
                         if ok:
                             blocked_ips.add(ip)
-
                 if known_blocked or port_signal or assessment.get('level') in ('high', 'critical'):
                     _post('/agent/report', {
                         'device_id': DEVICE_ID, 'type': 'network_alert',
@@ -290,6 +269,16 @@ def process_scan_loop():
     try:
         from security import process_monitor
         def scan_func(path):
+            if hardened_scan_target is not None:
+                try:
+                    result = hardened_scan_target(path, quarantine=False)
+                    if not result:
+                        return True, False, 'no result'
+                    first = result[0]
+                    suspicious = first.get('status') in ('suspicious_review_or_corroboration', 'quarantined')
+                    return True, suspicious, first.get('status', 'scanned')
+                except Exception as exc:
+                    return False, False, str(exc)
             if scan_utils is None:
                 return True, False, 'scan_utils not loaded'
             return scan_utils.scan_file_for_viruses(path)
@@ -302,9 +291,6 @@ def process_scan_loop():
                     block_connections=False,
                     event_callback=_cloud_event_callback,
                 )
-
-                # Independently inspect running processes so the threat engine
-                # can combine repeated behavior with file/YARA evidence.
                 if psutil is not None:
                     for proc in psutil.process_iter(['pid', 'name', 'exe']):
                         try:
