@@ -995,7 +995,32 @@ class StandaloneAgent:
 
     def _heartbeat(self):
         try:
+            # Runtime state is a connection prerequisite, not a scan side effect.
+            # Create/verify the LocalAppData JSON files before collecting any
+            # expensive telemetry so a connected agent can never report healthy
+            # while silently lacking its local state store.
+            runtime_dir = ensure_runtime_state_files()
+            required_json = (
+                "scan_state.json",
+                "conditional_startup_state.json",
+                "scanner_results.json",
+                "blocked_files.json",
+                "scheduled_scan_state.json",
+                "quarantine_log.json",
+                "scan_cache.json",
+            )
+            missing = [
+                name for name in required_json
+                if not os.path.isfile(os.path.join(runtime_dir, name))
+            ]
+            if missing:
+                raise RuntimeError(
+                    "runtime JSON bootstrap incomplete: " + ", ".join(missing)
+                )
             stats = self._get_live_stats()
+            stats["runtime_state_ready"] = True
+            stats["runtime_dir"] = runtime_dir
+            stats["agent_version"] = AGENT_VERSION
             # Log ALL live connections with process names so the user can see them
             all_conns = stats.get('network_connections', [])
             flagged = stats.get('flagged_connections', [])
@@ -1035,7 +1060,12 @@ class StandaloneAgent:
                     pass
                 return True
             return False
-        except Exception:
+        except Exception as exc:
+            print(f"[HEARTBEAT] failed: {exc!r}")
+            try:
+                _startup_log(f"[HEARTBEAT] failed: {exc!r}")
+            except Exception:
+                pass
             return False
 
     def _handle_command(self, cmd):
