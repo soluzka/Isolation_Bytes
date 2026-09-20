@@ -2246,8 +2246,8 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         # Use the stable integer counter so the number never decreases mid-scan.
         # scanned_files is a dict that grows during scanning; len() on it
         # fluctuates when the UI polls mid-run, causing the counter to jump.
-        'scanned_files': 0,
-        'quarantined_files': 0,
+        'scanned_files': int(results.get('scanned_files_count') or 0),
+        'quarantined_files': count('quarantined_files'),
         'errors': count('errors'),
         'process_events': count('process_events'),
         'ml_detections': count('ml_detections'),
@@ -2309,8 +2309,8 @@ def run_startup():
         )
         conditional_startup_state.update({
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'scanned_files': 0, 0),
-            'quarantined_files': 0,
+            'scanned_files': int(results.get('scanned_files_count') or 0),
+            'quarantined_files': len(results.get('quarantined_files') or []),
             'errors': len(results.get('errors') or []),
             'process_events': len(results.get('process_events') or []),
             'ml_detections': len(results.get('ml_detections') or []),
