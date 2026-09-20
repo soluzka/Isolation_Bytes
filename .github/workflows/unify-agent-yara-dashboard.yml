@@ -57,7 +57,7 @@ jobs:
           )
           require(
               "standalone_agent.py",
-              "while self._running and (not continuous or self._continuous_scan_requested)",
+              "while self._running:",
               "self._continuous_scan_requested = True",
               "self._continuous_scan_requested = False",
           )
