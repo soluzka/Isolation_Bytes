@@ -449,7 +449,7 @@ def main():
     if build_launcher_flag:
         ok = build_launcher() and ok
 
-    print(f"\\n{'='*60}")
+    print(f"\n{'='*60}")
     if ok:
         print("  BUILD COMPLETE")
         print(f"{'='*60}")
