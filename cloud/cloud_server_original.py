@@ -4398,7 +4398,7 @@ def _run_continuous_scan_all():
         _quarantine_file = None
         QUARANTINE_FOLDER = os.path.join(
             os.environ.get('USERPROFILE', r'C:\Users\Default'),
-            'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+            'AppData', 'Local', 'Temp', 'IsolationBytes\Quarantine'
         )
 
     # Quarantine directory (matches quick_start.py's location).
@@ -5485,7 +5485,7 @@ _startup_state = {
 
 
 def _count_quarantine_files():
-    """Count .enc files currently in the Defender_Quarantine folder."""
+    """Count .enc files currently in the IsolationBytes\Quarantine folder."""
     try:
         qdir = _cloud_quarantine_dir()
         if os.path.isdir(qdir):
