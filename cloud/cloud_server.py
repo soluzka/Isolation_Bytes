@@ -593,28 +593,6 @@ def conditional_startup_status_api():
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         return response, 200
 
-    else_unused = None
-    if False:
-        payload = {
-            'status': 'IDLE',
-            'running': False,
-            'run_id': '',
-            'last_run': None,
-            'started_at': None,
-            'last_updated': None,
-            'duration': None,
-            'scanned_files': 0,
-            'quarantined_files': 0,
-            'blocked_threats': 0,
-            'errors': 0,
-            'process_events': 0,
-            'ml_detections': 0,
-            'ransomware_indicators': 0,
-            'persistence_indicators': 0,
-            'yara_suspicious': 0,
-            'scan_phase': 'idle',
-            'last_error': None,
-        }
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response, 200
