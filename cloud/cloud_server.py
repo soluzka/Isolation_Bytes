@@ -118,9 +118,11 @@ def _canonical_yara_agent_state():
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
             if generation_started:
                 scanned_files += max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
-                baseline_quarantined = int(scan_state.get('baseline_quarantined', 0) or 0)
-                raw_quarantined = int(agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0)
-                quarantined_files += max(0, raw_quarantined - baseline_quarantined)
+                # Never derive the active scan counter from quarantine history.
+                # Only the current agent generation may contribute quarantined files.
+                quarantined_files += max(0, int(
+                    agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
+                ))
         else:
             scanned_files += _live_max(report, agent, 'files_scanned')
             quarantined_files += _live_max(report, agent, 'quarantined_count')
@@ -239,7 +241,9 @@ def _agent_trigger_scan_response():
         pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
         pending.append({'action': 'scan_now'})
         _legacy.commands[device_id] = pending
-        baseline_quarantined = int(agent.get('quarantined_count', 0) or 0)
+        # Start every server-side scan generation with its own counters.
+        # Do not seed counters from previous quarantine history.
+        baseline_quarantined = 0
         previous_scan_id = str(agent.get('scan_id') or (agent.get('last_report') or {}).get('scan_id') or '')
         _agent_scan_state[device_id] = {
             'started_at': now,
