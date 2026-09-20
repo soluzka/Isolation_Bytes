@@ -2817,6 +2817,8 @@ X-GNOME-Autostart-enabled=true
                 except Exception as exc:
                     print(f"[SCAN] Directory scan error for {dirpath}: {exc}")
                     continue
+            # A continuous scan is never marked complete. Finishing a directory
+            # pass only means the next continuous pass begins immediately.
             self._scan_status = 'scanning' if (continuous and self._running) else ('complete' if self._running else 'stopped')
             if all_findings:
                 print(
