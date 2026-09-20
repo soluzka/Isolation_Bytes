@@ -42,7 +42,8 @@ def build_complete_agent_scan_results(legacy):
             findings = []
 
         scan_id = str(
-            report.get('scan_id') or ag.get('scan_id') or ''
+            ag.get('scan_id') or report.get('scan_id') or
+            ag.get('scan_started_at') or report.get('scan_started_at') or ''
         ).strip()
 
         files_scanned = _monotonic_counter(
