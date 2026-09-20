@@ -18,10 +18,6 @@
                 response.json = function() {
                     return originalJson().then(function(data) {
                         if (data && typeof data === 'object') {
-                            const lastError = typeof data.last_error === 'string' ? data.last_error : '';
-                            if (/^Scan triggered for \d+ agent\(s\)\./i.test(lastError)) {
-                                data.last_error = null;
-                            }
                             if (data.message_type === 'success' && data.error == null) {
                                 data.last_error = null;
                             }
