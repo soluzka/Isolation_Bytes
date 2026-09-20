@@ -1794,7 +1794,7 @@ def _persist_conditional_startup_log(log_text, basedir):
             continue
 
 
-def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None):
+def _run_conditional_startup_once(open_browser=True, progress_callback=None, critical_dirs=None):
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
 
@@ -1897,6 +1897,82 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     _persist_conditional_startup_log(results["log"], basedir)
 
     return results
+
+def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None, continuous=False):
+    """Run Conditional Startup once or continuously until STOP_EVENT is set."""
+    cumulative_scanned = 0
+    cumulative_quarantined = []
+    cumulative_errors = []
+    cumulative_process_events = []
+    cumulative_ml = []
+    cumulative_ransomware = []
+    cumulative_yara = []
+    cumulative_persistence = {}
+    last_result = None
+
+    while True:
+        if STOP_EVENT.is_set():
+            break
+
+        def _continuous_progress(results):
+            if not callable(progress_callback):
+                return
+            merged = dict(results)
+            merged["scanned_files_count"] = cumulative_scanned + int(results.get("scanned_files_count") or 0)
+            merged["quarantined_files"] = list(cumulative_quarantined) + list(results.get("quarantined_files") or [])
+            merged["errors"] = list(cumulative_errors) + list(results.get("errors") or [])
+            merged["process_events"] = list(cumulative_process_events) + list(results.get("process_events") or [])
+            merged["ml_detections"] = list(cumulative_ml) + list(results.get("ml_detections") or [])
+            merged["ransomware_indicators"] = list(cumulative_ransomware) + list(results.get("ransomware_indicators") or [])
+            merged["yara_suspicious"] = list(cumulative_yara) + list(results.get("yara_suspicious") or [])
+            persistence = results.get("persistence_indicators") or {}
+            merged["persistence_indicators"] = dict(cumulative_persistence)
+            for key, value in persistence.items():
+                if isinstance(value, list):
+                    merged["persistence_indicators"][key] = list(merged["persistence_indicators"].get(key) or []) + list(value)
+                else:
+                    merged["persistence_indicators"][key] = value
+            progress_callback(merged)
+
+        last_result = _run_conditional_startup_once(
+            open_browser=open_browser if not continuous else False,
+            progress_callback=_continuous_progress if continuous else progress_callback,
+            critical_dirs=critical_dirs,
+        )
+
+        cumulative_scanned += int(last_result.get("scanned_files_count") or 0)
+        cumulative_quarantined.extend(last_result.get("quarantined_files") or [])
+        cumulative_errors.extend(last_result.get("errors") or [])
+        cumulative_process_events.extend(last_result.get("process_events") or [])
+        cumulative_ml.extend(last_result.get("ml_detections") or [])
+        cumulative_ransomware.extend(last_result.get("ransomware_indicators") or [])
+        cumulative_yara.extend(last_result.get("yara_suspicious") or [])
+        for key, value in (last_result.get("persistence_indicators") or {}).items():
+            if isinstance(value, list):
+                cumulative_persistence.setdefault(key, []).extend(value)
+            else:
+                cumulative_persistence[key] = value
+
+        if not continuous or STOP_EVENT.is_set():
+            break
+
+        time.sleep(0.25)
+
+    if last_result is None:
+        last_result = {
+            "scanned_files": {},
+            "scanned_files_count": cumulative_scanned,
+            "quarantined_files": cumulative_quarantined,
+            "errors": cumulative_errors,
+            "process_events": cumulative_process_events,
+            "ml_detections": cumulative_ml,
+            "ransomware_indicators": cumulative_ransomware,
+            "persistence_indicators": cumulative_persistence,
+            "yara_suspicious": cumulative_yara,
+            "results": [],
+            "log": "",
+        }
+    return last_result
 
 # Run the logic when the script is executed
 if __name__ == "__main__":
