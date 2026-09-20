@@ -40,8 +40,7 @@ jobs:
               "return jsonify({",
           )
           # Full-system scan is intentionally a single authoritative agent scan.
-          # Do not require the retired dual-scan markers (Promise.allSettled,
-/run_startup).
+          # Do not require the retired dual-scan markers (Promise.allSettled, /run_startup).
           require(
               "templates/index.html",
               "fetch('/api/agent-trigger-scan'",
