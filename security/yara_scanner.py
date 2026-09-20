@@ -936,6 +936,12 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         '.html', '.htm', '.shtml', '.dhtml'
     ]
     
+    if _yara_scan_state is not None:
+        try:
+            _yara_scan_state.start_scan()
+        except Exception:
+            pass
+
     results = []
     scan_stats = {
         'total_directories': len(monitored_folders),
@@ -1063,6 +1069,12 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         
         scan_stats['directories'].append(folder_stats)
     
+    if _yara_scan_state is not None:
+        try:
+            _yara_scan_state.finish_scan('complete')
+        except Exception:
+            pass
+
     return {
         'results': results,
         'stats': scan_stats
