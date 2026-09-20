@@ -1623,15 +1623,8 @@ def start_conditional_startup_scan():
                 "run_id": conditional_startup_state.get("run_id", ""),
             }
 
-        # Every explicit start creates a clean generation. Do not carry the
-        # previous worker's counters/findings into the new JSON files.
-        latest_errors.clear()
-        latest_process_events.clear()
-        latest_ml_detections.clear()
-        latest_ransomware_indicators.clear()
-        latest_yara_suspicious.clear()
-        latest_quarantined_files.clear()
-        latest_persistence_indicators.clear()
+        # Indicator history is append-only. Starting another scan never clears
+        # evidence collected by previous scans.
 
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         run_id = hashlib.sha256(f'{now}:{time.time_ns()}'.encode()).hexdigest()[:24]
