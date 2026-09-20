@@ -340,14 +340,16 @@ def _complete_agent_scan_results_response():
     if not (session.get('logged_in') or session.get('user_logged_in')):
         return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
 
-    # Conditional startup is itself the active YARA generation. Do not expose
-    # the previous agent heartbeat/report while that scan is running.
-    conditional = _active_conditional_startup_state()
-    if conditional is not None:
+    # The dashboard's synchronized scan generation is owned by Conditional
+    # Startup. While a run exists (active or just completed), expose that
+    # generation instead of replaying an older agent heartbeat/report.
+    conditional = _conditional_startup_state()
+    if conditional is not None and conditional.get('run_id'):
         started = str(conditional.get('started_at') or '')
         findings = conditional.get('findings') or []
         scanned = int(conditional.get('scanned_files') or 0)
         quarantined = int(conditional.get('quarantined_files') or 0)
+        running = bool(conditional.get('running'))
         return jsonify({
             'ok': True, 'success': True,
             'agents': [{
@@ -359,18 +361,27 @@ def _complete_agent_scan_results_response():
                 'quarantined_count': quarantined,
                 'scan_id': str(conditional.get('run_id') or ''),
                 'scan_dirs': [],
-                'scan_status': 'scanning',
+                'scan_status': 'scanning' if running else 'idle',
                 'scan_started_at': started,
-                'last_scan': started,
+                'last_scan': str(conditional.get('last_run') or started),
             }],
             'total_files_scanned': scanned,
             'total_findings': len(findings),
             'total_quarantined': quarantined,
-            'status': 'running',
-            'message': 'Conditional startup is the active YARA scan generation.',
+            'status': 'running' if running else 'idle',
+            'message': 'Conditional Startup is the current dashboard scan generation.',
         }), 200
 
-    return jsonify(build_complete_agent_scan_results(_legacy, _agent_scan_state)), 200
+    return jsonify({
+        'ok': True,
+        'success': True,
+        'agents': [],
+        'total_files_scanned': 0,
+        'total_findings': 0,
+        'total_quarantined': 0,
+        'status': 'idle',
+        'message': 'No current scan generation.',
+    }), 200
 
 
 @app.before_request
