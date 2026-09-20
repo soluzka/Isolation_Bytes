@@ -429,6 +429,11 @@ def _conditional_startup_state():
     Refresh the persisted state before every read so a request handled by a
     different worker sees the live counters written by the scan worker.
     """
+    # The cloud service runs on Linux; the Windows quick_start launcher is not
+    # a cloud worker and must never be imported here. Connected agents own the
+    # cloud scan generation on non-Windows deployments.
+    if os.name != 'nt':
+        return None
     try:
         import quick_start
         refresh = getattr(quick_start, '_refresh_conditional_startup_state', None)
