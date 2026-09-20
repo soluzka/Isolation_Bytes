@@ -260,6 +260,7 @@ class StandaloneAgent:
         self._scan_started_at = ''
         self._scan_current_path = ''
         self._scan_progress_reported = 0
+        self._scan_lock = threading.Lock()
         self._last_quarantine_error = ''
         self._quarantine_ready = False
         self._cached_network_devices = []
@@ -860,6 +861,9 @@ class StandaloneAgent:
             return
         if action == 'scan_now':
             print("[CMD] Scan triggered from cloud dashboard — running immediate scan")
+            if self._scan_lock.locked():
+                print("[CMD] Scan request ignored because a scan is already running")
+                return
             try:
                 import threading
                 t = threading.Thread(target=self._scan_cycle, daemon=True)
@@ -2569,14 +2573,24 @@ X-GNOME-Autostart-enabled=true
             return False
 
     def _scan_cycle(self):
-        cycle_start = time.time()
-        self._scan_cycle_remaining = MAX_FILES_PER_SCAN
+        # Only one cloud-triggered full scan may run at a time. Without this
+        # guard, repeated scan_now commands can create concurrent os.walk/YARA
+        # threads that share the same counters and make progress appear stuck.
+        if not self._scan_lock.acquire(blocking=False):
+            print("[SCAN] Scan already running; ignoring duplicate scan request")
+            return
+        try:
+            cycle_start = time.time()
+            self._scan_cycle_remaining = MAX_FILES_PER_SCAN
         self._scan_status = 'scanning'
         self._scan_started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._scan_current_path = ''
-        self._scan_progress_reported = self._files_scanned
-        all_findings = []
-        scanned_roots = []
+            self._scan_progress_reported = self._files_scanned
+            all_findings = []
+            scanned_roots = []
+            # Publish the new run immediately so the dashboard cannot display
+            # an older completed scan as the current run.
+            self._report([], report_type='scan_progress')
         for dirpath in self._scan_dirs:
             if not self._running:
                 break
@@ -2604,13 +2618,15 @@ X-GNOME-Autostart-enabled=true
                 print(f"[SCAN] Directory scan error for {dirpath}: {e}")
                 continue
 
-        self._scan_current_path = ''
-        self._scan_status = 'complete' if self._running else 'stopped'
-        if all_findings:
+            self._scan_current_path = ''
+            self._scan_status = 'complete' if self._running else 'stopped'
+            if all_findings:
             print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
             self._report(all_findings)
         else:
-            self._report([], report_type='heartbeat_scan')
+                self._report([], report_type='heartbeat_scan')
+        finally:
+            self._scan_lock.release()
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
