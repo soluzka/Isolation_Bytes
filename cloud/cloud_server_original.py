@@ -3576,18 +3576,19 @@ def cloud_safe_download_page():
 
 # -- Quarantine helpers --
 def _cloud_quarantine_dir():
-    """Return the Defender_Quarantine folder path."""
+    """Return the application's quarantine directory, never Defender's private store."""
     try:
         from quarantine_utils import QUARANTINE_FOLDER
         return QUARANTINE_FOLDER
     except ImportError:
-        # Linux/VPS path
         if os.name != 'nt':
             return '/opt/antivirus-server/quarantine'
-        # Windows path
         return os.path.join(
-            os.environ.get('USERPROFILE', r'C:\Users\Default'),
-            'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+            os.environ.get(
+                'ANTIVIRUS_RUNTIME_DIR',
+                os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+            ),
+            'Quarantine'
         )
 
 
