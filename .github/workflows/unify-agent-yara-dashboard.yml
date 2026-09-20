@@ -39,17 +39,33 @@ jobs:
               "'status': 'started'",
               "return jsonify({",
           )
-          # Full-system scan is intentionally a single authoritative agent scan.
-          # Do not require the retired dual-scan markers (Promise.allSettled, /run_startup).
+          # Full System Scan intentionally starts BOTH engines together.
+          # Promise.allSettled only waits for the trigger requests; it is not
+          # a scan-completion condition.
           require(
               "templates/index.html",
+              "Promise.allSettled",
               "fetch('/api/agent-trigger-scan'",
-              "Full System Scan has one authoritative owner",
+              "fetch('/run_startup'",
+              "Both scan engines are starting simultaneously",
           )
           require(
               "templates/yara_scanner.html",
+              "Promise.allSettled",
               "fetch('/api/agent-trigger-scan'",
-              "This button controls ONE authoritative agent scan generation",
+              "fetch('/run_startup'",
+          )
+          require(
+              "standalone_agent.py",
+              "while self._running and (not continuous or self._continuous_scan_requested)",
+              "self._continuous_scan_requested = True",
+              "self._continuous_scan_requested = False",
+          )
+          require(
+              "conditional_startup.py",
+              "while True:",
+              "continuous=False",
+              "if not continuous or STOP_EVENT.is_set():",
           )
           require(
               "quick_start.py",
