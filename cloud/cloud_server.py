@@ -312,16 +312,29 @@ def _yara_only_quarantine_response():
     return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message_type': 'success', 'quarantined': quarantined, 'failed': [], 'count': len(quarantined), 'agents_triggered': sent, 'targeted_findings': targeted, 'message': f'YARA quarantine queued for {targeted} current finding(s) across {sent} agent(s). Results will refresh after the scan.', 'error': None}), 200
 
 
-def _active_conditional_startup_state():
-    """Return the live conditional-startup generation when it is running."""
+def _conditional_startup_state():
+    """Return only the app-owned Conditional Startup state.
+
+    This state is the source of truth for the Conditional Startup panel.
+    Never replace it with the agent heartbeat/YARA aggregate, because that
+    aggregate can contain results from an older scan generation.
+    """
     try:
         import quick_start
         state = getattr(quick_start, 'conditional_startup_state', None)
-        if not isinstance(state, dict) or not state.get('running'):
-            return None
-        return dict(state)
+        if isinstance(state, dict):
+            return dict(state)
     except Exception:
+        pass
+    return None
+
+
+def _active_conditional_startup_state():
+    """Return the current Conditional Startup state only while it is running."""
+    state = _conditional_startup_state()
+    if not state or not state.get('running'):
         return None
+    return state
 
 def _complete_agent_scan_results_response():
     if not (session.get('logged_in') or session.get('user_logged_in')):
@@ -376,19 +389,41 @@ def conditional_startup_status_api():
     if not (session.get('logged_in') or session.get('user_logged_in')):
         return jsonify({'error': 'Authentication required'}), 401
 
-    conditional = _active_conditional_startup_state()
+    # Conditional Startup has its own generation and counters. Always
+    # return that state when available, including after completion. Do not
+    # fall back to the agent aggregate, which may contain historical files,
+    # quarantine events, or blocks from a previous generation.
+    conditional = _conditional_startup_state()
     if conditional is not None:
         payload = dict(conditional)
-        payload.setdefault('status', 'RUNNING')
-        payload.setdefault('scan_phase', 'scanning')
-    else:
-        payload = _canonical_yara_agent_state()
-        payload.setdefault('status', 'IDLE')
+        payload.setdefault('status', 'RUNNING' if payload.get('running') else 'IDLE')
         payload.setdefault('running', False)
         payload.setdefault('scanned_files', 0)
         payload.setdefault('quarantined_files', 0)
+        payload.setdefault('blocked_threats', 0)
         payload.setdefault('errors', 0)
-        payload.setdefault('scan_phase', 'idle')
+        payload.setdefault('scan_phase', 'scanning' if payload.get('running') else 'idle')
+    else:
+        payload = {
+            'status': 'IDLE',
+            'running': False,
+            'run_id': '',
+            'last_run': None,
+            'started_at': None,
+            'last_updated': None,
+            'duration': None,
+            'scanned_files': 0,
+            'quarantined_files': 0,
+            'blocked_threats': 0,
+            'errors': 0,
+            'process_events': 0,
+            'ml_detections': 0,
+            'ransomware_indicators': 0,
+            'persistence_indicators': 0,
+            'yara_suspicious': 0,
+            'scan_phase': 'idle',
+            'last_error': None,
+        }
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     return response, 200
