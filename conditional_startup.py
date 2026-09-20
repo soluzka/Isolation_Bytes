@@ -8,6 +8,7 @@ import logging
 import threading
 import subprocess
 import tempfile
+import queue
 
 # --- Windows subprocess window suppression ---
 if sys.platform == 'win32':
@@ -71,6 +72,48 @@ def import_module_from_path(module_name, path):
 # Locks for concurrent process + file scanning
 results_lock = threading.RLock()
 scanner_lock = threading.RLock()
+
+
+def _run_scan_stage_with_timeout(func, timeout_seconds, stage, filepath, output):
+    """Run one file-scan stage behind a kill-independent watchdog.
+
+    A scanner library can occasionally block outside its own timeout handling
+    (for example while acquiring a lock, opening a file, or loading rules).
+    The Conditional Startup worker must still advance to the next file.
+    """
+    try:
+        timeout = max(1.0, float(timeout_seconds))
+    except (TypeError, ValueError):
+        timeout = 30.0
+    result_queue = queue.Queue(maxsize=1)
+
+    def _worker():
+        try:
+            result_queue.put(("ok", func()), block=False)
+        except Exception as exc:
+            try:
+                result_queue.put(("error", exc), block=False)
+            except Exception:
+                pass
+
+    worker = threading.Thread(
+        target=_worker,
+        name=f"IsolationBytes-{stage}",
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=timeout)
+    if worker.is_alive():
+        message = f"{stage} watchdog timed out after {timeout:.1f}s: {filepath}"
+        output.write(f"[WATCHDOG] {message}\n")
+        return False, None, message
+    try:
+        status, value = result_queue.get_nowait()
+    except queue.Empty:
+        return False, None, f"{stage} worker returned no result: {filepath}"
+    if status == "error":
+        return True, None, str(value)
+    return True, value, None
 
 # Cooperative stop signal used by the dashboard "Break the cycle" button.
 
@@ -1607,8 +1650,30 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 progress_callback(results)
             except Exception:
                 pass
-        with scanner_lock:
-            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=None)
+        scan_timeout = os.environ.get("CONDITIONAL_FILE_SCAN_TIMEOUT_SECONDS", "30")
+        completed, scan_value, scan_error = _run_scan_stage_with_timeout(
+            lambda: scan_utils.scan_file_for_viruses(filepath, stop_event=None),
+            scan_timeout,
+            "signature_scan",
+            filepath,
+            output,
+        )
+        if not completed:
+            from security.indicator_scans import record_error
+            with results_lock:
+                record_error(results, "signature_scan_watchdog", scan_error, filepath)
+                scanned_file_status[filepath] = {
+                    "malware_found": None,
+                    "quarantined": False,
+                    "error": scan_error,
+                }
+            if callable(progress_callback):
+                progress_callback(results)
+            scan_success, malware_found, msg = False, False, scan_error
+        elif scan_error:
+            scan_success, malware_found, msg = False, False, scan_error
+        else:
+            scan_success, malware_found, msg = scan_value
         with results_lock:
             output.write(f"[conditional_startup] {msg}\n")
             scanned_file_status[filepath] = {
@@ -1627,9 +1692,23 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                     progress_callback(results)
                 except Exception:
                     pass
-            with scanner_lock:
-                output.write(f"[conditional_startup] ENTER YARA LOOP: {filepath}\n")
-                yara_result = yara_scanner.scan_file_with_yara(filepath)
+            output.write(f"[conditional_startup] ENTER YARA LOOP: {filepath}\n")
+            completed, yara_value, yara_error = _run_scan_stage_with_timeout(
+                lambda: yara_scanner.scan_file_with_yara(filepath),
+                scan_timeout,
+                "yara_scan",
+                filepath,
+                output,
+            )
+            if not completed:
+                from security.indicator_scans import record_error
+                with results_lock:
+                    record_error(results, "yara_scan_watchdog", yara_error, filepath)
+                yara_result = None
+            elif yara_error:
+                raise RuntimeError(yara_error)
+            else:
+                yara_result = yara_value
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
                 if yara_result:
