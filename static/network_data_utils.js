@@ -46,14 +46,30 @@
                     response.json = function () {
                         return originalJson().then(function (data) {
                             if (!data || typeof data !== 'object') return data;
-                            const state = global.__isolationBytesScanDisplay || {
+                            const incomingGeneration = String(data.scan_generation || '');
+                            let state = global.__isolationBytesScanDisplay || {
+                                generation: incomingGeneration,
                                 scanned_files: 0,
                                 quarantined_files: 0,
                                 blocked_threats: 0
                             };
-                            data.scanned_files = Math.max(Number(data.scanned_files) || 0, state.scanned_files);
-                            data.quarantined_files = Math.max(Number(data.quarantined_files) || 0, state.quarantined_files);
-                            data.blocked_threats = Math.max(Number(data.blocked_threats) || 0, state.blocked_threats);
+
+                            // A new scan generation owns its counters. Never
+                            // carry the previous run (for example 8,204 files)
+                            // into the new run.
+                            if (incomingGeneration && state.generation !== incomingGeneration) {
+                                state = {
+                                    generation: incomingGeneration,
+                                    scanned_files: 0,
+                                    quarantined_files: 0,
+                                    blocked_threats: 0
+                                };
+                            }
+
+                            data.scanned_files = Number(data.scanned_files) || 0;
+                            data.quarantined_files = Number(data.quarantined_files) || 0;
+                            data.blocked_threats = Number(data.blocked_threats) || 0;
+                            state.generation = incomingGeneration || state.generation;
                             state.scanned_files = data.scanned_files;
                             state.quarantined_files = data.quarantined_files;
                             state.blocked_threats = data.blocked_threats;
