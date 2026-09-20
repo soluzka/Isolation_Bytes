@@ -76,12 +76,27 @@ def record_persistence_indicators(
     results: dict[str, Any],
     findings: Mapping[str, Any],
 ) -> int:
-    """Replace persistence results and return the number of indicators."""
-    normalized = dict(findings or {})
-    results["persistence_indicators"] = normalized
+    """Merge persistence evidence without clearing or overwriting prior entries."""
+    existing = results.setdefault("persistence_indicators", {})
+    if not isinstance(existing, dict):
+        existing = {}
+        results["persistence_indicators"] = existing
+
+    for key, value in dict(findings or {}).items():
+        base = str(key)
+        if base not in existing:
+            existing[base] = value
+            continue
+        index = 2
+        candidate = f"{base}#{index}"
+        while candidate in existing:
+            index += 1
+            candidate = f"{base}#{index}"
+        existing[candidate] = value
+
     return sum(
         len(value) if isinstance(value, (list, tuple, dict, set)) else 1
-        for value in normalized.values()
+        for value in existing.values()
     )
 
 
