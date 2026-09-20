@@ -427,7 +427,7 @@ from data_analysis import (
 
 # Persistent scan cache and safe quarantine helper
 from security.scan_cache import safe_quarantine
-from quarantine_utils import quarantine_file, list_quarantine_files, restore_quarantine_file, delete_quarantine_file
+from quarantine_utils import quarantine_file, list_quarantine_files, restore_quarantine_file, delete_quarantine_file, QUARANTINE_FOLDER
 from windows_admin_service import (
     AdminServiceUnavailable,
     AdminServiceProtocolError,
@@ -997,7 +997,7 @@ def _perform_scan_all():
         }, 400
 
     try:
-        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', r'C:\Users\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+        quarantine_dir = QUARANTINE_FOLDER
 
         if continuous_scan_state['active']:
             continuous_scan_state['last_result'] = {
@@ -3122,7 +3122,7 @@ def decrypt_file_route():
 @app.route('/quarantine.html', methods=['GET'])
 def quarantine():
     # Path to the quarantine directory
-    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantine_dir = QUARANTINE_FOLDER
     os.makedirs(quarantine_dir, exist_ok=True)
     
     quarantined_files = []
