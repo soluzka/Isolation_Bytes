@@ -102,6 +102,9 @@ def _canonical_yara_agent_state():
     ransomware_indicators = 0
     persistence_indicators = 0
     last_scan = ''
+    current_path = ''
+    current_status = 'idle'
+    current_started_at = ''
     running = False
     now = time.time()
 
@@ -110,6 +113,15 @@ def _canonical_yara_agent_state():
         scanned_files += _live_max(report, agent, 'files_scanned')
         quarantined_files += _live_max(report, agent, 'quarantined_count')
         marker = _agent_report_marker(agent)
+        agent_path = agent.get('scan_current_path') or report.get('scan_current_path') or ''
+        agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
+        agent_started = agent.get('scan_started_at') or report.get('scan_started_at') or ''
+        if agent_path:
+            current_path = agent_path
+        if agent_status:
+            current_status = agent_status
+        if agent_started:
+            current_started_at = agent_started
         last_scan = max(last_scan, marker)
         scan_state = _agent_scan_state.get(device_id)
         pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
@@ -182,6 +194,9 @@ def _canonical_yara_agent_state():
         'findings': findings,
         'ml_models': {},
         'last_error': '',
+        'scan_current_path': current_path,
+        'scan_status': current_status,
+        'scan_started_at': current_started_at,
     }
 
 
