@@ -7,7 +7,13 @@ import os
 import json
 from datetime import datetime
 
-ALERTS_FILE = os.path.join(os.path.dirname(__file__), 'phishing_alerts.json')
+ALERTS_FILE = os.path.join(
+    os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+    ),
+    'phishing_alerts.json'
+)
 
 _alerts_lock = threading.Lock()
 
