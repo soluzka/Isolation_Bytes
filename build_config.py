@@ -341,18 +341,30 @@ if not args.skip_exe:
 
     # ── Build the universal launcher as a single standalone EXE ──
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
-    if os.path.isfile(launcher_spec):
+    launcher_source = os.path.join(BASE_DIR, 'universal_launcher.py')
+    launcher_dist_source = os.path.join(DIST_DIR, 'universal_launcher.py')
+
+    # The WPF MSIX is the primary Windows launcher. The legacy Python
+    # universal launcher is optional and may not be checked into the repo.
+    # Never abort the MSIX build merely because that optional source is absent.
+    if os.path.isfile(launcher_spec) and (os.path.isfile(launcher_source) or os.path.isfile(launcher_dist_source)):
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
+        if not os.path.isfile(launcher_dist_source) and os.path.isfile(launcher_source):
+            shutil.copy2(launcher_source, launcher_dist_source)
         _ensure_spec_excludes(launcher_spec, ('pydantic', 'pydantic_core'))
-        run([sys.executable, '-m', 'PyInstaller', launcher_spec,
-             '--noconfirm',
-             '--distpath', DIST_DIR,
-             '--workpath', BUILD_DIR])
+        try:
+            run([sys.executable, '-m', 'PyInstaller', launcher_spec,
+                 '--noconfirm',
+                 '--distpath', DIST_DIR,
+                 '--workpath', BUILD_DIR])
+        except subprocess.CalledProcessError as exc:
+            print(f'WARNING: optional universal launcher build failed (exit {exc.returncode}).')
+            print('         Continuing with the Windows WPF/MSIX launcher.')
         launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
         if os.path.isfile(launcher_exe):
             print(f'Universal launcher: {launcher_exe}')
-        else:
-            print('WARNING: Universal launcher EXE not found.')
+    else:
+        print('NOTE: Optional universal launcher source/spec not available — skipping Python launcher EXE.')
 
     # ── Build the standalone agent as onedir ──
     agent_spec = os.path.join(BASE_DIR, 'standalone_agent.spec')
