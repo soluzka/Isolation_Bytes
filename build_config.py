@@ -90,25 +90,49 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Ensure spec-file Analysis() excludes incompatible optional modules.
+    """Make specs compatible with PyInstaller and project-specific hooks.
 
-    PyInstaller accepts --exclude-module only when building from a Python
-    entry-point. When a .spec file is supplied, exclusion options must live
-    in Analysis(excludes=...).
+    --exclude-module is invalid when PyInstaller is invoked with a .spec
+    file, so exclusions belong in Analysis(excludes=...). The project hook
+    directory must also be present so our Pydantic 2 compatibility hook takes
+    precedence over incompatible hooks-contrib versions.
     """
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    if 'excludes=' in content:
-        return
-    marker = 'a = Analysis(\n'
+
+    marker = 'a = Analysis(\\n'
     if marker not in content:
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
+
     exclusions = ', '.join(repr(m) for m in modules)
-    content = content.replace(marker, marker + f'    excludes=[{exclusions}],\n', 1)
+    if 'excludes=' not in content:
+        content = content.replace(
+            marker,
+            marker + f'    excludes=[{exclusions}],\\n',
+            1,
+        )
+        print(f'Added PyInstaller spec exclusions: {exclusions}')
+
+    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\\\', '\\\\\\\\')
+    hook_entry = f"r'{hook_dir}'"
+    if 'pyinstaller_hooks' not in content:
+        if 'hookspath=' in content:
+            content = re.sub(
+                r'hookspath=\\[([^\\]]*)\\]',
+                lambda m: f"hookspath=[{m.group(1).strip()}, {hook_entry}]",
+                content,
+                count=1,
+            )
+        else:
+            content = content.replace(
+                marker,
+                marker + f'    hookspath=[{hook_entry}],\\n',
+                1,
+            )
+        print(f'Added project PyInstaller hook path: {hook_dir}')
+
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(content)
-    print(f'Added PyInstaller spec exclusions: {exclusions}')
-
 
 def find_dotnet():
     for c in [shutil.which('dotnet'),
