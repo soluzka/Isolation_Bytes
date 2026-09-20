@@ -378,6 +378,9 @@
             </div>
 
             <div class="results" id="results"></div>
+            <div class="card" id="yaraScanCounter" aria-live="polite">
+                <strong>YARA Files Scanned:</strong> <span id="yaraFilesScanned">0</span>
+            </div>
         </div>
 
         <div id="MonitoredFolders" class="tabcontent">
@@ -926,6 +929,11 @@
                 .then(r => r.json())
                 .then(data => {
                     renderAgentScanResults(data);
+                    const totalYaraFiles = (data.agents || []).reduce(
+                        (sum, ag) => sum + (Number(ag.files_scanned) || 0), 0
+                    );
+                    const counter = document.getElementById('yaraFilesScanned');
+                    if (counter) counter.textContent = String(totalYaraFiles);
                     // Hide loading indicator once we have results
                     const li = document.getElementById('loadingIndicator');
                     if (li) li.style.display = 'none';
@@ -934,6 +942,12 @@
                     const el = document.getElementById('agent_scan_results');
                     if (el) el.innerHTML = '<p class="alert alert-warning">Unable to load agent scan results.</p>';
                 });
+        }
+
+        // Poll the same authoritative API during a scan so YARA's
+        // counter advances with the agent instead of remaining at its old value.
+        if (!window.__yaraScanCounterTimer) {
+            window.__yaraScanCounterTimer = setInterval(fetchAgentScanResults, 1000);
         }
 
         function renderAgentScanResults(data) {
