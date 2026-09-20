@@ -3172,6 +3172,22 @@ def pair_agent():
     return jsonify({'ok': True, 'device_token': credential}), 200
 
 
+@cloud_bp.route('/agent/commands/poll', methods=['POST'])
+@_require_key
+def agent_commands_poll():
+    """Deliver queued agent commands independently of the heavyweight heartbeat."""
+    data = request.get_json(force=True, silent=True) or {}
+    device_id = str(data.get('device_id', '')).strip()
+    if not device_id:
+        return jsonify({'error': 'device_id required'}), 400
+    agent = _get_agent(device_id)
+    if not agent:
+        return jsonify({'error': 'unknown device'}), 404
+    pending = commands.get(device_id, [])
+    commands[device_id] = []
+    return jsonify({'commands': pending}), 200
+
+
 @cloud_bp.route('/agent/heartbeat', methods=['POST'])
 @_require_key
 def agent_heartbeat():
