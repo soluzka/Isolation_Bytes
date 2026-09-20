@@ -339,6 +339,14 @@ def build_agent():
         print(f"ERROR: {spec_path} not found")
         return False
 
+    # Remove stale onedir output before producing the single-file agent.
+    stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
+    if stale_agent_dir.is_dir():
+        shutil.rmtree(stale_agent_dir, ignore_errors=True)
+        if stale_agent_dir.exists():
+            print(f"ERROR: unable to remove stale agent directory: {stale_agent_dir}")
+            return False
+
     if not _run_build_command(
         [sys.executable, "-m", "PyInstaller", str(spec_path), "--noconfirm", "--distpath", str(DIST_DIR)],
         cwd=PROJECT_ROOT, log_name="agent-build.log"
