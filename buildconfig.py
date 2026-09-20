@@ -4,7 +4,7 @@ Builds both EXEs with the same configuration:
   - cloud_server.exe         (PyInstaller — Flask + Caddy + Cloudflare)
   - IsolationBytesAgent.exe  (PyInstaller — desktop scanning agent)\n  - IsolationBytesLogin.exe  (dotnet — launcher)
 
-The launcher is a thin client and expects IsolationBytesAgent.exe alongside it at runtime.
+The launcher is a thin client and expects\nIsolationBytesAgent.exe alongside it at runtime.
 
 Usage:
     python buildconfig.py              # build everything (cloud first, then launcher)
