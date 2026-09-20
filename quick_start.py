@@ -916,6 +916,44 @@ conditional_startup_state = {
 conditional_startup_lock = threading.Lock()
 scanning_lock = threading.Lock()
 conditional_startup_thread = None  # Background scan thread, used to detect dead scans
+
+# Conditional Startup state is persisted because production deployments may
+# serve /run_startup and /api/conditional_startup/status from different
+# worker processes. Keeping this state only in Python memory lets one worker
+# reset counters while another worker continues returning the previous run.
+_CONDITIONAL_STATE_DIR = os.environ.get(
+    'ANTIVIRUS_RUNTIME_DIR',
+    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+)
+_CONDITIONAL_STATE_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'conditional_startup_state.json')
+
+def _persist_conditional_startup_state():
+    """Atomically publish the current Conditional Startup generation."""
+    try:
+        os.makedirs(_CONDITIONAL_STATE_DIR, exist_ok=True)
+        with conditional_startup_lock:
+            payload = dict(conditional_startup_state)
+            payload['findings'] = list(payload.get('findings') or [])[:100]
+        tmp = _CONDITIONAL_STATE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, ensure_ascii=False)
+        os.replace(tmp, _CONDITIONAL_STATE_FILE)
+    except Exception as exc:
+        logger.warning('Could not persist Conditional Startup state: %s', exc)
+
+def _refresh_conditional_startup_state():
+    """Refresh counters from the shared state file when another worker wrote them."""
+    try:
+        with open(_CONDITIONAL_STATE_FILE, 'r', encoding='utf-8') as f:
+            persisted = json.load(f)
+        if not isinstance(persisted, dict):
+            return
+        with conditional_startup_lock:
+            conditional_startup_state.update(persisted)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return
+    except Exception as exc:
+        logger.debug('Could not refresh Conditional Startup state: %s', exc)
 latest_yara_suspicious = []  # Full list of YARA suspicious matches from the last conditional startup
 latest_ransomware_indicators = []  # Full list of ransomware heuristic findings from the last conditional startup
 latest_persistence_indicators = {}  # Full persistence findings from the last conditional startup
@@ -1275,6 +1313,7 @@ def run_conditional_startup_background():
                 'last_error': str(errors[-1]) if errors else None,
                 'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
             })
+        _persist_conditional_startup_state()
             # Expose the latest detail lists so the review UI works
             # even while the scan is still in progress.
             global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
@@ -1315,6 +1354,7 @@ def run_conditional_startup_background():
             'last_error': None,
             'scan_phase': 'starting',
         })
+    _persist_conditional_startup_state()
 
     try:
         with scanning_lock:
@@ -1324,6 +1364,7 @@ def run_conditional_startup_background():
             scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress, critical_dirs=critical_dirs)
         with conditional_startup_lock:
             record_conditional_startup_run(scan_data, time.time() - start_time)
+        _persist_conditional_startup_state()
             if isinstance(scan_data, dict):
                 latest_yara_suspicious = scan_data.get('yara_suspicious', [])
                 latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
@@ -1339,6 +1380,7 @@ def run_conditional_startup_background():
         logger.error(f"Error running conditional startup: {e!r}")
         with conditional_startup_lock:
             record_conditional_startup_run(error=e, duration=time.time() - start_time)
+        _persist_conditional_startup_state()
 
 
 def _find_models_dir():
@@ -1396,6 +1438,7 @@ def _ml_model_status():
 def conditional_startup_status():
     """Status of the last conditional startup run; also used by Refresh Status."""
     global conditional_startup_thread
+    _refresh_conditional_startup_state()
     with conditional_startup_lock:
         if conditional_startup_state.get('running'):
             if conditional_startup_thread is None or not conditional_startup_thread.is_alive():
@@ -1444,6 +1487,7 @@ def run_startup():
                 'last_error': None,
                 'scan_phase': 'starting',
             })
+            _persist_conditional_startup_state()
 
         logger.info("Starting conditional startup scan in background")
         global conditional_startup_thread
