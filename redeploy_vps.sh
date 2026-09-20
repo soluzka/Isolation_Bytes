@@ -58,13 +58,6 @@ sed -i 's/^llama-cpp-python==/#llama-cpp-python==/' requirements.txt 2>/dev/null
 sed -i 's/^pyinstaller==/#pyinstaller==/' requirements.txt 2>/dev/null || true
 /opt/antivirus-server/venv/bin/pip install --no-cache-dir -r requirements.txt gunicorn 2>&1 | tail -5
 
-# Verify the exact source that will be started before touching the service.
-echo "  Deployed commit: $(git rev-parse --short HEAD)"
-/opt/antivirus-server/venv/bin/python -m py_compile quick_start.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
-/opt/antivirus-server/venv/bin/python -c "import quick_start; print('  quick_start import: OK')"
-/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
-/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server as m; assert getattr(m, 'app', None) is not None; print('  production WSGI app: OK')"
-
 # Conditional Startup counters are generation-scoped. Remove only the shared
 # runtime state from the previous deployment; this does not touch quarantine
 # data or scan history.
@@ -149,13 +142,18 @@ ensure_json_state "/opt/antivirus-server/scheduled_scan_state.json" '{"enabled":
 ensure_json_state "/opt/antivirus-server/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0}'
 # Scan cache is intentionally empty on a fresh/repaired deployment.
 mkdir -p /opt/antivirus-server/data
-if [ ! -f /opt/antivirus-server/data/scan_cache.json ]; then printf '{}\\n' > /opt/antivirus-server/data/scan_cache.json; fi
+ensure_json_state "/opt/antivirus-server/data/scan_cache.json" '{}'
 
 # Quarantine metadata is separate from payloads and is always valid JSON.
-if [ ! -f "$QUARANTINE_DIR/quarantine_log.json" ]; then
-    printf '[]\\n' > "$QUARANTINE_DIR/quarantine_log.json"
-    chmod 600 "$QUARANTINE_DIR/quarantine_log.json"
-fi
+chmod 600 "$QUARANTINE_DIR/quarantine_log.json"
+
+# Verify the exact source that will be started before touching the service.
+echo "  Deployed commit: $(git rev-parse --short HEAD)"
+/opt/antivirus-server/venv/bin/python -m py_compile quick_start.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
+/opt/antivirus-server/venv/bin/python -c "import quick_start; print('  quick_start import: OK')"
+/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
+/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server as m; assert getattr(m, 'app', None) is not None; print('  production WSGI app: OK')"
+
 
 # If running interactively, ask for the Cloudflare API token so we can obtain
 # a Let's Encrypt origin certificate. The token is not echoed.
