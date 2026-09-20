@@ -3930,7 +3930,7 @@ if not FERNET_KEY or len(FERNET_KEY) != 44:
 secure_key = SecureBuffer(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
 FERNET_INSTANCE = Fernet(secure_key.get_bytes())
 
-__version__ = "1.8.952.0"
+__version__ = "1.8.953.0"
 
 # --- Robust EXE folder detection for all file/shortcut creation ---
 def get_basedir():
