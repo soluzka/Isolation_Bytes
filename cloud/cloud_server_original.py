@@ -3355,7 +3355,7 @@ def cloud_yara_scanner():
             'device_id': device_id,
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
-            'last_scan': ag.get('last_scan', ''),
+            'last_scan': ag.get('last_scan') or last_report.get('last_scan') or last_report.get('timestamp') or '',
             'findings': findings[:50],  # cap at 50 per agent
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
@@ -3376,7 +3376,7 @@ def cloud_agent_scan_results():
             'device_id': device_id,
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
-            'last_scan': ag.get('last_scan', ''),
+            'last_scan': ag.get('last_scan') or last_report.get('last_scan') or last_report.get('timestamp') or '',
             'findings': findings,
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,
