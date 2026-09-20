@@ -3019,6 +3019,9 @@ def agent_heartbeat():
         'scan_id': data.get('scan_id', agent.get('scan_id', '')),
         'scan_started_at': data.get('scan_started_at', agent.get('scan_started_at', '')),
         'scan_status': data.get('scan_status', agent.get('scan_status', 'idle')),
+        'scan_id': data.get('scan_id', agent.get('scan_id', '')),
+        'scan_started_at': data.get('scan_started_at', agent.get('scan_started_at', '')),
+        'scan_current_path': data.get('scan_current_path', agent.get('scan_current_path', '')),
     }
     _update_agent(device_id, updates)
     # Auto-block: scan heartbeat connections for threats and queue block
