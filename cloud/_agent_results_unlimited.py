@@ -76,6 +76,9 @@ def build_complete_agent_scan_results(legacy):
             'quarantined_count': quarantined_count,
             'scan_id': scan_id,
             'scan_dirs': ag.get('scan_dirs') or report.get('scan_dirs') or [],
+            'scan_status': ag.get('scan_status') or report.get('scan_status') or 'idle',
+            'scan_current_path': ag.get('scan_current_path') or report.get('scan_current_path') or '',
+            'scan_started_at': ag.get('scan_started_at') or report.get('scan_started_at') or '',
         })
         total_findings += len(findings)
     return {'agents': results, 'total_findings': total_findings}
