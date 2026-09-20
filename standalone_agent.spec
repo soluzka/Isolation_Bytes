@@ -36,7 +36,7 @@ a = Analysis(
               'IPython', 'ipykernel', 'notebook', 'pytest',
               'nltk', 'transformers', 'accelerate', 'cv2', 'redis', 'onnxruntime',
               'pyssdeep', 'ssdeep', 'tlsh', 'lief', 'lightgbm', 'pefile',
-              'pandas', 'matplotlib', 'seaborn', 'scipy', 'sklearn', 'numpy'],
+              'pandas', 'matplotlib', 'seaborn', 'scipy', 'sklearn', 'numpy', 'pydantic', 'pydantic_core'],
     noarchive=False,
     optimize=0,
 )
