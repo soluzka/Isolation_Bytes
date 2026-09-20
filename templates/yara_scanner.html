@@ -1142,50 +1142,51 @@
             btn.textContent = 'Triggering agent scan...';
             document.getElementById('loadingIndicator').style.display = 'block';
             if (status) status.innerHTML = '<p>Sending scan command to agent(s)...</p>';
-            fetch('/api/agent-trigger-scan', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: '{}'
-            })
-            .then(async response => {
+            // The YARA page's full-system button also starts Conditional Startup,
+            // so both scanners begin from the same user action.
+            Promise.allSettled([
+                fetch('/api/agent-trigger-scan', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: '{}'
+                }).then(async response => {
                     const text = await response.text();
                     let data = {};
-                    try { data = text ? JSON.parse(text) : {}; }
-                    catch (e) { throw new Error(`Invalid server response (${response.status})`); }
-                    if (!response.ok) {
-                        throw new Error(data.message || data.error || `Scan request failed (${response.status})`);
-                    }
+                    try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+                    if (!response.ok) throw new Error(data.message || data.error || `Scan request failed (${response.status})`);
+                    return data;
+                }),
+                fetch('/run_startup', {
+                    method: 'POST',
+                    credentials: 'same-origin'
+                }).then(async response => {
+                    const text = await response.text();
+                    let data = {};
+                    try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+                    if (!response.ok) throw new Error(data.message || data.error || `Startup request failed (${response.status})`);
                     return data;
                 })
-            .then(data => {
-                const accepted = data.ok === true || data.success === true || data.status === 'accepted';
-            if (accepted) {
-                    btn.disabled = false;
-                    btn.textContent = 'Stop Scanning';
-                    if (status) status.innerHTML = '<p style="color:#28a745;">' + escapeHtml(data.message) + ' Polling for results every 5 seconds.</p>';
-                    document.getElementById('results').innerHTML = '<div class="alert info">' + escapeHtml(data.message) + ' Polling for results...</div>';
-                    // Immediately fetch results and start continuous polling
-                    fetchAgentScanResults();
-                    scanAllInterval = setInterval(function() {
-                        fetchAgentScanResults();
-                    }, 5000);
-                } else {
-                    document.getElementById('loadingIndicator').style.display = 'none';
-                    document.getElementById('results').innerHTML = '<div class="alert">' + escapeHtml(data.message || 'No agents connected.') + '</div>';
-                    if (status) status.innerHTML = '<p style="color:#dc3545;">' + escapeHtml(data.message || 'No agents connected.') + '</p>';
-                    btn.disabled = false;
-                    btn.textContent = 'Run Full System Scan (Agent PC)';
-                }
+            ])
+            .then(results => {
+                const started = results.filter(r => r.status === 'fulfilled');
+                if (!started.length) throw new Error('Neither scan accepted the request.');
+                const failed = results.length - started.length;
+                btn.disabled = false;
+                btn.textContent = 'Stop Scanning';
+                if (status) status.innerHTML = failed
+                    ? '<p style="color:#b36200;">One scan started; the other reported an error.</p>'
+                    : '<p style="color:#28a745;">Conditional Startup and agent YARA started together.</p>';
+                fetchAgentScanResults();
+                scanAllInterval = setInterval(fetchAgentScanResults, 5000);
             })
-            .catch(function() {
+            .catch(function(error) {
                 document.getElementById('loadingIndicator').style.display = 'none';
-                document.getElementById('results').innerHTML = '<div class="alert">Failed to trigger agent scan.</div>';
-                if (status) status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scan.</p>';
+                document.getElementById('results').innerHTML = '<div class="alert">Failed to trigger scans: ' + escapeHtml(error.message || error) + '</div>';
+                if (status) status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scans.</p>';
                 btn.disabled = false;
                 btn.textContent = 'Run Full System Scan (Agent PC)';
             });
-        });
 
         // Auto-fetch agent scan results on page load (no VPS scan)
         window.addEventListener('load', function() {
