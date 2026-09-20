@@ -2194,6 +2194,7 @@ def index():
 # Route for conditional startup
 # Most recent conditional startup run, exposed to the UI via /api/conditional_startup/status
 conditional_startup_state = {
+    'run_id': '',
     'running': False,
     'last_run': None,
     'started_at': None,
@@ -2282,7 +2283,10 @@ def run_startup():
                         "message": "A scan is already in progress"}), 200
 
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    run_id = hashlib.sha256(f'{now_str}:{time.time_ns()}'.encode()).hexdigest()[:24]
     conditional_startup_state.update({
+        'run_id': run_id,
+        'findings': [],
         'running': True,
         'started_at': now_str,
         'last_updated': now_str,
@@ -2349,8 +2353,8 @@ def run_conditional_startup_route():
         results = conditional_startup.run_conditional_startup_logic(open_browser=False)
         return jsonify({
             'status': 'success',
-            'scanned_files': 0,
-            'quarantined_files': 0, []),
+            'scanned_files': int(results.get('scanned_files_count') or len(results.get('scanned_files') or {})),
+            'quarantined_files': len(results.get('quarantined_files') or []),
             'errors': results.get('errors', []),
             'process_events': results.get('process_events', []),
             'log': results.get('log', ''),
