@@ -1899,7 +1899,7 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
     return results
 
 def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None, continuous=False):
-    """Run Conditional Startup once or continuously until STOP_EVENT is set."""
+    """Run Conditional Startup once or continuously for the lifetime of the process."""
     cumulative_scanned = 0
     cumulative_quarantined = []
     cumulative_errors = []
@@ -1911,9 +1911,6 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     last_result = None
 
     while True:
-        if STOP_EVENT.is_set():
-            break
-
         def _continuous_progress(results):
             if not callable(progress_callback):
                 return
