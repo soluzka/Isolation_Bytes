@@ -223,7 +223,12 @@ def _canonical_yara_agent_state():
         'duration': None,
         'scanned_files': scanned_files,
         'quarantined_files': quarantined_files,
-        'blocked_threats': sum(1 for f in findings if f.get('blocked')),
+        'blocked_threats': sum(
+            1 for device_id, agent in agents.items()
+            if _agent_scan_state.get(device_id)
+            for f in (agent.get('last_report') or {}).get('findings', [])
+            if isinstance(f, dict) and f.get('blocked')
+        ),
         'errors': 0,
         'process_events': 0,
         'ml_detections': ml_detections,
@@ -311,6 +316,9 @@ def _agent_trigger_scan_response():
         }
         agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
         agent['files_scanned'] = 0
+        agent['threats_blocked'] = 0
+        agent['quarantined_count'] = 0
+        agent['quarantine_files'] = []
         agent['scan_status'] = 'queued'
         agent['scan_started_at'] = agent['last_report']['scan_started_at']
         agent['scan_id'] = ''
