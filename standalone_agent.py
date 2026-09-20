@@ -2857,7 +2857,7 @@ X-GNOME-Autostart-enabled=true
 
     def _scan_cycle(self, continuous=False):
         """Run full scans continuously until explicitly stopped."""
-        while self._running and (not continuous or self._continuous_scan_requested):
+        while self._running:
             try:
                 self._scan_cycle_once(continuous=continuous)
             except BaseException as exc:
@@ -2870,10 +2870,10 @@ X-GNOME-Autostart-enabled=true
                     self._report([], report_type='scan_error')
                 except Exception:
                     pass
-            if not continuous or not self._running or not self._continuous_scan_requested:
+            if not self._running:
                 break
             time.sleep(1)
-        if continuous and self._continuous_scan_requested and not self._running:
+        if continuous and not self._running:
             self._scan_status = 'stopped'
 
     def _scan_single_file(self, filepath):
