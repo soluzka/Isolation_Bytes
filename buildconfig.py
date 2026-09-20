@@ -306,7 +306,7 @@ def generate_csproj():
     <AssemblyTitle>Isolation Bytes Login</AssemblyTitle>
     <AssemblyProduct>Isolation Bytes</AssemblyProduct>
     <AssemblyCompany>soluzka</AssemblyCompany>
-    <Version>1.8.952.0</Version>
+    <Version>1.8.953.0</Version>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyName>IsolationBytesLogin</AssemblyName>
   </PropertyGroup>
