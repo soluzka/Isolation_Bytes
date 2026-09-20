@@ -371,6 +371,21 @@ class StandaloneAgent:
         """Publish the active scan plus the complete, dashboard-ready result collections."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         scan_state = self._get_yara_scan_state()
+
+        # Conditional Startup and the standalone agent can publish the same
+        # runtime state concurrently. While Conditional Startup is actively
+        # scanning, never let the agent publisher regress the shared scan
+        # counter (for example 16 -> 11).
+        try:
+            conditional_path = runtime_path("conditional_startup_state.json")
+            with open(conditional_path, "r", encoding="utf-8") as handle:
+                conditional_live = json.load(handle)
+            if isinstance(conditional_live, dict) and conditional_live.get("running"):
+                conditional_scanned = int(conditional_live.get("scanned_files") or 0)
+                self._files_scanned = max(int(self._files_scanned), conditional_scanned)
+        except (OSError, ValueError, TypeError):
+            pass
+
         scanner_results = ensure_indicator_results(getattr(self, "_scanner_results", {}) or {})
 
         # Keep collection counts authoritative even if a caller recorded an
