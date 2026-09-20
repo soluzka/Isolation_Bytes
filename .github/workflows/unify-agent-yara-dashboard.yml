@@ -32,4 +32,9 @@ jobs:
           grep -F "Promise.allSettled" templates/yara_scanner.html >/dev/null
           grep -F "fetch('/run_startup'" templates/yara_scanner.html >/dev/null
           test -f cloud/_agent_results_unlimited.py
-          echo "Agent and YARA scan-status integration is present."
+          grep -F "'scanned_files': 0" quick_start.py >/dev/null
+          grep -F "'quarantined_files': 0" quick_start.py >/dev/null
+          grep -F "'blocked_threats': 0" quick_start.py >/dev/null
+          grep -F "Publish the scanner's current-run counters directly" quick_start.py >/dev/null
+          python -m py_compile quick_start.py cloud/cloud_server.py cloud/_agent_results_unlimited.py conditional_startup.py
+          echo "Agent/YARA synchronization and current-generation counter isolation are present."
