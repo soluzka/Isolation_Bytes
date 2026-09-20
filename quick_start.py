@@ -1362,10 +1362,9 @@ def run_conditional_startup_background():
             """Publish current-pass progress to shared state."""
             global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators, latest_errors, latest_ml_detections, latest_process_events, latest_quarantined_files
             nonlocal _last_progress_report
-            now = time.time()
-            if now - _last_progress_report < 0.2:
-                return
-            _last_progress_report = now
+            # Continuous protection publishes every file-entry update immediately.
+            # Do not throttle progress: the dashboard must reflect live counters.
+            _last_progress_report = time.time()
             errors = partial_results.get('errors', [])
             # Publish the scanner's current-run counters directly to the shared dashboard state.
             # These values come from this scan pass rather than persisted historical totals.
@@ -1423,6 +1422,9 @@ def run_conditional_startup_background():
                 'last_error': None,
                 'scan_phase': 'starting',
             })
+        # Publish the initialized runtime JSON before the first file scan starts.
+        # This guarantees the dashboard has a real scan-state document even if
+        # module loading or filesystem access fails afterward.
         _persist_conditional_startup_state()
 
         try:
