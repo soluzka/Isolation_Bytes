@@ -15,7 +15,17 @@ from dotenv import dotenv_values, load_dotenv
 logger = logging.getLogger(__name__)
 
 # --- Base Directory ---
+# Windows endpoint state is always stored in the user's LocalAppData runtime
+# directory. This prevents stale scan/quarantine data from being written next
+# to a moved EXE, source checkout, or deployment directory.
+_WINDOWS_RUNTIME = os.path.abspath(os.path.join(
+    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+    'IsolationBytes'
+))
+
 def get_basedir():
+    if os.name == 'nt':
+        return _WINDOWS_RUNTIME
     if 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
         return os.environ['ANTIVIRUS_RUNTIME_DIR']
     if getattr(sys, 'frozen', False):
@@ -23,6 +33,8 @@ def get_basedir():
     return os.path.dirname(os.path.abspath(__file__))
 
 BASEDIR = get_basedir()
+if os.name == 'nt':
+    os.environ['ANTIVIRUS_RUNTIME_DIR'] = BASEDIR
 
 # Load packaged/source environment files relative to the application instead of
 # relying only on the current working directory. In a frozen onedir build,
@@ -89,8 +101,8 @@ QUARANTINE_FOLDER = os.path.join(
     ),
     'Quarantine'
 )
-FAILED_QUARANTINE_FOLDER = os.path.join(BASEDIR, 'failed_quarantine')
-ENCRYPTED_FOLDER = os.path.join(BASEDIR, 'encrypted')
+FAILED_QUARANTINE_FOLDER = os.path.join(BASEDIR, 'Quarantine', 'failed')
+ENCRYPTED_FOLDER = os.path.join(BASEDIR, 'Quarantine', 'encrypted')
 
 # Ensure folders exist
 for folder in [QUARANTINE_FOLDER, FAILED_QUARANTINE_FOLDER, ENCRYPTED_FOLDER]:
