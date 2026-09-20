@@ -45,28 +45,66 @@ def iter_files(target: str) -> Iterable[str]:
 
 
 def _yara(path: str):
-    """Run every loaded rule; adaptive gating happens after all signals exist."""
+    """Run the complete loaded YARA set without file-count or rule-set early exits."""
     try:
         from security.yara_scanner import load_yara_rules, _classify_filetype
         import warnings
         import yara
         ext = os.path.splitext(path)[1].lower()
-        externals = {"extension": ext, "filename": os.path.basename(path), "filepath": path, "filetype": _classify_filetype(path)}
+        externals = {"extension": ext, "filename": os.path.basename(path),
+                     "filepath": path, "filetype": _classify_filetype(path)}
         matches = []
-        for rule in load_yara_rules():
+        timeout = max(1, int(os.environ.get("YARA_TIMEOUT_SECONDS", "10")))
+        for rule_index, rule in enumerate(load_yara_rules()):
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore", RuntimeWarning)
-                    matches.extend(rule.match(path, timeout=2, externals=externals, fast=True))
+                    matches.extend(rule.match(path, timeout=timeout,
+                                              externals=externals, fast=True))
             except yara.TimeoutError:
-                logging.warning("YARA timeout scanning %s", path)
+                # A slow rule must not prevent later rule sets from scanning the
+                # same file. Continue with the remaining compiled rule sets.
+                logging.warning("YARA timeout scanning %s (rule %d); continuing",
+                                path, rule_index)
                 continue
             except yara.Error as exc:
-                logging.error("YARA rule error scanning %s: %s", path, exc)
+                logging.error("YARA rule error scanning %s (rule %d): %s",
+                              path, rule_index, exc)
         return matches
     except Exception as exc:
         logging.error("YARA failed for %s: %s", path, exc)
         return None
+
+
+def scan_target(target: str, *, quarantine: bool = True) -> List[Dict[str, object]]:
+    """Recursively scan every regular file under *target* with no artificial cap."""
+    results: List[Dict[str, object]] = []
+    scanned = 0
+    errors = 0
+    for path in iter_files(target):
+        try:
+            result = scan_file(path, quarantine=quarantine)
+            result["scan_index"] = scanned
+            results.append(result)
+            scanned += 1
+        except (OSError, PermissionError) as exc:
+            errors += 1
+            results.append({
+                "path": os.path.abspath(path),
+                "status": "scan_error",
+                "error": str(exc),
+            })
+        except Exception as exc:
+            errors += 1
+            logging.exception("Unexpected scan failure for %s", path)
+            results.append({
+                "path": os.path.abspath(path),
+                "status": "scan_error",
+                "error": str(exc),
+            })
+    logging.info("Hardened target scan complete: %s files processed, %s errors",
+                 scanned, errors)
+    return results
 
 
 def _yara_severity(matches) -> str:
