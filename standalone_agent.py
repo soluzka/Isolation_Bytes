@@ -318,6 +318,12 @@ class StandaloneAgent:
         self._total_persistence = 0
         self._total_yara = 0
         self._total_ml = 0
+        self._last_report_ok = False
+        self._last_report_error = ''
+        self._scan_status = 'idle'
+        self._scan_started_at = ''
+        self._scan_id = ''
+        self._scan_progress_reported = 0
         # Initialize the LocalAppData runtime state immediately. The agent
         # must create its JSON state before registration or the first scan so
         # a fresh install never appears to be running with no local state.
@@ -326,12 +332,6 @@ class StandaloneAgent:
             self._get_yara_scan_state()
         except Exception as exc:
             _startup_log(f'[ERROR] Could not initialize scan state: {exc}')
-        self._last_report_ok = False
-        self._last_report_error = ''
-        self._scan_status = 'idle'
-        self._scan_started_at = ''
-        self._scan_id = ''
-        self._scan_progress_reported = 0
         self._continuous_scan_requested = False
         self._continuous_scan_thread = None
         self._scan_lock = threading.Lock()
