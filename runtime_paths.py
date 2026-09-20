@@ -1,7 +1,9 @@
 """Canonical writable runtime paths for Isolation Bytes.
 
-All mutable application state belongs under the per-user LocalAppData directory
-unless ANTIVIRUS_RUNTIME_DIR explicitly overrides it.
+All mutable application state belongs under the per-user LocalAppData directory.
+On Windows this is always %LOCALAPPDATA%\\IsolationBytes so a packaged EXE,
+source checkout, service, or environment override cannot redirect scan state
+or quarantine data into the project/install directory.
 """
 import os
 
@@ -10,10 +12,13 @@ _DEFAULT_RUNTIME = os.path.join(
     "IsolationBytes",
 )
 
-# Resolve the runtime once and publish it before other modules derive state paths.
-RUNTIME_DIR = os.path.abspath(
-    os.path.expandvars(os.environ.get("ANTIVIRUS_RUNTIME_DIR") or _DEFAULT_RUNTIME)
-)
+if os.name == "nt":
+    RUNTIME_DIR = os.path.abspath(_DEFAULT_RUNTIME)
+else:
+    RUNTIME_DIR = os.path.abspath(
+        os.path.expandvars(os.environ.get("ANTIVIRUS_RUNTIME_DIR") or _DEFAULT_RUNTIME)
+    )
+
 os.environ["ANTIVIRUS_RUNTIME_DIR"] = RUNTIME_DIR
 
 try:
