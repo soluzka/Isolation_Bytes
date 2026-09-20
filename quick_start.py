@@ -1244,8 +1244,8 @@ def run_conditional_startup_background():
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         new_counts = {
-            'scanned_files': len(partial_results.get('scanned_files', [])),
-            'quarantined_files': len(partial_results.get('quarantined_files', [])),
+            'scanned_files': 0, [])),
+            'quarantined_files': 0, [])),
             'errors': len(errors),
             'process_events': len(partial_results.get('process_events', [])),
             'ml_detections': len(partial_results.get('ml_detections', [])),
@@ -3590,7 +3590,7 @@ def scan():
     # Mock scan results
     scan_results = {
         'status': 'completed',
-        'scanned_files': 15423,
+        'scanned_files': 0,
         'detected_threats': 0,
         'scan_time': '352.4 seconds',
         'scanned_directories': folder_watcher_state['monitored_paths'] + network_state['monitored_directories'],
