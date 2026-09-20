@@ -266,6 +266,7 @@ class StandaloneAgent:
         self._scan_status = 'idle'
         self._scan_started_at = ''
         self._scan_current_path = ''
+        self._scan_id = ''
         self._scan_progress_reported = 0
         self._scan_lock = threading.Lock()
         self._last_quarantine_error = ''
@@ -2637,6 +2638,7 @@ X-GNOME-Autostart-enabled=true
                 'quarantine_ready': self._quarantine_ready,
                 'last_quarantine_error': self._last_quarantine_error,
                 'last_scan': timestamp,
+                'scan_id': self._scan_id,
                 'scan_dirs': list(self._scan_dirs),
                 'scan_dir_count': len(self._scan_dirs),
                 'scan_status': self._scan_status,
@@ -2698,8 +2700,14 @@ X-GNOME-Autostart-enabled=true
             self._scan_started_at = datetime.datetime.now(
                 datetime.timezone.utc
             ).isoformat()
+            # Every full scan is a new counter generation.  files_scanned is
+            # deliberately a per-run counter, not a lifetime accumulator.
+            self._scan_id = hashlib.sha256(
+                f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
+            ).hexdigest()[:24]
+            self._files_scanned = 0
             self._scan_current_path = ''
-            self._scan_progress_reported = self._files_scanned
+            self._scan_progress_reported = 0
             all_findings = []
             scanned_roots = []
 
