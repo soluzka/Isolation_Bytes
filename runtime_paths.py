@@ -131,6 +131,20 @@ def ensure_runtime_state_files():
         },
     )
     _create_json_if_missing("blocked_files.json", {})
+    _create_json_if_missing(
+        "scheduled_scan_state.json",
+        {
+            "status": "idle",
+            "started_at": None,
+            "last_updated": None,
+            "scanned_files": 0,
+            "quarantined_files": 0,
+            "errors": 0,
+            "findings": [],
+        },
+    )
+    _create_json_if_missing("quarantine_log.json", [])
+    _create_json_if_missing("scan_cache.json", {})
     return RUNTIME_DIR
 
 
