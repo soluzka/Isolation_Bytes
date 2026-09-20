@@ -790,6 +790,51 @@ def yara_scanner_page():
                            rules_info=rules_info,
                            monitored_folders=monitored_folders)
 
+@app.route('/api/scan-directories', methods=['GET'])
+@login_required
+def api_scan_directories():
+    """Read the editable scan-directories configuration used by scanners."""
+    runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
+    runtime_file = os.path.join(runtime_dir, 'scan_directories.txt')
+    resource_file = os.path.join(basedir, 'scan_directories.txt')
+    try:
+        os.makedirs(runtime_dir, exist_ok=True)
+        if not os.path.exists(runtime_file) and os.path.exists(resource_file):
+            shutil.copy2(resource_file, runtime_file)
+        source_file = runtime_file if os.path.exists(runtime_file) else resource_file
+        with open(source_file, 'r', encoding='utf-8') as fh:
+            content = fh.read()
+        return jsonify({'success': True, 'content': content, 'path': source_file})
+    except Exception as exc:
+        logger.exception('Unable to read scan directory configuration')
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/scan-directories', methods=['PUT', 'POST'])
+@login_required
+def api_save_scan_directories():
+    """Save scan directories to the writable runtime directory."""
+    payload = request.get_json(silent=True) or {}
+    content = payload.get('content')
+    if not isinstance(content, str):
+        return jsonify({'success': False, 'error': 'content must be a string'}), 400
+    if '\x00' in content:
+        return jsonify({'success': False, 'error': 'NUL characters are not allowed'}), 400
+    if len(content.splitlines()) > 2000:
+        return jsonify({'success': False, 'error': 'Maximum 2000 lines'}), 400
+    runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
+    runtime_file = os.path.join(runtime_dir, 'scan_directories.txt')
+    try:
+        os.makedirs(runtime_dir, exist_ok=True)
+        temp_file = runtime_file + '.tmp'
+        with open(temp_file, 'w', encoding='utf-8', newline='\n') as fh:
+            fh.write(content.rstrip() + '\n')
+        os.replace(temp_file, runtime_file)
+        return jsonify({'success': True, 'message': 'Scan directories saved. The next scan will use the updated configuration.', 'path': runtime_file})
+    except Exception as exc:
+        logger.exception('Unable to save scan directory configuration')
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
 @app.route('/yara_scan', methods=['POST'])
 def yara_scan():
     """Handle YARA scanning requests"""
