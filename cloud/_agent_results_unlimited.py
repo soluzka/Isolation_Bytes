@@ -34,6 +34,39 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
         current_scan_id = str(
             agent.get("scan_id") or report.get("scan_id") or ""
         )
+        current_status = str(
+            agent.get("scan_status")
+            or report.get("scan_status")
+            or ""
+        ).lower()
+
+        # A cloud worker restart clears the in-memory generation map. If the
+        # connected agent is demonstrably still in the same active scan, recover
+        # that generation from the agent's own scan_id/status instead of
+        # displaying a misleading 0/queued state. Completed historical reports
+        # are deliberately not recovered.
+        if (
+            not active_started
+            and current_scan_id
+            and current_status in {"queued", "scanning"}
+        ):
+            recovered_started = (
+                agent.get("scan_started_at")
+                or report.get("scan_started_at")
+                or report.get("timestamp")
+            )
+            try:
+                active_started = datetime.fromisoformat(
+                    str(recovered_started).replace("Z", "+00:00")
+                ).timestamp()
+            except (TypeError, ValueError, OSError):
+                active_started = time.time()
+            active = {
+                "started_at": active_started,
+                "previous_scan_id": "",
+                "recovered_after_restart": True,
+            }
+
         previous_scan_id = str(active.get("previous_scan_id") or "")
         generation_started = bool(
             active_started
