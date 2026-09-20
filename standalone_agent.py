@@ -2645,6 +2645,9 @@ X-GNOME-Autostart-enabled=true
                 'scan_started_at': self._scan_started_at,
                 'scan_current_path': self._scan_current_path,
                 'scan_complete': self._scan_status == 'complete',
+                'scan_id': self._scan_id,
+                'scan_started_at': self._scan_started_at,
+                'scan_status': self._scan_status,
             }
 
             # Keep each HTTP request well below the server JSON limit while
@@ -2653,9 +2656,7 @@ X-GNOME-Autostart-enabled=true
             if not findings:
                 payloads = [dict(base, findings=[])]
             else:
-                scan_id = hashlib.sha256(
-                    f'{self.device_id}:{timestamp}:{time.time_ns()}'.encode()
-                ).hexdigest()[:24]
+                scan_id = self._scan_id
                 payloads = []
                 total_parts = (len(findings) + chunk_size - 1) // chunk_size
                 for index in range(total_parts):
