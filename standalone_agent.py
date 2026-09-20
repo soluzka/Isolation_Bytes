@@ -325,6 +325,7 @@ class StandaloneAgent:
         self._scan_id = ''
         self._scan_progress_reported = 0
         self._continuous_scan_requested = False
+        self._continuous_scan_thread = None
         self._scan_lock = threading.Lock()
         self._last_quarantine_error = ''
         self._quarantine_ready = False
@@ -2832,12 +2833,25 @@ X-GNOME-Autostart-enabled=true
             self._scan_lock.release()
 
     def _scan_cycle(self, continuous=False):
-        """Run full scans continuously when requested by the cloud dashboard."""
+        """Run full scans continuously until explicitly stopped."""
         while self._running and (not continuous or self._continuous_scan_requested):
-            self._scan_cycle_once(continuous=continuous)
+            try:
+                self._scan_cycle_once(continuous=continuous)
+            except BaseException as exc:
+                # A single scanner exception must never silently kill the
+                # continuous protection thread.
+                self._scan_status = 'scanning' if continuous else 'error'
+                self._last_report_error = str(exc)
+                print(f"[SCAN] Scan pass failed; continuous mode will retry: {exc!r}")
+                try:
+                    self._report([], report_type='scan_error')
+                except Exception:
+                    pass
             if not continuous or not self._running or not self._continuous_scan_requested:
                 break
             time.sleep(1)
+        if continuous and self._continuous_scan_requested and not self._running:
+            self._scan_status = 'stopped'
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
