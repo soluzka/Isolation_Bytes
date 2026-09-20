@@ -100,7 +100,12 @@ HIDDEN_IMPORTS = [
 ]
 
 EXCLUDED_IMPORTS = [
-    "tensorflow", "torch", "torchvision",
+    "tensorflow",
+    "torch",
+    "torchvision",
+    "sentence_transformers",
+    "transformers",
+    "safetensors",
     "matplotlib", "IPython", "ipykernel", "notebook", "pytest",
 ]
 
