@@ -7,6 +7,44 @@ import hashlib
 import json
 import time
 
+# Import ML analyzer for enhanced quarantine analysis
+try:
+    from security.ml_yara_analyzer import get_ml_analyzer
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    logging.warning("ML analyzer not available - quarantine will use basic analysis only")
+
+def _calculate_file_entropy(data):
+    """Calculate Shannon entropy of file data for ML analysis."""
+    if not data:
+        return 0.0
+    
+    # Calculate byte frequency
+    byte_counts = [0] * 256
+    for byte in data:
+        byte_counts[byte] += 1
+    
+    # Calculate entropy
+    entropy = 0.0
+    data_len = len(data)
+    for count in byte_counts:
+        if count > 0:
+            probability = count / data_len
+            entropy -= probability * (probability.bit_length() - 1)
+    
+    return entropy
+
+def _count_suspicious_patterns(matches):
+    """Count suspicious patterns in YARA matches for ML analysis."""
+    suspicious_count = 0
+    for match in matches:
+        rule_name = getattr(match, 'rule', '').lower()
+        # Count rules with suspicious keywords
+        if any(keyword in rule_name for keyword in ['injection', 'hijack', 'obfuscation', 'evasion', 'steal']):
+            suspicious_count += 1
+    return suspicious_count
+
 ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
 from security.secure_memory import SecureBuffer
@@ -387,6 +425,42 @@ def quarantine_file(filepath, reason=''):
                 _matches = _rescan(filepath, timeout=5)
                 if _matches:
                     confirm_malware_hit([getattr(m, 'rule', '') for m in _matches])
+                    
+                    # Apply ML analysis for enhanced threat assessment
+                    if ML_AVAILABLE:
+                        try:
+                            ml_analyzer = get_ml_analyzer()
+                            file_metadata = {
+                                'size': len(data),
+                                'type': os.path.splitext(filepath)[1],
+                                'entropy': _calculate_file_entropy(data),
+                                'suspicious_patterns': _count_suspicious_patterns(_matches)
+                            }
+                            
+                            ml_analysis = ml_analyzer.analyze_threat_level(_matches, file_metadata)
+                            anomaly_detection = ml_analyzer.detect_anomalies(_matches, file_metadata)
+                            
+                            # Log ML analysis results
+                            logging.info(f"ML analysis for quarantined file {filepath}: "
+                                       f"threat_level={ml_analysis.get('threat_level')}, "
+                                       f"confidence={ml_analysis.get('confidence'):.2f}")
+                            
+                            if anomaly_detection.get('anomaly_detected', False):
+                                logging.warning(f"Anomaly detected in quarantined file {filepath}: "
+                                             f"score={anomaly_detection.get('anomaly_score'):.2f}")
+                            
+                            # Update ML model with this quarantined sample
+                            ml_analyzer.update_model(_matches, file_metadata, 'malware', True)
+                            
+                            # Get security recommendations
+                            recommendations = ml_analyzer.get_security_recommendations(ml_analysis)
+                            if recommendations:
+                                logging.info(f"Security recommendations for {filepath}: "
+                                           f"{', '.join(recommendations)}")
+                                
+                        except Exception as ml_error:
+                            logging.error(f"ML analysis failed for quarantined file {filepath}: {ml_error}")
+                            
         except Exception:
             pass
         secure_key.zero_and_unlock()

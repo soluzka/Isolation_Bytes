@@ -8,6 +8,14 @@ import warnings
 import re
 from yara import Error as YaraError, TimeoutError as YaraTimeoutError
 
+# Import ML analyzer for enhanced threat analysis
+try:
+    from security.ml_yara_analyzer import get_ml_analyzer
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+    logging.warning("ML analyzer not available - using rule-based analysis only")
+
 def get_basedir():
     """Get the base directory of the project."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -611,7 +619,35 @@ def scan_file_with_yara(filepath, timeout=None):
                 logging.debug(f"Found {len(all_matches)} low-severity YARA matches in {filepath} (scan time: {scan_time:.2f}s)")
         else:
             logging.info(f"No YARA matches in {filepath} (scan time: {scan_time:.2f}s, timeouts: {timeouts}, errors: {errors})")
-            
+        
+        # Apply ML analysis if available
+        if ML_AVAILABLE and all_matches:
+            try:
+                ml_analyzer = get_ml_analyzer()
+                file_metadata = {
+                    'size': file_size,
+                    'type': _classify_filetype(filepath),
+                    'entropy': _calculate_file_entropy(filepath) if file_size < 10 * 1024 * 1024 else 0,
+                    'suspicious_patterns': _count_suspicious_patterns(all_matches)
+                }
+                
+                ml_analysis = ml_analyzer.analyze_threat_level(all_matches, file_metadata)
+                anomaly_detection = ml_analyzer.detect_anomalies(all_matches, file_metadata)
+                
+                # Attach ML analysis results to matches
+                for match in all_matches:
+                    match._ml_analysis = ml_analysis
+                    match._anomaly_detection = anomaly_detection
+                
+                # Log ML analysis results
+                if ml_analysis.get('ml_analysis', False):
+                    logging.info(f"ML analysis for {filepath}: threat_level={ml_analysis.get('threat_level')}, confidence={ml_analysis.get('confidence'):.2f}")
+                if anomaly_detection.get('anomaly_detected', False):
+                    logging.warning(f"Anomaly detected in {filepath}: score={anomaly_detection.get('anomaly_score'):.2f}")
+                    
+            except Exception as e:
+                logging.error(f"ML analysis failed for {filepath}: {e}")
+        
         return all_matches
         
     except Exception as e:
@@ -654,6 +690,91 @@ def _rule_matches_definitive_keyword(rule_name):
             return True
     return False
 
+
+def categorize_threat(rule_name, metadata=None):
+    """Categorize a YARA rule match into threat categories for better reporting.
+    
+    Args:
+        rule_name: The name of the matched YARA rule
+        metadata: Optional dict of rule metadata (e.g., from rule.meta)
+    
+    Returns:
+        List of threat category strings (e.g., ['webshell', 'powershell'])
+    """
+    categories = []
+    rule_lower = rule_name.lower()
+    
+    # Extract metadata category if available
+    if metadata and hasattr(metadata, 'get'):
+        meta_category = metadata.get('category', '')
+        if meta_category:
+            categories.append(meta_category.lower())
+    
+    # Rule name pattern matching for categorization
+    if any(keyword in rule_lower for keyword in ['webshell', 'backdoor', 'r57', 'c99', 'c100', 'b374k', 'china_chopper']):
+        categories.append('webshell')
+    
+    if any(keyword in rule_lower for keyword in ['powershell', 'ps1', 'invoke-expression', 'iex', 'invoke-command']):
+        categories.append('powershell')
+    
+    if any(keyword in rule_lower for keyword in ['dll', 'hijacking', 'sideloading', 'injection', 'phantom', 'comodo']):
+        categories.append('dll_security')
+    
+    if any(keyword in rule_lower for keyword in ['suspdllownship', 'microsoft_threat', 'defender']):
+        categories.append('microsoft_threat')
+    
+    if any(keyword in rule_lower for keyword in ['c2', 'rat', 'covenant', 'empire', 'powersploit', 'cobalt']):
+        categories.append('c2_rats')
+    
+    if any(keyword in rule_lower for keyword in ['stealer', 'credential', 'password', 'cookie', 'mimikatz']):
+        categories.append('stealer')
+    
+    if any(keyword in rule_lower for keyword in ['malware', 'trojan', 'ransomware', 'miner', 'miner']):
+        categories.append('malware')
+    
+    if any(keyword in rule_lower for keyword in ['persistence', 'evasion', 'anti', 'obfuscation']):
+        categories.append('evasion')
+    
+    # Default generic category if no specific matches
+    if not categories:
+        categories.append('generic')
+    
+    return categories
+
+def _calculate_file_entropy(filepath):
+    """Calculate Shannon entropy of file for ML analysis."""
+    try:
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        if not data:
+            return 0.0
+        
+        # Calculate byte frequency
+        byte_counts = [0] * 256
+        for byte in data:
+            byte_counts[byte] += 1
+        
+        # Calculate entropy
+        entropy = 0.0
+        data_len = len(data)
+        for count in byte_counts:
+            if count > 0:
+                probability = count / data_len
+                entropy -= probability * (probability.bit_length() - 1)
+        
+        return entropy
+    except Exception:
+        return 0.0
+
+def _count_suspicious_patterns(matches):
+    """Count suspicious patterns in YARA matches for ML analysis."""
+    suspicious_count = 0
+    for match in matches:
+        rule_name = getattr(match, 'rule', '').lower()
+        # Count rules with suspicious keywords
+        if any(keyword in rule_name for keyword in ['injection', 'hijack', 'obfuscation', 'evasion', 'steal']):
+            suspicious_count += 1
+    return suspicious_count
 
 def get_match_severity(match):
     """Return the severity string from a yara.Match object's metadata, or empty.
