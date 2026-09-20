@@ -473,6 +473,11 @@ def load_yara_rules():
             return [fallback_rule]
         return []
 
+try:
+    from security import yara_scan_state as _yara_scan_state
+except Exception:
+    _yara_scan_state = None
+
 def scan_file_with_yara(filepath, timeout=None):
     """
     Scan a file using all available YARA rules. 
@@ -483,6 +488,14 @@ def scan_file_with_yara(filepath, timeout=None):
         filepath (str): Path to the file to scan
         timeout (int): Maximum time in seconds to wait for a YARA scan to complete
     """
+    # The YARA backend owns live scan progress. Update it before every file
+    # so callers do not have to infer the current path from findings.
+    if _yara_scan_state is not None:
+        try:
+            _yara_scan_state.begin_file(filepath)
+        except Exception:
+            pass
+
     # Skip files that don't exist
     if not os.path.isfile(filepath):
         logging.warning(f"File does not exist: {filepath}")
