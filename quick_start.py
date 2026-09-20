@@ -931,71 +931,130 @@ _CONDITIONAL_STATE_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'conditional_star
 _SCANNER_RESULTS_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'scanner_results.json')
 
 def _persist_conditional_startup_state():
-    """Atomically publish the current Conditional Startup generation."""
+    """Atomically publish the current Conditional Startup generation.
+
+    The persisted JSON collections are the canonical source of truth. Counter
+    fields are derived from those exact collections so the dashboard cannot
+    disagree with scanner_results.json.
+    """
     try:
         os.makedirs(_CONDITIONAL_STATE_DIR, exist_ok=True)
         with conditional_startup_lock:
             payload = dict(conditional_startup_state)
 
-            # Merge with the previously published history. Indicator evidence
-            # is append-only across scan runs and process restarts.
             previous = {}
             try:
                 if os.path.isfile(_SCANNER_RESULTS_FILE):
                     with open(_SCANNER_RESULTS_FILE, 'r', encoding='utf-8') as handle:
                         previous = json.load(handle) or {}
+                    if isinstance(previous.get('scanner_results'), dict):
+                        previous = previous['scanner_results']
             except (OSError, ValueError, TypeError):
                 previous = {}
 
-            def _append_history(key):
-                current = list(payload.get(key) or [])
-                prior = list(previous.get(key) or [])
-                return prior + current
+            def _merge_unique(prior, current):
+                merged = list(prior or [])
+                seen = {repr(item) for item in merged}
+                for item in list(current or []):
+                    marker = repr(item)
+                    if marker not in seen:
+                        merged.append(item)
+                        seen.add(marker)
+                return merged
 
-            for _key in (
+            # Merge each evidence stream once. Do not append an already
+            # cumulative in-memory collection to itself on every progress tick.
+            for key in (
                 'errors', 'process_events', 'ml_detections',
                 'ransomware_indicators', 'yara_suspicious', 'quarantined_files'
             ):
-                payload[_key] = _append_history(_key)
+                payload[key] = _merge_unique(previous.get(key), payload.get(key))
 
-            merged_persistence = dict(previous.get('persistence_indicators') or {})
-            for _key, _value in dict(payload.get('persistence_indicators') or {}).items():
-                base = str(_key)
-                if base not in merged_persistence:
-                    merged_persistence[base] = _value
-                    continue
-                _idx = 2
-                _candidate = f'{base}#{_idx}'
-                while _candidate in merged_persistence:
-                    _idx += 1
-                    _candidate = f'{base}#{_idx}'
-                merged_persistence[_candidate] = _value
+            previous_persistence = previous.get('persistence_indicators') or {}
+            merged_persistence = dict(previous_persistence) if isinstance(previous_persistence, dict) else {}
+            current_persistence = payload.get('persistence_indicators') or {}
+            if isinstance(current_persistence, dict):
+                for key, value in current_persistence.items():
+                    base = str(key)
+                    if base not in merged_persistence:
+                        merged_persistence[base] = value
+                        continue
+                    if merged_persistence[base] == value:
+                        continue
+                    suffix = 2
+                    candidate = f'{base}#{suffix}'
+                    while candidate in merged_persistence:
+                        suffix += 1
+                        candidate = f'{base}#{suffix}'
+                    merged_persistence[candidate] = value
             payload['persistence_indicators'] = merged_persistence
 
-            # Findings are also historical; never truncate them.
-            payload['findings'] = list(previous.get('findings') or []) + list(payload.get('findings') or [])
+            # Findings are also append-only, but deduplicated so repeated
+            # publication of the same evidence does not inflate the count.
+            payload['findings'] = _merge_unique(previous.get('findings'), payload.get('findings'))
 
-            # Persist every scanner implementation's current counters in one
-            # shared JSON document so all local backends read the same run.
+            def _collection_count(key):
+                value = payload.get(key) or []
+                return len(value) if isinstance(value, (list, tuple, set, dict)) else 0
+
+            persistence_count = 0
+            if isinstance(merged_persistence, dict):
+                persistence_count = sum(
+                    len(value) if isinstance(value, (list, tuple, dict, set)) else 1
+                    for value in merged_persistence.values()
+                )
+
+            # Scanned files are traversal work rather than an indicator
+            # collection, so preserve the highest cumulative traversal count.
+            previous_counts = previous.get('counts') or previous.get('scanner_counters') or {}
+            scanned_files = max(
+                int(previous_counts.get('scanned_files') or previous_counts.get('files_scanned') or 0),
+                int(payload.get('scanned_files') or 0),
+            )
+
+            payload['scanned_files'] = scanned_files
+            payload['quarantined_files'] = list(payload.get('quarantined_files') or [])
+            payload['errors'] = list(payload.get('errors') or [])
+            payload['process_events'] = list(payload.get('process_events') or [])
+            payload['ml_detections'] = list(payload.get('ml_detections') or [])
+            payload['ransomware_indicators'] = list(payload.get('ransomware_indicators') or [])
+            payload['yara_suspicious'] = list(payload.get('yara_suspicious') or [])
+
+            # Every numeric indicator counter is calculated from the exact
+            # collection that is persisted below.
+            payload['quarantined_files_count'] = _collection_count('quarantined_files')
+            payload['errors_count'] = _collection_count('errors')
+            payload['process_events_count'] = _collection_count('process_events')
+            payload['ml_detections_count'] = _collection_count('ml_detections')
+            payload['ransomware_indicators_count'] = _collection_count('ransomware_indicators')
+            payload['persistence_indicators_count'] = persistence_count
+            payload['yara_suspicious_count'] = _collection_count('yara_suspicious')
+
             payload['scanner_counters'] = {
-                'scanned_files': int(payload.get('scanned_files') or 0),
-                'quarantined_files': int(payload.get('quarantined_files') or 0),
-                'errors': int(payload.get('errors') or 0),
-                'process_events': int(payload.get('process_events') or 0),
-                'ml_detections': int(payload.get('ml_detections') or 0),
-                'ransomware_indicators': int(payload.get('ransomware_indicators') or 0),
-                'persistence_indicators': int(payload.get('persistence_indicators') or 0),
-                'yara_suspicious': int(payload.get('yara_suspicious') or 0),
+                'scanned_files': scanned_files,
+                'quarantined_files': payload['quarantined_files_count'],
+                'errors': payload['errors_count'],
+                'process_events': payload['process_events_count'],
+                'ml_detections': payload['ml_detections_count'],
+                'ransomware_indicators': payload['ransomware_indicators_count'],
+                'persistence_indicators': persistence_count,
+                'yara_suspicious': payload['yara_suspicious_count'],
+                'blocked_threats': int(payload.get('blocked_threats') or 0),
             }
+            payload['counts'] = dict(payload['scanner_counters'])
+
             payload['scanner_results'] = {
-                'errors': list(globals().get('latest_errors', []) or []),
-                'process_events': list(globals().get('latest_process_events', []) or []),
-                'ml_detections': list(globals().get('latest_ml_detections', []) or []),
-                'ransomware_indicators': list(globals().get('latest_ransomware_indicators', []) or []),
-                'persistence_indicators': globals().get('latest_persistence_indicators', {}) or {},
-                'yara_suspicious': list(globals().get('latest_yara_suspicious', []) or []),
-                'quarantined_files': list(globals().get('latest_quarantined_files', []) or []),
+                'errors': payload['errors'],
+                'process_events': payload['process_events'],
+                'ml_detections': payload['ml_detections'],
+                'ransomware_indicators': payload['ransomware_indicators'],
+                'persistence_indicators': payload['persistence_indicators'],
+                'yara_suspicious': payload['yara_suspicious'],
+                'quarantined_files': payload['quarantined_files'],
+                'counts': payload['counts'],
+                'scanner_counters': payload['scanner_counters'],
             }
+
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
