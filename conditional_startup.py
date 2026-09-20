@@ -1884,31 +1884,86 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
     # One invocation performs one complete traversal of every monitored folder.
     # Cross-run persistence is handled separately; there is intentionally no
     # "already scanned" set here, so every new run revisits every eligible file.
+    #
+    # os.walk() can block indefinitely on a broken/offline/reparse-pointed
+    # directory. Run each folder enumeration behind a watchdog so a filesystem
+    # stall cannot freeze the entire scan at the last file reached.
+    try:
+        enum_timeout = max(1.0, float(os.environ.get(
+            "CONDITIONAL_DIRECTORY_ENUM_TIMEOUT_SECONDS", "30"
+        )))
+    except (TypeError, ValueError):
+        enum_timeout = 30.0
+
     for folder in monitored_folders:
-            for root, dirs, files in os.walk(folder):
-                if "OneDriveTemp" in root:
+        output.write(f"[TRAVERSAL] START folder: {folder}\\n")
+        entries = queue.Queue(maxsize=1)
+
+        def _enumerate():
+            try:
+                for root, dirs, files in os.walk(folder, topdown=True, followlinks=False):
+                    if "OneDriveTemp" in root:
+                        dirs[:] = []
+                        continue
+                    entries.put(("entry", root, list(dirs), list(files)))
+                entries.put(("done", None, None, None))
+            except Exception as exc:
+                try:
+                    entries.put(("error", None, None, exc), block=False)
+                except Exception:
+                    pass
+
+        worker = threading.Thread(
+            target=_enumerate,
+            name="IsolationBytes-DirectoryEnumerator",
+            daemon=True,
+        )
+        worker.start()
+
+        while True:
+            try:
+                item = entries.get(timeout=enum_timeout)
+            except queue.Empty:
+                message = (
+                    f"directory enumeration watchdog timed out after "
+                    f"{enum_timeout:.1f}s: {folder}"
+                )
+                output.write(f"[WATCHDOG] {message}\\n")
+                from security.indicator_scans import record_error
+                record_error(results, "directory_enum_watchdog", message, folder)
+                break
+
+            kind, root, dirs, files = item
+            if kind == "done":
+                output.write(f"[TRAVERSAL] COMPLETE folder: {folder}\\n")
+                break
+            if kind == "error":
+                output.write(f"[TRAVERSAL ERROR] {dirs}\\n")
+                from security.indicator_scans import record_error
+                record_error(results, "directory_enumeration", dirs, folder)
+                break
+
+            output.write(f"[TRAVERSAL] {root}: {len(files)} file(s)\\n")
+            for filename in files:
+                filepath = os.path.join(root, filename)
+
+                try:
+                    with open(filepath, 'rb'):
+                        pass
+                except (PermissionError, OSError):
+                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
                     continue
 
-                for filename in files:
-                    filepath = os.path.join(root, filename)
-
-                    try:
-                        with open(filepath, 'rb'):
-                            pass
-                    except (PermissionError, OSError):
-                        output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
-                        continue
-
-                    _scan_file_and_record(
-                        filepath,
-                        scan_utils,
-                        yara_scanner,
-                        quarantine_utils,
-                        results,
-                        scanned_file_status,
-                        output,
-                        progress_callback,
-                    )
+                _scan_file_and_record(
+                    filepath,
+                    scan_utils,
+                    yara_scanner,
+                    quarantine_utils,
+                    results,
+                    scanned_file_status,
+                    output,
+                    progress_callback,
+                )
 
     # Return after the full traversal. Continuous mode is implemented by the
     # outer run_conditional_startup_logic() loop, which starts a fresh traversal
