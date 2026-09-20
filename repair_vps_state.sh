@@ -41,12 +41,14 @@ create_json "$APP/trusted_hashes.json" '{}'
 create_json "$APP/yara_rule_reputation.json" '{}'
 create_json "$APP/voice_scan_status.json" '{}'
 create_json "$APP/scheduled_scan_state.json" '{"enabled": false}'
-create_json "$APP/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0}'
+create_json "$APP/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}'
+create_json "$APP/scanner_results.json" '{"scanner_counters": {"scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}, "scanner_results": {"errors": [], "process_events": [], "ml_detections": [], "ransomware_indicators": [], "persistence_indicators": {}, "yara_suspicious": [], "quarantined_files": []}}'
 create_json "$APP/data/scan_cache.json" '{}'
 
 # Ensure the deployed runtime points at the application-owned state directory.
-if [ -f "$APP/.env" ] && ! grep -qE '^ANTIVIRUS_RUNTIME_DIR=' "$APP/.env"; then
-  printf '\nANTIVIRUS_RUNTIME_DIR=%s\n' "$RUNTIME" >> "$APP/.env"
+if [ -f "$APP/.env" ]; then
+  sed -i '/^ANTIVIRUS_RUNTIME_DIR=/d' "$APP/.env"
+  printf 'ANTIVIRUS_RUNTIME_DIR=%s\n' "$RUNTIME" >> "$APP/.env"
 fi
 
 # Validate every state file before restarting the service.
@@ -80,7 +82,9 @@ cd "$APP"
 git fetch --prune origin
 git checkout security-v2
 git reset --hard origin/security-v2
-"$APP/venv/bin/python" -m py_compile quick_start.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
+"$APP/venv/bin/python" -m py_compile quick_start.py conditional_startup.py runtime_paths.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py security/web_auth.py phishing_alerts.py
+"$APP/venv/bin/python" -c "import cloud.cloud_server; print('cloud WSGI import: OK')"
+"$APP/venv/bin/python" -c "import quick_start; print('quick_start import: OK')"
 systemctl restart antivirus-cloud
 systemctl restart nginx
 sleep 3
