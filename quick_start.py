@@ -1267,12 +1267,25 @@ def run_conditional_startup_background():
             except Exception:
                 conditional_startup_state['findings'] = []
 
+    # Start a fresh live generation. Historical findings remain available
+    # through the detail lists, but current-run counters must never inherit
+    # the previous completed conditional-startup scan.
+    run_started = time.strftime('%Y-%m-%d %H:%M:%S')
     with conditional_startup_lock:
         conditional_startup_state.update({
             'running': True,
-            'started_at': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'started_at': run_started,
+            'last_run': run_started,
+            'last_updated': run_started,
             'duration': None,
+            'scanned_files': 0,
+            'quarantined_files': 0,
+            'errors': 0,
+            'process_events': 0,
+            'ml_detections': 0,
+            'ransomware_indicators': 0,
+            'persistence_indicators': 0,
+            'yara_suspicious': 0,
             'last_error': None,
         })
 
