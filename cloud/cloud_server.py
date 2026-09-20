@@ -369,6 +369,19 @@ def conditional_startup_status_api():
 
     conditional = _active_conditional_startup_state()
     if conditional is not None:
-        return jsonify(dict(conditional, status='RUNNING')), 200
-
-    return jsonify(_canonical_yara_agent_state()), 200
+        payload = dict(conditional)
+        payload.setdefault('status', 'RUNNING')
+        payload.setdefault('scan_current_path', '')
+        payload.setdefault('scan_phase', 'scanning')
+    else:
+        payload = _canonical_yara_agent_state()
+        payload.setdefault('status', 'IDLE')
+        payload.setdefault('running', False)
+        payload.setdefault('scanned_files', 0)
+        payload.setdefault('quarantined_files', 0)
+        payload.setdefault('errors', 0)
+        payload.setdefault('scan_current_path', '')
+        payload.setdefault('scan_phase', 'idle')
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response, 200
