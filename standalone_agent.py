@@ -204,9 +204,9 @@ def _is_protected_path(filepath):
             return True
     return False
 SCAN_INTERVAL = 600        # seconds between scans
-MAX_FILES_PER_SCAN = 5000    # full-system scan budget; keeps the agent aligned with dashboard scans
-MAX_SCAN_CYCLE_SECONDS = 600 # allow a full-system scan to run for the dashboard scan window
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_FILES_PER_SCAN = float('inf')  # no artificial file-count ceiling
+MAX_SCAN_CYCLE_SECONDS = float('inf')  # no artificial wall-clock ceiling
+MAX_FILE_SIZE = float('inf')
 AGENT_VERSION = "1.8.950.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
@@ -1837,14 +1837,7 @@ X-GNOME-Autostart-enabled=true
             '.so', '.dylib',
         }
         # Files to always skip (media, logs, crash dumps)
-        SKIP_EXTENSIONS = {
-            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
-            '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv',
-            '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico',
-            '.log', '.evtx', '.evt', '.etl', '.dmp', '.mdmp', '.wer', '.cab',
-            '.txt', '.css', '.map', '.svg', '.woff', '.woff2', '.ttf', '.otf',
-            '.eot', '.pdf' if False else '.pdf',  # keep pdf scannable
-        }
+        SKIP_EXTENSIONS = set()
         # Try the full scanner first
         try:
             base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1918,14 +1911,14 @@ X-GNOME-Autostart-enabled=true
                         all_matches = []
                         for r in rules:
                             try:
-                                m = r.match(filepath, timeout=2, fast=True)
+                                m = r.match(filepath, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
                                 if m:
                                     all_matches.extend(m)
                             except Exception:
                                 pass
                         return all_matches
                     else:
-                        matches = rules.match(filepath, timeout=2, fast=True)
+                        matches = rules.match(filepath, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
                         return matches or []
                 else:
                     with open(filepath, 'rb') as fh:
@@ -1934,14 +1927,14 @@ X-GNOME-Autostart-enabled=true
                         all_matches = []
                         for r in rules:
                             try:
-                                m = r.match(data=data, timeout=2, fast=True)
+                                m = r.match(data=data, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
                                 if m:
                                     all_matches.extend(m)
                             except Exception:
                                 pass
                         return all_matches
                     else:
-                        matches = rules.match(data=data, timeout=2, fast=True)
+                        matches = rules.match(data=data, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
                         return matches or []
             except Exception:
                 return []
@@ -2464,7 +2457,7 @@ X-GNOME-Autostart-enabled=true
 
     def _report(self, findings, report_type='scan'):
         try:
-            # Count findings by type for cumulative counters
+            # Count findings by type for cumulative counters.
             for f in findings:
                 ttype = (f.get('threat_type') or '').lower()
                 self._total_findings += 1
@@ -2476,24 +2469,50 @@ X-GNOME-Autostart-enabled=true
                     self._total_ml += 1
                 elif ttype in ('yara_match', 'blocked') or f.get('rule'):
                     self._total_yara += 1
-            data = {
+
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            base = {
                 'device_id': self.device_id,
                 'type': report_type,
-                'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                'timestamp': timestamp,
                 'files_scanned': self._files_scanned,
                 'quarantined_count': self._quarantined_count,
-                'findings': findings,
             }
-            r = requests.post(f'{self.server_url}/agent/report',
-                              json=data, headers=self._headers,
-                              verify=True, timeout=15)
-            if r.status_code != 200:
-                self._last_report_ok = False
-                self._last_report_error = f'HTTP {r.status_code}: {r.text[:200]}'
+
+            # Keep each HTTP request well below the server JSON limit while
+            # preserving every finding. The cloud reassembles these parts.
+            chunk_size = 40
+            if not findings:
+                payloads = [dict(base, findings=[])]
             else:
-                self._last_report_ok = True
+                scan_id = hashlib.sha256(
+                    f'{self.device_id}:{timestamp}:{time.time_ns()}'.encode()
+                ).hexdigest()[:24]
+                payloads = []
+                total_parts = (len(findings) + chunk_size - 1) // chunk_size
+                for index in range(total_parts):
+                    payloads.append(dict(
+                        base,
+                        findings=findings[index * chunk_size:(index + 1) * chunk_size],
+                        scan_id=scan_id,
+                        scan_part=index,
+                        scan_parts=total_parts,
+                        scan_complete=(index == total_parts - 1),
+                    ))
+
+            all_ok = True
+            for data in payloads:
+                r = requests.post(f'{self.server_url}/agent/report',
+                                  json=data, headers=self._headers,
+                                  verify=True, timeout=30)
+                if r.status_code != 200:
+                    all_ok = False
+                    self._last_report_error = f'HTTP {r.status_code}: {r.text[:200]}'
+                    break
+            self._last_report_ok = all_ok
+            if all_ok:
                 self._last_report_error = ''
-            return r.status_code == 200
+            return all_ok
         except Exception as e:
             self._last_report_ok = False
             self._last_report_error = str(e)
