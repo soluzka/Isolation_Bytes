@@ -1851,16 +1851,6 @@ X-GNOME-Autostart-enabled=true
         except Exception:
             return False, 0.0, '', 'ml_suspicious'
 
-    def _get_yara_scan_state(self):
-        try:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            if base_dir not in sys.path:
-                sys.path.insert(0, base_dir)
-            from security.yara_scan_state import get_state
-            return get_state()
-        except Exception:
-            return {}
-
     def _scan_file_yara(self, filepath):
         """Scan a file with YARA rules if available.
         Tries the full scanner first, falls back to a direct yara.load()
@@ -2627,9 +2617,8 @@ X-GNOME-Autostart-enabled=true
 
     def _report(self, findings, report_type='scan'):
         try:
-            yara_state = self._get_yara_scan_state()
-            yara_current_path = yara_state.get('current_path') or self._scan_current_path
-            yara_status = yara_state.get('status') or self._scan_status
+            yara_current_path = self._scan_current_path
+            yara_status = self._scan_status
             # Count findings by type for cumulative counters.
             for f in findings:
                 ttype = (f.get('threat_type') or '').lower()
@@ -2717,14 +2706,6 @@ X-GNOME-Autostart-enabled=true
         try:
             cycle_start = time.time()
             self._scan_cycle_remaining = MAX_FILES_PER_SCAN
-            try:
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                if base_dir not in sys.path:
-                    sys.path.insert(0, base_dir)
-                from security.yara_scan_state import start_scan as _yara_start_scan
-                _yara_start_scan()
-            except Exception:
-                pass
             self._scan_status = 'scanning'
             self._scan_started_at = datetime.datetime.now(
                 datetime.timezone.utc
@@ -2778,11 +2759,6 @@ X-GNOME-Autostart-enabled=true
 
             self._scan_current_path = ''
             self._scan_status = 'complete' if self._running else 'stopped'
-            try:
-                from security.yara_scan_state import finish_scan as _yara_finish_scan
-                _yara_finish_scan(self._scan_status)
-            except Exception:
-                pass
             if all_findings:
                 print(
                     f"[ALERT] Found {len(all_findings)} threat(s)! "
