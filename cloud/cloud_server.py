@@ -2,6 +2,7 @@
 
 import os
 import time
+from datetime import datetime, timezone
 
 from flask import jsonify, request, session
 
@@ -235,7 +236,6 @@ def _agent_trigger_scan_response():
 
         # Reset the live scan result immediately. The next agent report will
         # populate this record with the new generation's findings/progress.
-        old_report = agent.get('last_report') or {}
         agent['last_report'] = {
             'device_id': device_id,
             'hostname': agent.get('hostname', device_id),
