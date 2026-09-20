@@ -37,7 +37,6 @@ results_lock = threading.RLock()
 scanner_lock = threading.RLock()
 
 # Cooperative stop signal used by the dashboard "Break the cycle" button.
-STOP_EVENT = threading.Event()
 
 def _resolve_critical_directories():
     """Resolve critical system directories, auto-detecting the Windows drive
@@ -298,7 +297,7 @@ def routine_maintenance_and_system_recovery():
                             filepath = os.path.join(root, file)
                             time.sleep(0)  # yield so the Flask server stays responsive
                             try:
-                                scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
+                                scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=None)
                                 if malware_found:
                                     recovery_results["signature_scans"].append({
                                         "file": filepath,
@@ -1720,18 +1719,12 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
     quarantine_utils = modules['quarantine_utils']
 
     for folder in monitored_folders:
-        if STOP_EVENT.is_set():
-            return
         for root, dirs, files in os.walk(folder):
             # Skip OneDriveTemp directories entirely
             if "OneDriveTemp" in root:
                 continue
-            if STOP_EVENT.is_set():
-                return
 
             for filename in files:
-                if STOP_EVENT.is_set():
-                    return
                 filepath = os.path.join(root, filename)
 
                 # Skip files that can't be accessed due to permissions
@@ -1798,7 +1791,6 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
     # Suppress scikit-learn version warnings
     warnings.filterwarnings("ignore", category=UserWarning)
 
-    STOP_EVENT.clear()
 
     output = io.StringIO()
     results = {
@@ -1848,9 +1840,6 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
     # the scheduler, not whether an explicit /run_startup request scans files.
     output.write('[conditional_startup] Running explicit Conditional Startup file scan...\n')
     monitored_folders = _get_monitored_folders(basedir, output)
-    if STOP_EVENT.is_set():
-        results["log"] = output.getvalue()
-        return results
     with ThreadPoolExecutor(max_workers=4) as executor:
         future_process = executor.submit(
             _scan_running_processes_step,
@@ -1877,11 +1866,6 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
             results["log"] = output.getvalue()
             output.write("[conditional_startup] Stop requested: skipping post-scan steps.\n")
             return results
-
-    if STOP_EVENT.is_set():
-        results["log"] = output.getvalue()
-        output.write("[conditional_startup] Stop requested: skipping post-scan steps.\n")
-        return results
 
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
@@ -1956,7 +1940,6 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
         if not continuous:
             break
 
-        STOP_EVENT.clear()
         time.sleep(0.25)
 
     if last_result is None:
