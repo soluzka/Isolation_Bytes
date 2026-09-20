@@ -102,6 +102,7 @@ def _canonical_yara_agent_state():
     ml_detections = 0
     ransomware_indicators = 0
     persistence_indicators = 0
+    blocked_threats = 0
     last_scan = ''
     current_status = 'idle'
     current_started_at = ''
@@ -128,6 +129,9 @@ def _canonical_yara_agent_state():
                     agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
                 ))
                 quarantined_files += current_quarantined
+                blocked_threats += max(0, int(
+                    agent.get('threats_blocked', report.get('threats_blocked', 0)) or 0
+                ))
         else:
             # No server-owned scan generation exists for this agent. Do not
             # display its lifetime heartbeat counters as a new scan.
@@ -223,12 +227,7 @@ def _canonical_yara_agent_state():
         'duration': None,
         'scanned_files': scanned_files,
         'quarantined_files': quarantined_files,
-        'blocked_threats': sum(
-            1 for device_id, agent in agents.items()
-            if _agent_scan_state.get(device_id)
-            for f in (agent.get('last_report') or {}).get('findings', [])
-            if isinstance(f, dict) and f.get('blocked')
-        ),
+        'blocked_threats': blocked_threats,
         'errors': 0,
         'process_events': 0,
         'ml_detections': ml_detections,
