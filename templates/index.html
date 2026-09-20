@@ -989,41 +989,52 @@ if (stopAutoUpdatesBtn) {
                     const originalText = runBtn.textContent;
                     runBtn.textContent = 'Running...';
                     messageDiv.innerHTML = '<p style="color:#b36200;">Scan started — tiles update every 5 seconds as files are scanned...</p>';
-                    fetch('/run_startup', {method: 'POST', credentials: 'include'})
-                        .then(async response => {
+                    // One user action starts both the local Conditional Startup
+                    // scan and the agent-side YARA scan concurrently.
+                    Promise.allSettled([
+                        fetch('/run_startup', {method: 'POST', credentials: 'include'}).then(async response => {
                             const text = await response.text();
-                            let data;
-                            try { data = JSON.parse(text); } catch(e) { data = {}; }
-                            if (response.status === 200 && (data.status === 'started' || data.status === 'already_running')) {
-                                // Scan is running in background — the setInterval below
-                                // will update the tiles live. Re-enable the button once
-                                // the status endpoint reports running:false.
-                                if (data.status === 'already_running') {
-                                    messageDiv.innerHTML = '<p style="color:#b36200;">A scan is already running — watching for updates...</p>';
-                                }
-                                const waitForFinish = setInterval(() => {
-                                    refreshStatus().then(d => {
-                                        if (d && !d.running) {
-                                            clearInterval(waitForFinish);
-                                            runBtn.disabled = false;
-                                            runBtn.textContent = originalText;
-                                            messageDiv.innerHTML = '<p style="color:#27ae60;">Scan complete.</p>';
-                                        }
-                                    }).catch(() => {});
-                                }, 5000);
-                            } else {
-                                messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${htmlEscape((data && (data.message || data.error)) || 'Unknown error')}</div>`;
-                                runBtn.disabled = false;
-                                runBtn.textContent = originalText;
-                            }
+                            let data = {};
+                            try { data = text ? JSON.parse(text) : {}; } catch(e) {}
+                            if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+                            return data;
+                        }),
+                        fetch('/api/agent-trigger-scan', {
+                            method: 'POST',
+                            credentials: 'include',
+                            headers: {'Content-Type': 'application/json'},
+                            body: '{}'
+                        }).then(async response => {
+                            const text = await response.text();
+                            let data = {};
+                            try { data = text ? JSON.parse(text) : {}; } catch(e) {}
+                            if (!response.ok) throw new Error(data.message || data.error || `HTTP ${response.status}`);
+                            return data;
                         })
-                        .catch(error => {
-                            messageDiv.innerHTML = `<div class="alert alert-danger">Error: ${htmlEscape(error.message || error)}</div>`;
-                            runBtn.disabled = false;
-                            runBtn.textContent = originalText;
-                        });
-                };
-            }
+                    ]).then(results => {
+                        const started = results.filter(r => r.status === 'fulfilled');
+                        if (!started.length) throw new Error('Neither scan accepted the request.');
+                        const failed = results.length - started.length;
+                        messageDiv.innerHTML = failed
+                            ? '<p style="color:#b36200;">One scan started; the other reported an error. Check the YARA scanner status.</p>'
+                            : '<p style="color:#27a745;">Conditional Startup and agent YARA started together.</p>';
+                        const waitForFinish = setInterval(() => {
+                            refreshStatus().then(d => {
+                                if (d && !d.running) {
+                                    clearInterval(waitForFinish);
+                                    runBtn.disabled = false;
+                                    runBtn.textContent = originalText;
+                                    messageDiv.innerHTML = failed
+                                        ? '<p style="color:#b36200;">Conditional Startup finished; one scan reported an error.</p>'
+                                        : '<p style="color:#27a745;">Both scans have finished.</p>';
+                                }
+                            }).catch(() => {});
+                        }, 5000);
+                    }).catch(error => {
+                        messageDiv.innerHTML = `<div class="alert alert-danger">Error starting scans: ${htmlEscape(error.message || error)}</div>`;
+                        runBtn.disabled = false;
+                        runBtn.textContent = originalText;
+                    });
 
             if (refreshBtn) {
                 refreshBtn.onclick = refreshStatus;
