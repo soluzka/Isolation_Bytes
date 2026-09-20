@@ -116,12 +116,20 @@ def _canonical_yara_agent_state():
             previous_scan_id = str(scan_state.get('previous_scan_id') or '')
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
             if generation_started:
-                scanned_files += max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
+                # Agent counters can be cumulative across process restarts.  The
+                # server-owned scan generation must expose only work performed
+                # after this trigger, never the legacy counter that existed at
+                # trigger time.
+                current_files = max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
+                baseline_files = max(0, int(scan_state.get('baseline_files_scanned', 0) or 0))
+                scanned_files += max(0, current_files - baseline_files)
                 # Never derive the active scan counter from quarantine history.
                 # Only the current agent generation may contribute quarantined files.
-                quarantined_files += max(0, int(
+                current_quarantined = max(0, int(
                     agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
                 ))
+                baseline_quarantined = max(0, int(scan_state.get('baseline_quarantined', 0) or 0))
+                quarantined_files += max(0, current_quarantined - baseline_quarantined)
         else:
             scanned_files += _live_max(report, agent, 'files_scanned')
             quarantined_files += _live_max(report, agent, 'quarantined_count')
@@ -239,11 +247,15 @@ def _agent_trigger_scan_response():
         # Start every server-side scan generation with its own counters.
         # Do not seed counters from previous quarantine history.
         baseline_quarantined = 0
+        baseline_files_scanned = max(0, int(
+            agent.get('files_scanned', (agent.get('last_report') or {}).get('files_scanned', 0)) or 0
+        ))
         previous_scan_id = str(agent.get('scan_id') or (agent.get('last_report') or {}).get('scan_id') or '')
         _agent_scan_state[device_id] = {
             'started_at': now,
             'report_marker': _agent_report_marker(agent),
             'previous_scan_id': previous_scan_id,
+            'baseline_files_scanned': baseline_files_scanned,
             'baseline_quarantined': baseline_quarantined,
         }
         agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
