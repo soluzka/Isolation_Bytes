@@ -941,6 +941,15 @@ def _persist_conditional_startup_state():
                 'persistence_indicators': int(payload.get('persistence_indicators') or 0),
                 'yara_suspicious': int(payload.get('yara_suspicious') or 0),
             }
+            payload['scanner_results'] = {
+                'errors': list(globals().get('latest_errors', []) or [])[-500:],
+                'process_events': list(payload.get('process_events_list') or [])[-500:],
+                'ml_detections': list(globals().get('latest_ml_detections', []) or [])[-500:],
+                'ransomware_indicators': list(globals().get('latest_ransomware_indicators', []) or [])[-500:],
+                'persistence_indicators': globals().get('latest_persistence_indicators', {}) or {},
+                'yara_suspicious': list(globals().get('latest_yara_suspicious', []) or [])[-500:],
+                'quarantined_files': list(payload.get('quarantined_files_list') or [])[-500:],
+            }
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
@@ -965,6 +974,8 @@ def _refresh_conditional_startup_state():
 latest_yara_suspicious = []  # Full list of YARA suspicious matches from the last conditional startup
 latest_ransomware_indicators = []  # Full list of ransomware heuristic findings from the last conditional startup
 latest_persistence_indicators = {}  # Full persistence findings from the last conditional startup
+latest_errors = []
+latest_ml_detections = []
 
 # -- Continuous Scan All state --
 continuous_scan_state = {
@@ -1316,9 +1327,11 @@ def run_conditional_startup_background():
                 'last_error': str(errors[-1]) if errors else None,
                 'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
             })
-            latest_yara_suspicious = partial_results.get('yara_suspicious', [])
-            latest_ransomware_indicators = partial_results.get('ransomware_indicators', [])
-            latest_persistence_indicators = partial_results.get('persistence_indicators', {})
+            latest_yara_suspicious = list(partial_results.get('yara_suspicious') or [])
+            latest_ransomware_indicators = list(partial_results.get('ransomware_indicators') or [])
+            latest_persistence_indicators = partial_results.get('persistence_indicators', {}) or {}
+            latest_errors = list(partial_results.get('errors') or [])
+            latest_ml_detections = list(partial_results.get('ml_detections') or [])
             try:
                 conditional_startup_state['findings'] = _findings_for_review()
             except Exception:
