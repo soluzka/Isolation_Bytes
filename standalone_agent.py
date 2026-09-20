@@ -30,6 +30,7 @@ from urllib.parse import urlparse, unquote
 import threading
 import json
 import queue
+import logging
 
 # EARLIEST WINDOWS AGENT BOOTSTRAP:
 # Create the LocalAppData runtime JSON state before importing optional scanner
