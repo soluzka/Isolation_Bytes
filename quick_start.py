@@ -1427,6 +1427,8 @@ def run_startup():
             now = time.strftime('%Y-%m-%d %H:%M:%S')
             conditional_startup_state.update({
                 'running': True,
+                'run_id': '',
+                'findings': [],
                 'started_at': now,
                 'last_updated': now,
                 'scanned_files': 0,
@@ -1440,6 +1442,7 @@ def run_startup():
                 'blocked_threats': 0,
                 'duration': None,
                 'last_error': None,
+                'scan_phase': 'starting',
             })
 
         logger.info("Starting conditional startup scan in background")
