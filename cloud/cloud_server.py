@@ -152,12 +152,17 @@ def _canonical_yara_agent_state():
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
             if generation_started:
                 running = agent_status in {'scanning', 'queued'}
-                if agent_status in {'complete', 'stopped'}:
-                    _agent_scan_state.pop(device_id, None)
+                # Keep the generation baseline after completion so the dashboard
+                # continues to expose only this run's counters. The next explicit
+                # scan trigger replaces this state with a fresh baseline.
             elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
                 running = True
             else:
-                _agent_scan_state.pop(device_id, None)
+                # A queued trigger without a scan_id is still the current
+                # generation; retain its zeroed counters until the agent reports
+                # the new scan_id. Only expire a truly abandoned generation.
+                if started and now - started < _AGENT_SCAN_STALE_SECONDS:
+                    running = True
         elif pending_scan:
             running = True
 
