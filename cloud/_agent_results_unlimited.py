@@ -154,7 +154,7 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 "files_scanned": files_scanned,
                 "finding_count": len(findings),
                 "last_scan": last_scan,
-                "findings": findings[:50],
+                "findings": findings,
                 "quarantined_count": quarantined_count,
                 "scan_id": scan_id,
                 "scan_dirs": scan_state.get("scan_dirs")
