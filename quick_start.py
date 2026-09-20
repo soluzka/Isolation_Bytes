@@ -1216,10 +1216,12 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         'yara_suspicious': len(scan_data.get('yara_suspicious') or []),
         'last_error': str(error) if error else last_internal,
     })
+    # Finalize findings from this run only. Do not use setdefault here:
+    # run_startup intentionally initializes findings=[] for every new generation.
     try:
-        conditional_startup_state.setdefault('findings', _findings_for_review())
+        conditional_startup_state['findings'] = _findings_for_review()
     except Exception:
-        pass
+        conditional_startup_state['findings'] = []
 
 
 def run_conditional_startup_background():
