@@ -1333,8 +1333,8 @@ def _check_persistence_indicators_step(results, output, progress_callback=None):
     try:
         from security.persistence_checks import run_all_checks
         findings = run_all_checks()
-        results["persistence_indicators"] = findings
-        total = sum(len(v) for v in findings.values())
+        from security.indicator_scans import record_persistence_indicators
+        total = record_persistence_indicators(results, findings)
         output.write(f"[conditional_startup] Persistence checks found {total} indicator(s).\n")
         if callable(progress_callback):
             try:
@@ -1506,6 +1506,8 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                 record_ransomware_indicator(results, filepath, reason)
         except Exception as ml_exc:
             output.write(f"[INFO] ML/ransomware check skipped for {filepath}: {ml_exc}\n")
+            from security.indicator_scans import record_error
+            record_error(results, "ml_ransomware_check", ml_exc, filepath)
 
 
 def _is_trusted_windows_path(filepath):
@@ -1599,6 +1601,8 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
         except Exception as yara_exc:
             with results_lock:
                 output.write(f"[INFO] YARA scan skipped for {filepath}: {yara_exc}\n")
+                from security.indicator_scans import record_error
+                record_error(results, "yara_scan", yara_exc, filepath)
 
         _run_ml_and_ransomware_checks(filepath, results, output)
 
@@ -1703,7 +1707,6 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 "quarantined": False,
                 "error": str(scan_exc)
             }
-            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
             if callable(progress_callback):
                 progress_callback(results)
 
