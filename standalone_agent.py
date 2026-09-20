@@ -1851,6 +1851,16 @@ X-GNOME-Autostart-enabled=true
         except Exception:
             return False, 0.0, '', 'ml_suspicious'
 
+    def _get_yara_scan_state(self):
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            if base_dir not in sys.path:
+                sys.path.insert(0, base_dir)
+            from security.yara_scan_state import get_state
+            return get_state()
+        except Exception:
+            return {}
+
     def _scan_file_yara(self, filepath):
         """Scan a file with YARA rules if available.
         Tries the full scanner first, falls back to a direct yara.load()
@@ -2649,6 +2659,7 @@ X-GNOME-Autostart-enabled=true
                 'scan_status': self._scan_status,
                 'scan_started_at': self._scan_started_at,
                 'scan_current_path': self._scan_current_path,
+                'yara_scan_state': self._get_yara_scan_state(),
                 'scan_complete': self._scan_status == 'complete',
                 'scan_id': self._scan_id,
                 'scan_started_at': self._scan_started_at,
