@@ -379,7 +379,7 @@
 
             <div class="results" id="results"></div>
             <div class="card" id="yaraScanCounter" aria-live="polite">
-                <strong>YARA Files Scanned:</strong> <span id="yaraFilesScanned">0</span><br><strong>Currently Scanning:</strong> <span id="yaraCurrentPath">Waiting for agent...</span><br><strong>Scan Status:</strong> <span id="yaraScanStatus">idle</span>
+                <strong>YARA Files Scanned:</strong> <span id="yaraFilesScanned">0</span><br><strong>Scan Status:</strong> <span id="yaraScanStatus">idle</span>
             </div>
         </div>
 
@@ -965,13 +965,10 @@
                 );
                 const counter = document.getElementById('yaraFilesScanned');
                 if (counter) counter.textContent = String(totalYaraFiles);
-                const current = document.getElementById('yaraCurrentPath');
                 const scanStatus = document.getElementById('yaraScanStatus');
                 const active = (data.agents || []).find(
                     ag => ag.scan_status === 'scanning' || ag.scan_current_path
                 );
-                if (current) current.textContent =
-                    active && active.scan_current_path ? active.scan_current_path : 'Waiting for agent...';
                 if (scanStatus) scanStatus.textContent =
                     active ? (active.scan_status || 'scanning') : 'idle';
                 const li = document.getElementById('loadingIndicator');
@@ -1023,7 +1020,7 @@
                     }
                     dirsHtml += '</ul></details>';
                 }
-                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Current: <strong style="word-break:break-all;">' + escapeHtml(ag.scan_current_path || 'idle') + '</strong> &middot; Status: <strong>' + escapeHtml(ag.scan_status || 'idle') + '</strong> &middot; Findings: <strong style="color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';">' + (ag.finding_count || 0) + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Status: <strong>' + escapeHtml(ag.scan_status || 'idle') + '</strong> &middot; Findings: <strong style="color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';">' + (ag.finding_count || 0) + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
             }
             el.innerHTML = html;
         }
