@@ -107,6 +107,9 @@ EXCLUDED_IMPORTS = [
     "transformers",
     "safetensors",
     "matplotlib", "IPython", "ipykernel", "notebook", "pytest",
+    # Pydantic 2.13.5 is runtime-optional here; excluding it avoids the
+    # incompatible PyInstaller hook that probes removed Pydantic v1 APIs.
+    "pydantic",
 ]
 
 # ============================================================
