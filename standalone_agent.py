@@ -403,13 +403,13 @@ class StandaloneAgent:
             "scan_phase": "scanning" if self._scan_status not in ("idle", "complete") else self._scan_status,
             "counts": counts,
             "scanner_counters": counts,
-            "errors": list(scanner_results.get("errors", []) or [])[-500:],
-            "process_events": list(scanner_results.get("process_events", []) or [])[-500:],
-            "ml_detections": list(scanner_results.get("ml_detections", []) or [])[-500:],
-            "ransomware_indicators": list(scanner_results.get("ransomware_indicators", []) or [])[-500:],
+            "errors": list(scanner_results.get("errors", []) or []),
+            "process_events": list(scanner_results.get("process_events", []) or []),
+            "ml_detections": list(scanner_results.get("ml_detections", []) or []),
+            "ransomware_indicators": list(scanner_results.get("ransomware_indicators", []) or []),
             "persistence_indicators": dict(scanner_results.get("persistence_indicators", {}) or {}),
-            "yara_suspicious": list(scanner_results.get("yara_suspicious", []) or [])[-500:],
-            "quarantined_files": list(scanner_results.get("quarantined_files", []) or [])[-500:],
+            "yara_suspicious": list(scanner_results.get("yara_suspicious", []) or []),
+            "quarantined_files": list(scanner_results.get("quarantined_files", []) or []),
         }
 
         # Conditional state retains its historical envelope while exposing the
