@@ -163,6 +163,14 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 or [],
                 "scan_status": status,
                 "scan_started_at": started_at,
+                "errors": int(scan_state.get("errors", 0) or 0),
+                "process_events": int(scan_state.get("process_events", 0) or 0),
+                "ransomware_indicators": int(scan_state.get("ransomware_indicators", 0) or 0),
+                "persistence_indicators": int(scan_state.get("persistence_indicators", 0) or 0),
+                "yara_suspicious": int(scan_state.get("yara_suspicious", 0) or 0),
+                "ml_suspicious": int(scan_state.get("ml_suspicious", 0) or 0),
+                "threats_blocked": int(scan_state.get("threats_blocked", 0) or 0),
+                "last_error": scan_state.get("last_error"),
             }
         )
         total_findings += len(findings)
