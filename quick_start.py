@@ -1429,13 +1429,12 @@ def run_conditional_startup_background():
 
         try:
             with scanning_lock:
-                critical_dirs = list(folder_watcher_state.get('monitored_paths', []))
-                if not critical_dirs:
-                    critical_dirs = None
+                # Conditional Startup owns the scan. Do not use folder-watcher
+                # state as the authority for what gets scanned.
                 scan_data = run_conditional_startup_logic(
                     open_browser=False,
                     progress_callback=report_progress,
-                    critical_dirs=critical_dirs,
+                    critical_dirs=None,
                     continuous=True,
                 )
 
