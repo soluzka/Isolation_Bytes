@@ -90,7 +90,9 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Ensure a valid PyInstaller Analysis(excludes=...) entry without using CLI options."""
+    """Ensure Analysis(excludes=...) contains the requested modules."""
+    import ast
+
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -98,11 +100,6 @@ def _ensure_spec_excludes(spec_path, modules):
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
 
     wanted = list(dict.fromkeys(str(m) for m in modules))
-    exclusions = ', '.join(repr(m) for m in wanted)
-
-    # A .spec file is executable Python. Do not pass --exclude-module on the
-    # PyInstaller command line, and do not rewrite hookspath: both approaches
-    # can produce an invalid spec or are rejected by PyInstaller.
     lines = content.splitlines()
     normalized = []
     excludes_found = False
@@ -112,22 +109,38 @@ def _ensure_spec_excludes(spec_path, modules):
         stripped = line.strip()
         if stripped.startswith('excludes=') or stripped.startswith('excludes ='):
             indent = line[:len(line) - len(line.lstrip())]
-            normalized.append(indent + 'excludes=[' + exclusions + '],')
+            existing = []
+            try:
+                value = stripped.split('=', 1)[1].strip().rstrip(',')
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, (list, tuple)):
+                    existing = [str(x) for x in parsed]
+            except (SyntaxError, ValueError):
+                # If an earlier build attempt left a malformed excludes line,
+                # replace only that option with the required safe exclusions.
+                existing = []
+            merged = list(dict.fromkeys(existing + wanted))
+            normalized.append(indent + 'excludes=[' + ', '.join(repr(x) for x in merged) + '],')
             excludes_found = True
             continue
+
         normalized.append(line)
         if stripped.startswith('Analysis('):
             analysis_found = True
-            if not excludes_found:
-                normalized.append('    excludes=[' + exclusions + '],')
 
     if not analysis_found:
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
 
+    if not excludes_found:
+        for i, line in enumerate(normalized):
+            if line.strip().startswith('Analysis('):
+                normalized.insert(i + 1, '    excludes=[' + ', '.join(repr(x) for x in wanted) + '],')
+                break
+
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(chr(10).join(normalized) + chr(10))
 
-    print(f'PyInstaller spec exclusions: {exclusions}')
+    print(f'PyInstaller spec exclusions ensured: {", ".join(wanted)}')
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
