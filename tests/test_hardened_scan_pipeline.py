@@ -28,6 +28,26 @@ class HardenedScanPipelineTests(unittest.TestCase):
         finally:
             os.unlink(path)
 
+
+    @patch('security.hardened_scan_pipeline._ml_confidence', return_value=0.0)
+    @patch('security.hardened_scan_pipeline._yara', return_value=[])
+    def test_static_and_behavioral_evidence_is_exposed(self, _yara, _ml):
+        with tempfile.TemporaryDirectory() as root:
+            path = os.path.join(root, 'encrypted.locked')
+            with open(path, 'wb') as handle:
+                handle.write(
+                    b'vssadmin.exe delete shadows /all /quiet '
+                    b'PowerShell -EncodedCommand AAAA '
+                    b'<?php eval( base64_decode( shell_exec('
+                )
+            result = scan_file(path, quarantine=False)
+            self.assertIn('static_entropy', result)
+            self.assertIn('static_behavioral_signals', result)
+            self.assertIn('yara_behavior', result)
+            self.assertGreater(result['yara_behavior']['ransomware'], 0.0)
+            self.assertGreater(result['code_analysis_score'], 0.0)
+            self.assertGreater(result['threat_score'], 0.0)
+
     @patch('security.hardened_scan_pipeline._ml_confidence', return_value=0.9)
     @patch('security.hardened_scan_pipeline._yara', return_value=[{'severity': 'high'}])
     @patch('quarantine_utils.quarantine_file')
