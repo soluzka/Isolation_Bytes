@@ -347,9 +347,19 @@ def build_agent():
         return False
 
     exe = DIST_DIR / "IsolationBytesAgent.exe"
+    # The agent spec is intentionally one-file so the launcher can place a
+    # single executable beside the login EXE. Keep a compatibility fallback
+    # for older onedir builds left in dist/ by previous versions.
     if not exe.exists():
-        print("ERROR: IsolationBytesAgent.exe not found in dist/")
-        return False
+        onedir_exe = DIST_DIR / "IsolationBytesAgent" / "IsolationBytesAgent.exe"
+        if onedir_exe.exists():
+            shutil.copy2(onedir_exe, exe)
+            print(f"  OK: copied legacy onedir agent to {exe}")
+        else:
+            print("ERROR: IsolationBytesAgent.exe was not produced by PyInstaller")
+            print(f"  Expected: {exe}")
+            print(f"  Build log: {PROJECT_ROOT / 'agent-build.log'}")
+            return False
     print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
     return True
 
