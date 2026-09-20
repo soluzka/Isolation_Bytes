@@ -126,61 +126,32 @@ def _contain(path: str, reason: str) -> tuple[bool, str]:
             return False, str(exc)
 
 
-def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
-    """Scan one file; broad rules are weak evidence until independently corroborated."""
-    path = os.path.abspath(path)
-    research_asset = _is_security_rule_asset(path)
-    evidence = analyze_file(path)
-    static = analyze_static_file(path)
-    all_matches = _yara(path) or []
-    ml_confidence = _ml_confidence(path, yara_matches=all_matches)
-    ml_available = _ml_available()
-
-    # Correlate independent static-analysis helpers with the behavioral
-    # detector. Entropy/import evidence is never proof by itself.
-    static_signals = static.get("behavioral_signals", {})
-    static_score = 0.0
+def _static_score(static_signals) -> float:
+    score = 0.0
     for value in static_signals.values():
         try:
-            static_score = max(static_score, float(value) * 100.0)
+            score = max(score, float(value) * 100.0)
         except (TypeError, ValueError):
             continue
+    return score
 
+
+def _correlated_behavior(evidence, path):
     behavior = behavior_signals(
         events=[path],
         persistence_values=[path, *evidence.indicators],
     )
-    correlated_behavior = dict(evidence.categories)
-    if behavior.get("ransomware", 0.0) > 0:
-        correlated_behavior["ransomware_behavior"] = behavior["ransomware"]
-    if behavior.get("persistence", 0.0) > 0:
-        correlated_behavior["persistence_behavior"] = behavior["persistence"]
+    categories = dict(evidence.categories)
+    for name in ("ransomware", "persistence"):
+        if behavior.get(name, 0.0) > 0:
+            categories[f"{name}_behavior"] = behavior[name]
+    return behavior, categories
 
-    # Broad/noisy rules are still executed and retained. They only become
-    # decision-grade when independent behavior/ML evidence supports them.
-    from security.adaptive_yara_gate import filter_for_decision, explain
-    decision_matches = filter_for_decision(
-        all_matches,
-        behavioral_score=evidence.score,
-        ml_confidence=ml_confidence,
-        code_analysis_score=static_score,
-        confirmed=evidence.suspicious,
-    )
-    yara_severity = _yara_severity(decision_matches)
 
-    # Dynamic reputation learns from outcomes. A clean/unconfirmed file makes
-    # repeated broad matches more suppressible; confirmed malware immediately
-    # gives matching rules a chance to return to the active set.
-    if evidence.suspicious:
-        from security.adaptive_yara_gate import record_confirmed_malware
-        record_confirmed_malware(all_matches)
-    elif all_matches:
-        from security.adaptive_yara_gate import record_clean_matches
-        record_clean_matches(all_matches)
-
+def _threat_assessment(path, yara_severity, decision_matches, ml_confidence, static_score, evidence, behavior):
     try:
         from threat_level_engine import score_threat
-        threat = score_threat(
+        return score_threat(
             path,
             yara_severity=yara_severity,
             yara_matches=decision_matches,
@@ -194,65 +165,25 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
             confirmed=evidence.suspicious,
         )
     except Exception:
-        threat = {"level": yara_severity or "low", "score": 0.0}
+        return {"level": yara_severity or "low", "score": 0.0}
 
+
+def _scan_decisions(evidence, yara_severity, ml_confidence, static_score, threat):
     decision = quarantine_decision(
-        evidence,
-        yara_severity=yara_severity,
-        ml_confidence=ml_confidence,
-        code_analysis_score=static_score,
-        threat_score=threat.get("score", 0.0),
+        evidence, yara_severity=yara_severity, ml_confidence=ml_confidence,
+        code_analysis_score=static_score, threat_score=threat.get("score", 0.0),
         antivirus_confirmed=False,
     )
-    independent_decision = (
-        quarantine_decision(
-            evidence,
-            yara_severity="",
-            ml_confidence=ml_confidence,
-            code_analysis_score=static_score,
-            threat_score=threat.get("score", 0.0),
-            antivirus_confirmed=False,
-        )
-        if research_asset else decision
-    )
+    research = _is_security_rule_asset(evidence.path)
+    independent = quarantine_decision(
+        evidence, yara_severity="", ml_confidence=ml_confidence,
+        code_analysis_score=static_score, threat_score=threat.get("score", 0.0),
+        antivirus_confirmed=False,
+    ) if research else decision
+    return decision, independent, research
 
-    rule_stats = explain(all_matches)
-    result: Dict[str, object] = {
-        "path": path,
-        "sha256": evidence.sha256,
-        "size": evidence.size,
-        "extension": evidence.extension,
-        "magic": evidence.magic,
-        "entropy": evidence.entropy,
-        "static_entropy": static.get("entropy", {}),
-        "suspicious_strings": static.get("strings", []),
-        "pe_imports": static.get("imports", {}),
-        "printable_ratio": evidence.printable_ratio,
-        "behavioral_score": evidence.score,
-        "behavioral_confidence": evidence.confidence,
-        "behavioral_categories": correlated_behavior,
-        "yara_behavior": behavior,
-        "static_behavioral_signals": static_signals,
-        "code_analysis_score": static_score,
-        "indicators": evidence.indicators,
-        "yara_severity": yara_severity,
-        "yara_matches": len(decision_matches),
-        "yara_matches_observed": len(all_matches),
-        "yara_broad_matches": rule_stats["broad"],
-        "yara_suppressed_matches": rule_stats["suppressed"],
-        "ml_confidence": ml_confidence,
-        "ml_available": ml_available,
-        "ml_role": "corroborating_evidence" if ml_available else "unavailable_no_model_verdict",
-        "threat_level": threat.get("level", "low"),
-        "threat_score": threat.get("score", 0.0),
-        "server_context": evidence.server_context,
-        "security_research_asset": research_asset,
-        "research_asset_yara_only": bool(research_asset and decision["quarantine"] and not independent_decision["quarantine"]),
-        "quarantine": False,
-        "quarantine_verified": False,
-        "status": "clean_or_uncorroborated",
-    }
 
+def _finish_containment(result, path, quarantine, independent_decision, evidence, all_matches, research_asset):
     if quarantine and independent_decision["quarantine"]:
         ok, method = _contain(path, "corroborated multi-signal malware detection")
         result["quarantine"] = ok
@@ -266,17 +197,60 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     return result
 
 
-def scan_target(target: str, *, quarantine: bool = True) -> List[Dict[str, object]]:
-    results: List[Dict[str, object]] = []
-    target = os.path.abspath(target)
-    if not os.path.exists(target):
-        return [{"path": target, "status": "scan_error", "error": "target does not exist"}]
-    for path in iter_files(target):
-        try:
-            results.append(scan_file(path, quarantine=quarantine))
-        except (PermissionError, OSError) as exc:
-            results.append({"path": path, "status": "scan_error", "error": str(exc)})
-        except Exception as exc:
-            logging.exception("Unexpected scan failure for %s", path)
-            results.append({"path": path, "status": "scan_error", "error": str(exc)})
-    return results
+def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
+    """Scan one file; broad rules are weak evidence until independently corroborated."""
+    path = os.path.abspath(path)
+    research_asset = _is_security_rule_asset(path)
+    evidence = analyze_file(path)
+    static = analyze_static_file(path)
+    all_matches = _yara(path) or []
+    ml_confidence = _ml_confidence(path, yara_matches=all_matches)
+    ml_available = _ml_available()
+    static_signals = static.get("behavioral_signals", {})
+    static_score = _static_score(static_signals)
+    behavior, correlated_behavior = _correlated_behavior(evidence, path)
+
+    from security.adaptive_yara_gate import filter_for_decision, explain
+    decision_matches = filter_for_decision(
+        all_matches, behavioral_score=evidence.score, ml_confidence=ml_confidence,
+        code_analysis_score=static_score, confirmed=evidence.suspicious,
+    )
+    yara_severity = _yara_severity(decision_matches)
+
+    if evidence.suspicious:
+        from security.adaptive_yara_gate import record_confirmed_malware
+        record_confirmed_malware(all_matches)
+    elif all_matches:
+        from security.adaptive_yara_gate import record_clean_matches
+        record_clean_matches(all_matches)
+
+    threat = _threat_assessment(
+        path, yara_severity, decision_matches, ml_confidence, static_score, evidence, behavior
+    )
+    decision, independent_decision, research_asset = _scan_decisions(
+        evidence, yara_severity, ml_confidence, static_score, threat
+    )
+    rule_stats = explain(all_matches)
+    result = {
+        "path": path, "sha256": evidence.sha256, "size": evidence.size,
+        "extension": evidence.extension, "magic": evidence.magic, "entropy": evidence.entropy,
+        "static_entropy": static.get("entropy", {}), "suspicious_strings": static.get("strings", []),
+        "pe_imports": static.get("imports", {}), "printable_ratio": evidence.printable_ratio,
+        "behavioral_score": evidence.score, "behavioral_confidence": evidence.confidence,
+        "behavioral_categories": correlated_behavior, "yara_behavior": behavior,
+        "static_behavioral_signals": static_signals, "code_analysis_score": static_score,
+        "indicators": evidence.indicators, "yara_severity": yara_severity,
+        "yara_matches": len(decision_matches), "yara_matches_observed": len(all_matches),
+        "yara_broad_matches": rule_stats["broad"], "yara_suppressed_matches": rule_stats["suppressed"],
+        "ml_confidence": ml_confidence, "ml_available": ml_available,
+        "ml_role": "corroborating_evidence" if ml_available else "unavailable_no_model_verdict",
+        "threat_level": threat.get("level", "low"), "threat_score": threat.get("score", 0.0),
+        "server_context": evidence.server_context, "security_research_asset": research_asset,
+        "research_asset_yara_only": bool(research_asset and decision["quarantine"] and not independent_decision["quarantine"]),
+        "quarantine": False, "quarantine_verified": False, "status": "clean_or_uncorroborated",
+    }
+    return _finish_containment(
+        result, path, quarantine, independent_decision, evidence, all_matches, research_asset
+    )
+
+
