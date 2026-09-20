@@ -952,7 +952,7 @@
         // Poll the same authoritative API during a scan so YARA's
         // counter advances with the agent instead of remaining at its old value.
         if (!window.__yaraScanCounterTimer) {
-            window.__yaraScanCounterTimer = setInterval(fetchAgentScanResults, 1000);
+            window.__yaraScanCounterTimer = setInterval(fetchAgentScanResults, 2000);
         }
 
         function renderAgentScanResults(data) {
