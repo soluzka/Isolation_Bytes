@@ -2627,6 +2627,9 @@ X-GNOME-Autostart-enabled=true
 
     def _report(self, findings, report_type='scan'):
         try:
+            yara_state = self._get_yara_scan_state()
+            yara_current_path = yara_state.get('current_path') or self._scan_current_path
+            yara_status = yara_state.get('status') or self._scan_status
             # Count findings by type for cumulative counters.
             for f in findings:
                 ttype = (f.get('threat_type') or '').lower()
@@ -2656,7 +2659,8 @@ X-GNOME-Autostart-enabled=true
                 'scan_id': self._scan_id,
                 'scan_dirs': list(self._scan_dirs),
                 'scan_dir_count': len(self._scan_dirs),
-                'scan_status': self._scan_status,
+                'scan_status': yara_status,
+                'scan_current_path': yara_current_path,
                 'scan_started_at': self._scan_started_at,
                 'scan_current_path': self._scan_current_path,
                 'yara_scan_state': self._get_yara_scan_state(),
