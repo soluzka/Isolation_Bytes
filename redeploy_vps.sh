@@ -187,7 +187,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=/opt/antivirus-server
-ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 -b 127.0.0.1:5002 cloud.cloud_server:app
+ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 cloud.cloud_server:app
 Restart=always
 RestartSec=5
 Environment=PYTHONPATH=/opt/antivirus-server
@@ -204,6 +204,7 @@ systemctl restart antivirus-cloud
 sleep 2
 systemctl is-active antivirus-cloud
 systemctl is-active nginx
+systemctl is-enabled antivirus-cloud
 
 # Verify the origin directly before declaring the deployment healthy.
 echo ""
