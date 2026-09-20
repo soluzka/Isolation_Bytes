@@ -96,7 +96,7 @@ print(f"Validated {len(files)} JSON state files")
 PY
 "$APP/venv/bin/python" -m py_compile quick_start.py conditional_startup.py runtime_paths.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py security/web_auth.py phishing_alerts.py
 "$APP/venv/bin/python" -c "import cloud.cloud_server; print('cloud WSGI import: OK')"
-"$APP/venv/bin/python" -c "import quick_start; print('quick_start import: OK')"
+"$APP/venv/bin/python" -c "import wsgi; assert wsgi.application is not None; print('WSGI application import: OK')"
 systemctl restart antivirus-cloud
 systemctl restart nginx
 sleep 3
@@ -115,6 +115,12 @@ fi
 
 echo "Origin checks:"
 curl -fsS --max-time 10 -o /dev/null -w '  / -> HTTP %{http_code}\n' http://127.0.0.1:5002/ || true
+curl -fsS --max-time 10 -o /dev/null -w '  /api/config -> HTTP %{http_code}\n' http://127.0.0.1:5002/api/config || true
+if ! ss -ltn | grep -q '127.0.0.1:5002'; then
+  echo "ERROR: antivirus-cloud is not listening on 127.0.0.1:5002"
+  journalctl -u antivirus-cloud -n 120 --no-pager
+  exit 1
+fi
 curl -fsS --max-time 10 -o /dev/null -w '  /api/config -> HTTP %{http_code}\n' http://127.0.0.1:5002/api/config || true
 
 echo "Deployment state repair complete."
