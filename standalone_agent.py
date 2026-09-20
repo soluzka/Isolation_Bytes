@@ -270,6 +270,7 @@ class StandaloneAgent:
         self._scan_started_at = ''
         self._scan_id = ''
         self._scan_progress_reported = 0
+        self._continuous_scan_requested = False
         self._scan_lock = threading.Lock()
         self._last_quarantine_error = ''
         self._quarantine_ready = False
@@ -871,6 +872,7 @@ class StandaloneAgent:
             return
         if action == 'scan_now':
             print("[CMD] Scan triggered from cloud dashboard — starting continuous scan")
+            self._continuous_scan_requested = True
             if self._scan_lock.locked():
                 print("[CMD] Scan request ignored because a scan is already running")
                 return
@@ -883,6 +885,7 @@ class StandaloneAgent:
             return
         if action == 'stop_scan':
             print("[CMD] Continuous scan stop requested")
+            self._continuous_scan_requested = False
             self._scan_status = 'stopping'
             return
         if action == 'scan_file':
@@ -2781,9 +2784,9 @@ X-GNOME-Autostart-enabled=true
 
     def _scan_cycle(self, continuous=False):
         """Run full scans continuously when requested by the cloud dashboard."""
-        while self._running:
+        while self._running and (not continuous or self._continuous_scan_requested):
             self._scan_cycle_once(continuous=continuous)
-            if not continuous or not self._running:
+            if not continuous or not self._running or not self._continuous_scan_requested:
                 break
             time.sleep(1)
 
