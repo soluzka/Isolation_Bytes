@@ -1271,8 +1271,13 @@ def run_conditional_startup_background():
     # through the detail lists, but current-run counters must never inherit
     # the previous completed conditional-startup scan.
     run_started = time.strftime('%Y-%m-%d %H:%M:%S')
+    run_id = hashlib.sha256(
+        f'{run_started}:{time.time_ns()}'.encode()
+    ).hexdigest()[:24]
     with conditional_startup_lock:
         conditional_startup_state.update({
+            'run_id': run_id,
+            'findings': [],
             'running': True,
             'started_at': run_started,
             'last_run': run_started,
