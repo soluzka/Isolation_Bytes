@@ -1471,13 +1471,13 @@ def run_conditional_startup_background():
                 })
             _persist_conditional_startup_state()
 
-        # Brief yield between full passes. The next pass starts automatically.
-        for _ in range(2):
-            if STOP_EVENT.is_set():
-                break
-            time.sleep(1)
+        # Brief yield between full passes. The next pass always starts.
+        # Do not consult STOP_EVENT here: continuous protection is indefinite.
+        time.sleep(2)
 
-    # Explicit stop is the only normal exit from the continuous worker.
+    # This point is unreachable during normal continuous protection. Keep the
+    # state finalization only as a defensive fallback if the Python process is
+    # being torn down.
     with conditional_startup_lock:
         conditional_startup_state.update({
             'running': False,
