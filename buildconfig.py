@@ -416,23 +416,26 @@ def main():
     args = set(sys.argv[1:])
     do_clean = "--clean" in args
 
-    # If specific flags given, only build those
-    if "--cloud" in args or "--launcher" in args:
+    # If specific flags are given, only build those targets.
+    if "--cloud" in args or "--agent" in args or "--launcher" in args:
         build_cloud = "--cloud" in args
+        build_agent_flag = "--agent" in args
         build_launcher_flag = "--launcher" in args
     else:
         build_cloud = True
+        build_agent_flag = True
         build_launcher_flag = True
 
-    print(f"\n{'='*60}")
+    print(f"\\n{'='*60}")
     print(f"  BUILD CONFIGURATION")
     print(f"{'='*60}")
-    print(f"  Project:       {PROJECT_ROOT}")
-    print(f"  Output:        {DIST_DIR}")
-    print(f"  PUBLIC_URL:    {PUBLIC_URL}")
-    print(f"  Build cloud:   {build_cloud}")
+    print(f"  Project:        {PROJECT_ROOT}")
+    print(f"  Output:         {DIST_DIR}")
+    print(f"  PUBLIC_URL:     {PUBLIC_URL}")
+    print(f"  Build cloud:    {build_cloud}")
+    print(f"  Build agent:    {build_agent_flag}")
     print(f"  Build launcher: {build_launcher_flag}")
-    print(f"  Order:         cloud_server.exe first, then launcher embeds it")
+    print(f"  Order:          cloud_server.exe, agent, then launcher")
 
     if do_clean:
         clean()
@@ -442,16 +445,18 @@ def main():
     ok = True
     if build_cloud:
         ok = build_cloud_server() and ok
+    if build_agent_flag:
+        ok = build_agent() and ok
     if build_launcher_flag:
-        ok = build_launcher() and ok  # No longer requires cloud_server.exe
+        ok = build_launcher() and ok
 
-    print(f"\n{'='*60}")
+    print(f"\\n{'='*60}")
     if ok:
         print("  BUILD COMPLETE")
         print(f"{'='*60}")
         for f in sorted(DIST_DIR.glob("*.exe")):
             print(f"  {f.name:40s} {f.stat().st_size / 1048576:>8.1f} MB")
-        print(f"\n  IsolationBytesLogin.exe is a thin client:")
+        print(f"\\n  IsolationBytesLogin.exe is a thin client:")
         print(f"    - Loads login page from {PUBLIC_URL}")
         print(f"    - Validates license via POST /api/license/validate")
         print(f"    - Authenticates via POST /api/user/login")
@@ -463,6 +468,3 @@ def main():
         print(f"{'='*60}")
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    main()
