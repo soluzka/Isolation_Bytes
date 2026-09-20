@@ -344,6 +344,13 @@ class StandaloneAgent:
             "persistence_indicators": int(self._total_persistence),
             "yara_suspicious": int(self._total_yara),
             "ml_suspicious": int(self._total_ml),
+            "errors": int(indicator_counts(getattr(self, "_scanner_results", {}) or {}).get("errors", 0)),
+            "process_events": int(indicator_counts(getattr(self, "_scanner_results", {}) or {}).get("process_events", 0)),
+            "last_error": (
+                (getattr(self, "_scanner_results", {}) or {}).get("errors", [])[-1]
+                if (getattr(self, "_scanner_results", {}) or {}).get("errors")
+                else None
+            ),
             "scan_dirs": list(self._scan_dirs),
             "next_scan_starts_at_beginning": True,
         }
