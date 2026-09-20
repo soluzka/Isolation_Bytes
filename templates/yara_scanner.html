@@ -1185,44 +1185,72 @@
             const btn = this;
             const status = document.getElementById('scanTriggerStatus');
 
-            // This button controls ONE authoritative agent scan generation.
-            // Do not start Conditional Startup or any second scan here.
+            // Full System Scan intentionally starts BOTH engines together.
+            // Do not treat either engine finishing as the end of the other.
             if (scanAllInterval) {
                 clearInterval(scanAllInterval);
                 scanAllInterval = null;
                 btn.textContent = 'Run Full System Scan (Agent PC)';
                 document.getElementById('loadingIndicator').style.display = 'none';
-                if (status) status.innerHTML = '<p>Scan stopped. Results shown below.</p>';
+                if (status) status.innerHTML = '<p>Stop requested. Both scan engines will stop independently.</p>';
+                fetch('/api/conditional_startup/stop', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: '{}'
+                }).catch(() => {});
                 return;
             }
 
             btn.disabled = true;
-            btn.textContent = 'Triggering agent scan...';
+            btn.textContent = 'Triggering both scan engines...';
             document.getElementById('loadingIndicator').style.display = 'block';
-            if (status) status.innerHTML = '<p>Sending scan command to agent(s)...</p>';
+            if (status) status.innerHTML = '<p>Starting Conditional Startup and agent YARA simultaneously...</p>';
 
-            fetch('/api/agent-trigger-scan', {
-                method: 'POST',
-                credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: '{}'
-            }).then(async response => {
-                const text = await response.text();
-                let data = {};
-                try { data = text ? JSON.parse(text) : {}; } catch (e) {}
-                if (!response.ok) {
-                    throw new Error(data.message || data.error || `Scan request failed (${response.status})`);
+            Promise.allSettled([
+                fetch('/run_startup', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: '{}'
+                }),
+                fetch('/api/agent-trigger-scan', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: '{}'
+                })
+            ]).then(async results => {
+                const failures = [];
+                for (const result of results) {
+                    if (result.status === 'rejected') {
+                        failures.push(result.reason?.message || String(result.reason));
+                        continue;
+                    }
+                    const response = result.value;
+                    const text = await response.text();
+                    let data = {};
+                    try { data = text ? JSON.parse(text) : {}; } catch (e) {}
+                    if (!response.ok) {
+                        failures.push(data.message || data.error || `HTTP ${response.status}`);
+                    }
                 }
                 btn.disabled = false;
                 btn.textContent = 'Stop Scanning';
-                if (status) status.innerHTML =
-                    '<p style="color:#28a745;">Agent scan started. The same scan generation will continue until explicitly stopped.</p>';
+                document.getElementById('loadingIndicator').style.display = 'block';
+                if (status) {
+                    status.innerHTML = failures.length === 2
+                        ? '<p style="color:#dc3545;">Neither scan engine started: ' + escapeHtml(failures.join('; ')) + '</p>'
+                        : failures.length
+                            ? '<p style="color:#b36200;">One scan engine started; the other reported an error. The active scan will continue.</p>'
+                            : '<p style="color:#28a745;">Both scan engines started simultaneously and will run independently until stopped.</p>';
+                }
                 fetchAgentScanResults();
                 scanAllInterval = setInterval(fetchAgentScanResults, 5000);
             }).catch(function(error) {
                 document.getElementById('loadingIndicator').style.display = 'none';
-                document.getElementById('results').innerHTML = '<div class="alert">Failed to trigger scan: ' + escapeHtml(error.message || error) + '</div>';
-                if (status) status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scan.</p>';
+                document.getElementById('results').innerHTML = '<div class="alert">Failed to trigger scans: ' + escapeHtml(error.message || error) + '</div>';
+                if (status) status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scan engines.</p>';
                 btn.disabled = false;
                 btn.textContent = 'Run Full System Scan (Agent PC)';
             });
