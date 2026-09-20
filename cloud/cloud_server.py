@@ -129,8 +129,11 @@ def _canonical_yara_agent_state():
                 ))
                 quarantined_files += current_quarantined
         else:
-            scanned_files += _live_max(report, agent, 'files_scanned')
-            quarantined_files += _live_max(report, agent, 'quarantined_count')
+            # No server-owned scan generation exists for this agent. Do not
+            # display its lifetime heartbeat counters as a new scan.
+            # Those counters are exactly what caused old totals such as
+            # 8,204 scanned / 1,614 quarantined to reappear on a fresh run.
+            pass
         marker = _agent_report_marker(agent)
         agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
         agent_started = agent.get('scan_started_at') or report.get('scan_started_at') or ''
@@ -233,6 +236,50 @@ def _canonical_yara_agent_state():
         'scan_status': current_status,
         'scan_started_at': current_started_at,
     }
+
+
+def _conditional_startup_status_response():
+    """Return only the current server-owned scan generation.
+    
+    The legacy cloud route aggregates lifetime agent counters after a scan,
+    which makes a fresh dashboard run start with historical totals. The
+    cloud wrapper is the canonical dashboard API, so it must never fall back
+    to those lifetime values.
+    """
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error',
+                        'message': 'Authentication required',
+                        'error': 'Authentication required'}), 401
+
+    state = _canonical_yara_agent_state()
+    return jsonify({
+        'ok': True,
+        'success': True,
+        'status': 'running' if state.get('running') else 'idle',
+        'running': bool(state.get('running')),
+        'started_at': state.get('started_at'),
+        'last_run': state.get('last_run'),
+        'last_updated': state.get('last_updated'),
+        'duration': state.get('duration'),
+        'scanned_files': int(state.get('scanned_files') or 0),
+        'quarantined_files': int(state.get('quarantined_files') or 0),
+        'errors': int(state.get('errors') or 0),
+        'process_events': int(state.get('process_events') or 0),
+        'ml_detections': int(state.get('ml_detections') or 0),
+        'ransomware_indicators': int(state.get('ransomware_indicators') or 0),
+        'persistence_indicators': int(state.get('persistence_indicators') or 0),
+        'yara_suspicious': int(state.get('yara_suspicious') or 0),
+        'blocked_threats': int(state.get('blocked_threats') or 0),
+        'findings': state.get('findings') or [],
+        'ml_models': state.get('ml_models') or {},
+        'last_error': state.get('last_error') or '',
+        'scan_status': state.get('scan_status') or 'idle',
+        'scan_started_at': state.get('scan_started_at') or '',
+        'scan_generation': state.get('scan_generation') or '',
+        'agents': [],
+        'agent_count': 0,
+        'folders': [],
+    }), 200
 
 
 def _agent_trigger_scan_response():
@@ -386,10 +433,16 @@ def _complete_agent_scan_results_response():
 
 @app.before_request
 def _intercept_agent_scan_and_yara_quarantine():
+    # /run_startup is also a cloud scan-generation trigger. Route it through
+    # the same reset path so direct startup requests cannot revive old totals.
+    if request.method == 'POST' and request.path == '/run_startup':
+        return _agent_trigger_scan_response()
     if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
         return _agent_trigger_scan_response()
     if request.method == 'GET' and request.path == '/api/agent-scan-results':
         return _complete_agent_scan_results_response()
+    if request.method == 'GET' and request.path == '/api/conditional_startup/status':
+        return _conditional_startup_status_response()
     if request.method == 'POST' and request.path == '/quarantine/yara-matches':
         return _yara_only_quarantine_response()
     return None
