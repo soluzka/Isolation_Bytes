@@ -2241,13 +2241,13 @@ def _persist_conditional_startup_state():
         "yara_suspicious": int(payload.get("yara_suspicious") or 0),
     }
     payload["scanner_results"] = {
-        "errors": list(globals().get("latest_errors", []) or [])[-500:],
-        "process_events": list(globals().get("latest_process_events", []) or [])[-500:],
-        "ml_detections": list(globals().get("latest_ml_detections", []) or [])[-500:],
-        "ransomware_indicators": list(globals().get("latest_ransomware_indicators", []) or [])[-500:],
+        "errors": list(globals().get("latest_errors", []) or []),
+        "process_events": list(globals().get("latest_process_events", []) or []),
+        "ml_detections": list(globals().get("latest_ml_detections", []) or []),
+        "ransomware_indicators": list(globals().get("latest_ransomware_indicators", []) or []),
         "persistence_indicators": dict(globals().get("latest_persistence_indicators", {}) or {}),
-        "yara_suspicious": list(globals().get("latest_yara_suspicious", []) or [])[-500:],
-        "quarantined_files": list(globals().get("latest_quarantined_files", []) or [])[-500:],
+        "yara_suspicious": list(globals().get("latest_yara_suspicious", []) or []),
+        "quarantined_files": list(globals().get("latest_quarantined_files", []) or []),
     }
     for target in (_CONDITIONAL_STATE_PATH, _SCANNER_RESULTS_PATH):
         tmp = target + ".tmp"
