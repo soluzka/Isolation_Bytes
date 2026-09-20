@@ -220,8 +220,14 @@ def conditional_startup_status_api():
 
     # Copy and add runtime flags to avoid mutating original
     resp = dict(state)
+    resp.setdefault('status', 'RUNNING' if resp.get('running') else 'IDLE')
+    resp.setdefault('scan_current_path', '')
+    resp.setdefault('scan_phase', 'scanning' if resp.get('running') else 'idle')
+    resp.setdefault('ml_models', {})
     resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
-    return jsonify(resp)
+    response = jsonify(resp)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    return response
 
 # Temporary runtime routes dump for debugging (remove after use)
 @app.route('/__routes__', methods=['GET'])
