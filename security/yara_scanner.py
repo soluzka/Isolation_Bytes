@@ -473,11 +473,6 @@ def load_yara_rules():
             return [fallback_rule]
         return []
 
-try:
-    from security import yara_scan_state as _yara_scan_state
-except Exception:
-    _yara_scan_state = None
-
 def scan_file_with_yara(filepath, timeout=None):
     """
     Scan a file using all available YARA rules. 
@@ -490,12 +485,6 @@ def scan_file_with_yara(filepath, timeout=None):
     """
     # The YARA backend owns live scan progress. Update it before every file
     # so callers do not have to infer the current path from findings.
-    if _yara_scan_state is not None:
-        try:
-            _yara_scan_state.begin_file(filepath)
-        except Exception:
-            pass
-
     # Skip files that don't exist
     if not os.path.isfile(filepath):
         logging.warning(f"File does not exist: {filepath}")
@@ -936,12 +925,6 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         '.html', '.htm', '.shtml', '.dhtml'
     ]
     
-    if _yara_scan_state is not None:
-        try:
-            _yara_scan_state.start_scan()
-        except Exception:
-            pass
-
     results = []
     scan_stats = {
         'total_directories': len(monitored_folders),
@@ -1069,12 +1052,6 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
         
         scan_stats['directories'].append(folder_stats)
     
-    if _yara_scan_state is not None:
-        try:
-            _yara_scan_state.finish_scan('complete')
-        except Exception:
-            pass
-
     return {
         'results': results,
         'stats': scan_stats
