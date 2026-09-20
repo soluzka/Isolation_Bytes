@@ -469,8 +469,10 @@ class StandaloneAgent:
             "scanner_results": result_payload,
         }
 
+        # Conditional Startup owns the canonical live scan-state counter.
+        # The standalone agent may run alongside it, but must not overwrite
+        # scan_state.json with its independent traversal counter.
         targets = {
-            runtime_path("scan_state.json"): scan_state,
             runtime_path("conditional_startup_state.json"): conditional,
             runtime_path("scanner_results.json"): result_payload,
         }
