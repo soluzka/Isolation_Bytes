@@ -40,7 +40,7 @@ a = Analysis(
               'IPython', 'ipykernel', 'notebook', 'pytest',
               'nltk', 'transformers', 'accelerate', 'cv2', 'redis', 'onnxruntime',
               'pyssdeep', 'ssdeep', 'tlsh', 'lief', 'lightgbm', 'pefile',
-              'pandas', 'matplotlib', 'seaborn', 'scipy', 'pydantic', 'pydantic_core', 'Crypto', 'Cryptodome'],
+              'pandas', 'matplotlib', 'seaborn', 'scipy', 'pydantic', 'pydantic_core', 'Crypto', 'Cryptodome', '_pyinstaller_hooks_contrib'],
     noarchive=False,
     optimize=0,
 )
