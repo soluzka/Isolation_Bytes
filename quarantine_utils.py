@@ -520,3 +520,4 @@ def quarantine_file(filepath, reason=''):
             logging.warning(f"Moved {filepath} to failed_quarantine due to encryption error.")
         except Exception as move_exc:
             logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Original file left in place.")
+        return False
