@@ -1279,6 +1279,7 @@ def run_conditional_startup_background():
             return
         _last_progress_report = now
         errors = partial_results.get('errors', [])
+        # Publish the scanner's current-run counters directly to the dashboard state.
         new_counts = {
             'scanned_files': int(partial_results.get('scanned_files_count') or 0),
             'quarantined_files': len(partial_results.get('quarantined_files') or []),
