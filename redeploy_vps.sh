@@ -150,7 +150,7 @@ chmod 600 "$QUARANTINE_DIR/quarantine_log.json"
 # Verify the exact source that will be started before touching the service.
 echo "  Deployed commit: $(git rev-parse --short HEAD)"
 /opt/antivirus-server/venv/bin/python -m py_compile quick_start.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
-/opt/antivirus-server/venv/bin/python -c "import quick_start; print('  quick_start import: OK')"
+/opt/antivirus-server/venv/bin/python -c "import wsgi; assert wsgi.application is not None; print('  WSGI application import: OK')"
 /opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
 /opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server as m; assert getattr(m, 'app', None) is not None; print('  production WSGI app: OK')"
 
