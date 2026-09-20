@@ -89,6 +89,27 @@ def run(cmd, **kw):
     return safe_run(cmd, **kw)
 
 
+def _ensure_spec_excludes(spec_path, modules):
+    """Ensure spec-file Analysis() excludes incompatible optional modules.
+
+    PyInstaller accepts --exclude-module only when building from a Python
+    entry-point. When a .spec file is supplied, exclusion options must live
+    in Analysis(excludes=...).
+    """
+    with open(spec_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    if 'excludes=' in content:
+        return
+    marker = 'a = Analysis(\\n'
+    if marker not in content:
+        raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
+    exclusions = ', '.join(repr(m) for m in modules)
+    content = content.replace(marker, marker + f'    excludes=[{exclusions}],\\n', 1)
+    with open(spec_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f'Added PyInstaller spec exclusions: {exclusions}')
+
+
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
@@ -221,13 +242,11 @@ if not args.skip_exe:
         sys.exit(1)
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
-    # The application does not import Pydantic directly. The installed
-    # PyInstaller contrib hook probes the removed V1 pydantic.compiled
-    # attribute and aborts against Pydantic 2.x.
+    # Exclusions must be encoded in the .spec Analysis() call; PyInstaller
+    # rejects --exclude-module when a .spec file is supplied.
+    _ensure_spec_excludes(spec, ('pydantic', 'pydantic_core'))
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
-         '--exclude-module', 'pydantic',
-         '--exclude-module', 'pydantic_core',
          '--distpath', DIST_DIR,
          '--workpath', BUILD_DIR])
     print('antivirus_server.exe build complete.')
@@ -242,10 +261,9 @@ if not args.skip_exe:
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
     if os.path.isfile(launcher_spec):
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
+        _ensure_spec_excludes(launcher_spec, ('pydantic', 'pydantic_core'))
         run([sys.executable, '-m', 'PyInstaller', launcher_spec,
              '--noconfirm',
-             '--exclude-module', 'pydantic',
-             '--exclude-module', 'pydantic_core',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
         launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
@@ -259,10 +277,9 @@ if not args.skip_exe:
     if os.path.isfile(agent_spec):
         print(f'\n{"="*60}\nBuilding standalone agent EXE\n{"="*60}')
         _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent.exe'))
+        _ensure_spec_excludes(agent_spec, ('pydantic', 'pydantic_core'))
         run([sys.executable, '-m', 'PyInstaller', agent_spec,
              '--noconfirm',
-             '--exclude-module', 'pydantic',
-             '--exclude-module', 'pydantic_core',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
         agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
