@@ -3319,7 +3319,7 @@ def cloud_agent_scan_results():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:100],
+            'findings': findings,
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,
         })
