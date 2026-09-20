@@ -342,7 +342,20 @@ class StandaloneAgent:
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         scan_state = self._get_yara_scan_state()
         scanner_results = getattr(self, "_scanner_results", {}) or {}
+        counts = {
+            "files_scanned": int(self._files_scanned),
+            "quarantined_files": int(self._quarantined_count),
+            "blocked_threats": int(self._threats_blocked),
+            "findings": int(self._total_findings),
+            "errors": int(scanner_results.get("errors_count", 0) or 0),
+            "process_events": int(scanner_results.get("process_events_count", 0) or 0),
+            "ml_detections": int(self._total_ml),
+            "ransomware_indicators": int(self._total_ransomware),
+            "persistence_indicators": int(self._total_persistence),
+            "yara_suspicious": int(self._total_yara),
+        }
         conditional = {
+            "schema_version": 2,
             "running": self._scan_status not in ("idle", "complete"),
             "run_id": self._scan_id,
             "findings": int(self._total_findings),
@@ -360,17 +373,15 @@ class StandaloneAgent:
             "yara_suspicious": int(self._total_yara),
             "blocked_threats": int(self._threats_blocked),
             "scan_phase": "scanning" if self._scan_status not in ("idle", "complete") else self._scan_status,
-            "scanner_counters": {
-                "scanned_files": int(self._files_scanned),
-                "quarantined_files": int(self._quarantined_count),
-                "errors": int(scanner_results.get("errors_count", 0) or 0),
-                "process_events": int(scanner_results.get("process_events_count", 0) or 0),
-                "ml_detections": int(self._total_ml),
-                "ransomware_indicators": int(self._total_ransomware),
-                "persistence_indicators": int(self._total_persistence),
-                "yara_suspicious": int(self._total_yara),
-            },
+            "counts": counts,
+            "scanner_counters": counts,
             "scanner_results": {
+                "schema_version": 2,
+                "run_id": self._scan_id,
+                "started_at": self._scan_started_at,
+                "last_updated": now,
+                "complete": self._scan_status == "complete",
+                "counts": counts,
                 "errors": list(scanner_results.get("errors", []) or [])[-500:],
                 "process_events": list(scanner_results.get("process_events", []) or [])[-500:],
                 "ml_detections": list(scanner_results.get("ml_detections", []) or [])[-500:],
