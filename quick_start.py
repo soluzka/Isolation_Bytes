@@ -935,7 +935,45 @@ def _persist_conditional_startup_state():
         os.makedirs(_CONDITIONAL_STATE_DIR, exist_ok=True)
         with conditional_startup_lock:
             payload = dict(conditional_startup_state)
-            payload['findings'] = list(payload.get('findings') or [])[:100]
+
+            # Merge with the previously published history. Indicator evidence
+            # is append-only across scan runs and process restarts.
+            previous = {}
+            try:
+                if os.path.isfile(_SCANNER_RESULTS_FILE):
+                    with open(_SCANNER_RESULTS_FILE, 'r', encoding='utf-8') as handle:
+                        previous = json.load(handle) or {}
+            except (OSError, ValueError, TypeError):
+                previous = {}
+
+            def _append_history(key):
+                current = list(payload.get(key) or [])
+                prior = list(previous.get(key) or [])
+                return prior + current
+
+            for _key in (
+                'errors', 'process_events', 'ml_detections',
+                'ransomware_indicators', 'yara_suspicious', 'quarantined_files'
+            ):
+                payload[_key] = _append_history(_key)
+
+            merged_persistence = dict(previous.get('persistence_indicators') or {})
+            for _key, _value in dict(payload.get('persistence_indicators') or {}).items():
+                base = str(_key)
+                if base not in merged_persistence:
+                    merged_persistence[base] = _value
+                    continue
+                _idx = 2
+                _candidate = f'{base}#{_idx}'
+                while _candidate in merged_persistence:
+                    _idx += 1
+                    _candidate = f'{base}#{_idx}'
+                merged_persistence[_candidate] = _value
+            payload['persistence_indicators'] = merged_persistence
+
+            # Findings are also historical; never truncate them.
+            payload['findings'] = list(previous.get('findings') or []) + list(payload.get('findings') or [])
+
             # Persist every scanner implementation's current counters in one
             # shared JSON document so all local backends read the same run.
             payload['scanner_counters'] = {
