@@ -215,7 +215,6 @@ def conditional_startup_status_api():
             'persistence_indicators': 0,
             'yara_suspicious': 0,
             'blocked_threats': 0,
-            'scan_current_path': '',
             'scan_phase': 'idle',
             'last_error': None,
             'network_monitor_running': bool(globals().get('network_monitor_running'))
