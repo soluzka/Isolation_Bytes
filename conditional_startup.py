@@ -19,12 +19,6 @@ import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import warnings
-try:
-    from watchdog.events import FileSystemEventHandler
-    from watchdog.observers import Observer
-except ImportError:  # pragma: no cover - dependency is required in production
-    FileSystemEventHandler = None
-    Observer = None
 
 # Ensure the base directory is in sys.path for package imports
 basedir = os.path.dirname(os.path.abspath(__file__))
@@ -1710,37 +1704,26 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
 
 
 def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback):
-    """Continuously scan filesystem changes without traversing directories.
-
-    The first protection session is event-driven: Windows/watchdog directory
-    notifications deliver created, modified, and moved files directly to the
-    scanner. There is deliberately no os.walk traversal and no finite first
-    pass. The worker remains alive for the lifetime of continuous protection.
-    """
+    """Run the normal filesystem scan over every monitored directory."""
     scan_utils = modules['scan_utils']
     yara_scanner = modules['yara_scanner']
     quarantine_utils = modules['quarantine_utils']
 
-    if Observer is None or FileSystemEventHandler is None:
-        raise RuntimeError(
-            "watchdog is required for traversal-free continuous filesystem scanning"
-        )
+    for folder in monitored_folders:
+        for root, dirs, files in os.walk(folder):
+            if "OneDriveTemp" in root:
+                continue
 
-    class ContinuousScanHandler(FileSystemEventHandler):
-        def _scan_path(self, filepath):
-            if not filepath or os.path.isdir(filepath):
-                return
-            if "OneDriveTemp" in filepath:
-                return
+            for filename in files:
+                filepath = os.path.join(root, filename)
 
-            try:
-                with open(filepath, 'rb'):
-                    pass
-            except (PermissionError, OSError):
-                output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
-                return
+                try:
+                    with open(filepath, 'rb'):
+                        pass
+                except (PermissionError, OSError):
+                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
+                    continue
 
-            try:
                 _scan_file_and_record(
                     filepath,
                     scan_utils,
@@ -1751,52 +1734,6 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
                     output,
                     progress_callback,
                 )
-            except (PermissionError, OSError) as exc:
-                output.write(f"[INFO] File changed before scan completed: {filepath}: {exc}\\n")
-            except Exception as exc:
-                output.write(f"[ERROR] Continuous file scan failed for {filepath}: {exc}\\n")
-
-        def on_created(self, event):
-            if not event.is_directory:
-                self._scan_path(event.src_path)
-
-        def on_modified(self, event):
-            if not event.is_directory:
-                self._scan_path(event.src_path)
-
-        def on_moved(self, event):
-            if not event.is_directory:
-                self._scan_path(event.dest_path)
-
-    observer = Observer()
-    handler = ContinuousScanHandler()
-    scheduled = False
-
-    for folder in monitored_folders:
-        if not folder or not os.path.isdir(folder):
-            continue
-        observer.schedule(handler, folder, recursive=True)
-        scheduled = True
-
-    if not scheduled:
-        raise RuntimeError("No monitored directories are available for continuous filesystem watching")
-
-    observer.start()
-    output.write("[INFO] Continuous filesystem protection is active; no directory traversal is used.\\n")
-    if progress_callback:
-        try:
-            progress_callback({
-                'scan_phase': 'scanning',
-                'continuous': True,
-                'filesystem_monitor': 'event-driven',
-            })
-        except Exception:
-            pass
-
-    # Deliberately never return during normal continuous protection.
-    # File-system notifications drive scans as files are created/modified/moved.
-    while True:
-        time.sleep(1.0)
 
 
 def _open_browser_when_ready(output):
@@ -1953,6 +1890,9 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     # In continuous mode, the very first filesystem traversal is itself the
     # live protection session. There is no finite "first scan" to complete.
     # Keep the worker in continuous mode from the moment the first traversal starts.
+    # A continuous protection session begins with the normal scan immediately.
+    # Each normal scan pass is followed immediately by another pass; there is
+    # no separate watchdog/event-monitoring mode.
     while True:
         def _continuous_progress(results):
             if not callable(progress_callback):
@@ -1993,13 +1933,9 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
             else:
                 cumulative_persistence[key] = value
 
-        # Continuous mode is deliberately unbounded. A dashboard stop signal
-        # may interrupt the current file operation, but it must never terminate
-        # the lifetime of the continuous worker. The next pass always starts.
         if not continuous:
             break
 
-        time.sleep(0.25)
 
     if last_result is None:
         last_result = {
