@@ -256,7 +256,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=/opt/antivirus-server
-ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 cloud.cloud_server:app
+ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 wsgi:application
 Restart=always
 RestartSec=5
 Environment=PYTHONPATH=/opt/antivirus-server
@@ -281,6 +281,21 @@ fi
 if ! systemctl is-active --quiet nginx; then
     echo "ERROR: nginx failed to start"
     systemctl --no-pager --full status nginx || true
+    exit 1
+fi
+
+# Verify the exact WSGI entry point and service listener before declaring
+# the deployment healthy. This catches stale/broken application imports that
+# otherwise surface to Cloudflare only as a 502.
+if ! /opt/antivirus-server/venv/bin/python -c "import wsgi; assert wsgi.application is not None; print('WSGI application: OK')"; then
+    echo "ERROR: WSGI application failed to import"
+    journalctl -u antivirus-cloud -n 120 --no-pager || true
+    exit 1
+fi
+if ! ss -ltn | grep -q '127.0.0.1:5002'; then
+    echo "ERROR: antivirus-cloud is not listening on 127.0.0.1:5002"
+    systemctl --no-pager --full status antivirus-cloud || true
+    journalctl -u antivirus-cloud -n 120 --no-pager || true
     exit 1
 fi
 systemctl is-enabled antivirus-cloud
