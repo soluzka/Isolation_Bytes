@@ -461,7 +461,10 @@ _default_runtime = os.path.join(
     os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Local'),
     'IsolationBytes'
 )
-if 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
+if os.name == 'nt':
+    # Windows endpoint state is pinned to the user's LocalAppData directory.
+    os.environ['ANTIVIRUS_RUNTIME_DIR'] = os.path.abspath(_default_runtime)
+elif 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
     os.environ['ANTIVIRUS_RUNTIME_DIR'] = os.path.abspath(
         os.path.expandvars(os.environ['ANTIVIRUS_RUNTIME_DIR'])
     )
@@ -500,7 +503,7 @@ class ScanResult(db.Model):
 # Set up folders for uploads and quarantine
 _RUNTIME_DIR = os.environ.get('ANTIVIRUS_RUNTIME_DIR', os.path.dirname(os.path.abspath(__file__)))
 UPLOAD_FOLDER = os.path.join(_RUNTIME_DIR, 'uploads')
-QUARANTINE_FOLDER = os.path.join(_RUNTIME_DIR, 'quarantine')
+QUARANTINE_FOLDER = os.path.join(_RUNTIME_DIR, 'Quarantine')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 
