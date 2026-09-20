@@ -3685,9 +3685,33 @@ def run_scheduled_scans():
                 logger.warning("YARA scanner or detector not available, skipping scheduled scan")
                 scan_file_with_yara = None
             
-            # Combine monitored directories from both sources
-            monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
-            quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+            # Combine monitored directories from both sources and remove nested roots.
+            raw_dirs = list(set(
+                network_state['monitored_directories']
+                + folder_watcher_state['monitored_paths']
+            ))
+            monitored_dirs = []
+            normalized_roots = []
+            for scan_dir in sorted(raw_dirs, key=lambda value: len(os.path.realpath(value))):
+                if not os.path.exists(scan_dir):
+                    continue
+                normalized = os.path.normcase(os.path.realpath(scan_dir))
+                if any(
+                    normalized == root or normalized.startswith(root + os.sep)
+                    for root in normalized_roots
+                ):
+                    continue
+                normalized_roots.append(normalized)
+                monitored_dirs.append(scan_dir)
+
+            # This set is intentionally per scheduled-run. It prevents overlapping
+            # monitored roots from rescanning the same file without trusting stale
+            # JSON verdicts from an earlier run.
+            scanned_paths = set()
+            quarantine_dir = os.path.join(
+                os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
+                'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+            )
             
             for scan_dir in monitored_dirs:
                 if not os.path.exists(scan_dir):
@@ -3706,15 +3730,13 @@ def run_scheduled_scans():
                             continue
                         
                         try:
-                            # Cache: avoid rescanning unchanged files.  This also
-                            # gives the operator a persistent hash -> verdict record.
-                            cached = scan_cache.get(file_path)
-                            if cached is not None:
-                                yara_matches = cached.get('yara_matches', [])
-                                if yara_matches:
-                                    logger.debug(f"Cached YARA matches ({len(yara_matches)}) for {file_path}")
+                            # Deduplicate only within this run. Never trust a
+                            # persistent JSON verdict as a reason to skip a fresh scan.
+                            scan_key = os.path.normcase(os.path.realpath(file_path))
+                            if scan_key in scanned_paths:
                                 continue
-                            
+                            scanned_paths.add(scan_key)
+
                             if not scan_file_with_yara:
                                 continue
 

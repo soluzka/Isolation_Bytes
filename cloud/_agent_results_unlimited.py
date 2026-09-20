@@ -58,7 +58,7 @@ def build_complete_agent_scan_results(legacy):
             'device_id': device_id,
             'files_scanned': files_scanned,
             'finding_count': len(findings),
-            'last_scan': ag.get('last_scan') or report.get('last_scan', ''),
+            'last_scan': ag.get('last_scan') or report.get('last_scan') or report.get('timestamp', ''),
             'findings': findings,
             'quarantined_count': quarantined_count,
             'scan_dirs': ag.get('scan_dirs') or report.get('scan_dirs') or [],
