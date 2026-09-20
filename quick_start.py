@@ -1203,10 +1203,17 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     last_internal = str(errors[-1]) if errors else None
     conditional_startup_state.update({
         'running': False,
-        'last_run': time.strftime('%Y-%m:%d %H:%M:%S'),
+        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+        'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
+        'scanned_files': int(scan_data.get('scanned_files_count') or 0),
+        'quarantined_files': len(scan_data.get('quarantined_files') or []),
         'errors': len(errors),
         'process_events': len(scan_data.get('process_events', [])),
+        'ml_detections': len(scan_data.get('ml_detections') or []),
+        'ransomware_indicators': len(scan_data.get('ransomware_indicators') or []),
+        'persistence_indicators': _count_persistence_indicators(scan_data),
+        'yara_suspicious': len(scan_data.get('yara_suspicious') or []),
         'last_error': str(error) if error else last_internal,
     })
     try:
@@ -1243,14 +1250,16 @@ def run_conditional_startup_background():
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         new_counts = {
-            'scanned_files': 0, [])),
-            'quarantined_files': 0, [])),
-            'errors': len(errors),
-            'process_events': len(partial_results.get('process_events', [])),
-            'ml_detections': len(partial_results.get('ml_detections', [])),
-            'ransomware_indicators': len(partial_results.get('ransomware_indicators', [])),
+            # These are current-run values from conditional_startup.py.
+            # Do not derive them from any persisted agent history.
+            'scanned_files': int(partial_results.get('scanned_files_count') or 0),
+            'quarantined_files': len(partial_results.get('quarantined_files') or []),
+            'errors': len(partial_results.get('errors') or []),
+            'process_events': len(partial_results.get('process_events') or []),
+            'ml_detections': len(partial_results.get('ml_detections') or []),
+            'ransomware_indicators': len(partial_results.get('ransomware_indicators') or []),
             'persistence_indicators': _count_persistence_indicators(partial_results),
-            'yara_suspicious': len(partial_results.get('yara_suspicious', [])),
+            'yara_suspicious': len(partial_results.get('yara_suspicious') or []),
         }
         with conditional_startup_lock:
             for key, current in new_counts.items():
