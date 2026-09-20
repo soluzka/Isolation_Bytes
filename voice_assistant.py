@@ -153,9 +153,13 @@ def _quarantine_path(path, reason=''):
         pass
     try:
         from security.scan_cache import safe_quarantine
-        qdir = os.path.join(os.environ.get('USERPROFILE', os.path.expanduser('~')), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
-        if sys.platform != 'win32':
-            qdir = os.path.join(os.path.expanduser('~'), 'Defender_Quarantine')
+        qdir = os.path.join(
+            os.environ.get(
+                'ANTIVIRUS_RUNTIME_DIR',
+                os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+            ),
+            'Quarantine'
+        )
         def _encrypt(src, dst):
             try:
                 from cryptography.fernet import Fernet
