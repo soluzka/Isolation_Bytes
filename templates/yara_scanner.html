@@ -347,6 +347,7 @@
         <div class="tab">
             <button class="tablinks active" id="scanTab">Scan</button>
             <button class="tablinks" id="monitoredFoldersTab">Monitored Folders</button>
+            <button class="tablinks" id="scanDirectoriesTab">Scan Directories</button>
             <button class="tablinks" id="networkMonitorTab">Network Monitoring</button>
             <button class="tablinks" id="mainDashboardTab">Main Dashboard</button>
             <button class="tablinks" id="threatHandlingTab">Threat Handling</button>
@@ -412,6 +413,20 @@
             <p style="color:#888;font-size:0.9em;margin-top:0.5em;">The folder will be added to all connected agents and scanned in their next scan cycle.</p>
         </div>
         
+
+        <div id="ScanDirectories" class="tabcontent">
+            <h2>Scan Directories</h2>
+            <p>Edit <code>scan_directories.txt</code>. Use one directory per line; blank lines and <code>#</code> comments are ignored.</p>
+            <div class="card">
+                <textarea id="scanDirectoriesEditor" spellcheck="false" style="width:100%;min-height:420px;box-sizing:border-box;font-family:Consolas,'Courier New',monospace;font-size:13px;padding:12px;border:1px solid #ccc;border-radius:4px;resize:vertical;"></textarea>
+                <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                    <button type="button" id="loadScanDirectoriesBtn">Reload</button>
+                    <button type="button" id="saveScanDirectoriesBtn" class="success">Save Scan Directories</button>
+                    <span id="scanDirectoriesStatus" aria-live="polite" style="color:#555;"></span>
+                </div>
+                <p style="color:#777;font-size:.9em;margin-bottom:0;">Saved to the writable Isolation Bytes runtime directory and used by the next scan. <code>%SystemDrive%</code>, <code>%USERPROFILE%</code>, and <code>~</code> are supported.</p>
+            </div>
+        </div>
 
         <div id="MainDashboard" class="tabcontent">
             <h2>Main Antivirus Dashboard</h2>
@@ -774,6 +789,11 @@
         // Load monitored folders when the tab is clicked
         // Initialize tab event listeners
         document.addEventListener('DOMContentLoaded', function() {
+            const loadDirsBtn = document.getElementById('loadScanDirectoriesBtn');
+            const saveDirsBtn = document.getElementById('saveScanDirectoriesBtn');
+            if (loadDirsBtn) loadDirsBtn.addEventListener('click', loadScanDirectoriesEditor);
+            if (saveDirsBtn) saveDirsBtn.addEventListener('click', saveScanDirectoriesEditor);
+            loadScanDirectoriesEditor();
             // Tab switching event listeners
             document.getElementById('scanTab').addEventListener('click', function() {
                 openTab(this, 'Scan');
@@ -913,6 +933,42 @@
             trafficContainer.innerHTML = html;
         }
         
+        async function loadScanDirectoriesEditor() {
+            const editor = document.getElementById('scanDirectoriesEditor');
+            const status = document.getElementById('scanDirectoriesStatus');
+            if (!editor) return;
+            if (status) status.textContent = 'Loading...';
+            try {
+                const response = await fetch('/api/scan-directories', {credentials: 'same-origin'});
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || 'Unable to load scan directories');
+                editor.value = data.content || '';
+                if (status) status.textContent = 'Loaded.';
+            } catch (error) {
+                if (status) status.textContent = 'Load failed: ' + error.message;
+            }
+        }
+
+        async function saveScanDirectoriesEditor() {
+            const editor = document.getElementById('scanDirectoriesEditor');
+            const status = document.getElementById('scanDirectoriesStatus');
+            if (!editor) return;
+            if (status) status.textContent = 'Saving...';
+            try {
+                const response = await fetch('/api/scan-directories', {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({content: editor.value})
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) throw new Error(data.error || 'Unable to save scan directories');
+                if (status) status.textContent = data.message || 'Saved.';
+            } catch (error) {
+                if (status) status.textContent = 'Save failed: ' + error.message;
+            }
+        }
+
         // Initial load of monitored folders
         loadMonitoredDirectories();
 
