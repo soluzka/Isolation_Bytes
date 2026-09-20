@@ -2112,6 +2112,7 @@ from safe_downloader import extract_archive, _is_safe_url, download_and_scan
 from antivirus_cli import scan_file_for_viruses_with_test_flag, file_hashes
 from advanced_threat_detector import detector
 import conditional_startup
+from runtime_paths import runtime_path, ensure_runtime_state_files
 import psutil
 import logging
 import platform
@@ -2221,6 +2222,47 @@ conditional_startup_state = {
     'last_error': None,
 }
 
+_CONDITIONAL_STATE_PATH = runtime_path("conditional_startup_state.json")
+_SCANNER_RESULTS_PATH = runtime_path("scanner_results.json")
+ensure_runtime_state_files()
+
+
+def _persist_conditional_startup_state():
+    """Publish Conditional Startup state to the canonical LocalAppData JSON files."""
+    payload = dict(conditional_startup_state)
+    payload["scanner_counters"] = {
+        "scanned_files": int(payload.get("scanned_files") or 0),
+        "quarantined_files": int(payload.get("quarantined_files") or 0),
+        "errors": int(payload.get("errors") or 0),
+        "process_events": int(payload.get("process_events") or 0),
+        "ml_detections": int(payload.get("ml_detections") or 0),
+        "ransomware_indicators": int(payload.get("ransomware_indicators") or 0),
+        "persistence_indicators": int(payload.get("persistence_indicators") or 0),
+        "yara_suspicious": int(payload.get("yara_suspicious") or 0),
+    }
+    payload["scanner_results"] = {
+        "errors": list(globals().get("latest_errors", []) or [])[-500:],
+        "process_events": list(globals().get("latest_process_events", []) or [])[-500:],
+        "ml_detections": list(globals().get("latest_ml_detections", []) or [])[-500:],
+        "ransomware_indicators": list(globals().get("latest_ransomware_indicators", []) or [])[-500:],
+        "persistence_indicators": dict(globals().get("latest_persistence_indicators", {}) or {}),
+        "yara_suspicious": list(globals().get("latest_yara_suspicious", []) or [])[-500:],
+        "quarantined_files": list(globals().get("latest_quarantined_files", []) or [])[-500:],
+    }
+    for target in (_CONDITIONAL_STATE_PATH, _SCANNER_RESULTS_PATH):
+        tmp = target + ".tmp"
+        try:
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp, target)
+        except OSError as exc:
+            logger.warning("Could not persist Conditional Startup state to %s: %s", target, exc)
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+
 
 def normalize_conditional_startup_data(scan_data):
     """Return conditional startup output as a (results dict, log text) pair.
@@ -2312,6 +2354,7 @@ def run_startup():
         'blocked_threats': 0,
         'last_error': None,
     })
+    _persist_conditional_startup_state()
 
     def _progress(results):
         """Called by conditional_startup after every file completes."""
@@ -2330,6 +2373,7 @@ def run_startup():
             'persistence_indicators': persistence_count,
             'yara_suspicious': len(results.get('yara_suspicious') or []),
         })
+        _persist_conditional_startup_state()
 
     def _run():
         try:
