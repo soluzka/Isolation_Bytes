@@ -11,7 +11,10 @@ from flask import session, redirect, url_for, request, render_template_string, f
 logger = logging.getLogger(__name__)
 
 def _auth_data_path():
-    app_data = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server')
+    app_data = os.path.abspath(os.path.expandvars(os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+    )))
     os.makedirs(app_data, exist_ok=True)
     auth_file = os.path.join(app_data, 'auth_data.json')
     # Set restrictive permissions on auth data file (owner read/write only)
