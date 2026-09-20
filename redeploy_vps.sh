@@ -246,6 +246,17 @@ for attempt in $(seq 1 20); do
     if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/; then
         echo "Origin: HTTP 200"
         if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/api/config; then
+        # /run_startup must be handled by the cloud app without importing the Windows-only quick_start module.
+        STARTUP_STATUS=$(curl -sS --max-time 5 -o /tmp/isolation-bytes-run-startup.json -w '%{http_code}' -X POST http://127.0.0.1:5002/run_startup || true)
+        if [ "$STARTUP_STATUS" = "202" ] || [ "$STARTUP_STATUS" = "200" ]; then
+            echo "Startup endpoint: HTTP $STARTUP_STATUS"
+        else
+            echo "ERROR: /run_startup returned HTTP $STARTUP_STATUS"
+            cat /tmp/isolation-bytes-run-startup.json 2>/dev/null || true
+            journalctl -u antivirus-cloud -n 80 --no-pager || true
+            exit 1
+        fi
+
             echo "API: HTTP 200"
         else
             echo "WARNING: root is healthy but /api/config failed"
