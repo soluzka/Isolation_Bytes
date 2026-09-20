@@ -2,15 +2,14 @@
 
 Builds both EXEs with the same configuration:
   - cloud_server.exe         (PyInstaller — Flask + Caddy + Cloudflare)
-  - IsolationBytesLogin.exe  (dotnet — launcher with embedded cloud_server.exe)
+  - IsolationBytesAgent.exe  (PyInstaller — desktop scanning agent)\n  - IsolationBytesLogin.exe  (dotnet — launcher)
 
-The launcher embeds cloud_server.exe inside itself, so the final
-IsolationBytesLogin.exe is fully self-contained — no external files needed.
+The launcher is a thin client and expects the agent beside it at runtime.
 
 Usage:
-    python buildconfig.py              # build everything (cloud first, then launcher)
+    python buildconfig.py              # build all targets
     python buildconfig.py --cloud      # only cloud_server.exe
-    python buildconfig.py --launcher   # only IsolationBytesLogin.exe
+    python buildconfig.py --agent      # only IsolationBytesAgent.exe\n    python buildconfig.py --launcher   # only IsolationBytesLogin.exe
     python buildconfig.py --clean      # clean dist/ then build everything
 
 Everything is defined here: URLs, ports, paths, embedded files.
@@ -109,7 +108,7 @@ EXCLUDED_IMPORTS = [
 # BUILD: cloud_server.exe (PyInstaller)
 # ============================================================
 def build_cloud_server():
-    print("\n[1/2] Building cloud_server.exe (PyInstaller)...")
+    print("\n[1/3] Building cloud_server.exe (PyInstaller)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
     print(f"  PROXY_PORT:    {PROXY_PORT}")
     print(f"  HTTPS_PORT:    {HTTPS_PORT}")
@@ -271,10 +270,37 @@ def generate_csproj():
 
 
 # ============================================================
+# BUILD: IsolationBytesAgent.exe (PyInstaller)
+# ============================================================
+def build_agent():
+    print("\n[2/3] Building IsolationBytesAgent.exe (PyInstaller)...")
+    spec_path = PROJECT_ROOT / "standalone_agent.spec"
+    if not spec_path.exists():
+        print(f"ERROR: {spec_path} not found")
+        return False
+
+    result = safe_run(
+        [sys.executable, "-m", "PyInstaller", str(spec_path),
+         "--noconfirm", "--distpath", str(DIST_DIR)],
+        cwd=str(PROJECT_ROOT),
+    )
+    if result.returncode != 0:
+        print("FAILED: IsolationBytesAgent.exe build")
+        return False
+
+    exe = DIST_DIR / "IsolationBytesAgent.exe"
+    if not exe.exists():
+        print("ERROR: IsolationBytesAgent.exe not found in dist/")
+        return False
+    print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
+    return True
+
+
+# ============================================================
 # BUILD: AntivirusServerLogin.exe (dotnet)
 # ============================================================
 def build_launcher():
-    print("\n[2/2] Building IsolationBytesLogin.exe (dotnet)...")
+    print("\n[3/3] Building IsolationBytesLogin.exe (dotnet)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
     print(f"  Mode:          Thin client (no embedded server)")
 
@@ -327,7 +353,7 @@ def build_launcher():
         print(f"  OK: IsolationBytesAgent.exe bundled alongside login EXE")
     else:
         print(f"  NOTE: IsolationBytesAgent.exe not found in dist/ yet —")
-        print(f"        the login EXE will download it from the server on first launch")
+        print(f"        place IsolationBytesAgent.exe alongside the installed login EXE")
 
     size = (DIST_DIR / "IsolationBytesLogin.exe").stat().st_size / 1048576
     print(f"  OK: IsolationBytesLogin.exe ({size:.1f} MB)")
@@ -389,23 +415,26 @@ def main():
     args = set(sys.argv[1:])
     do_clean = "--clean" in args
 
-    # If specific flags given, only build those
-    if "--cloud" in args or "--launcher" in args:
+    # If specific flags are given, only build those targets.
+    if "--cloud" in args or "--agent" in args or "--launcher" in args:
         build_cloud = "--cloud" in args
+        build_agent_flag = "--agent" in args
         build_launcher_flag = "--launcher" in args
     else:
         build_cloud = True
+        build_agent_flag = True
         build_launcher_flag = True
 
     print(f"\n{'='*60}")
     print(f"  BUILD CONFIGURATION")
     print(f"{'='*60}")
-    print(f"  Project:       {PROJECT_ROOT}")
-    print(f"  Output:        {DIST_DIR}")
-    print(f"  PUBLIC_URL:    {PUBLIC_URL}")
-    print(f"  Build cloud:   {build_cloud}")
+    print(f"  Project:        {PROJECT_ROOT}")
+    print(f"  Output:         {DIST_DIR}")
+    print(f"  PUBLIC_URL:     {PUBLIC_URL}")
+    print(f"  Build cloud:    {build_cloud}")
+    print(f"  Build agent:    {build_agent_flag}")
     print(f"  Build launcher: {build_launcher_flag}")
-    print(f"  Order:         cloud_server.exe first, then launcher embeds it")
+    print(f"  Order:          cloud_server.exe, agent, then launcher")
 
     if do_clean:
         clean()
@@ -415,8 +444,10 @@ def main():
     ok = True
     if build_cloud:
         ok = build_cloud_server() and ok
+    if build_agent_flag:
+        ok = build_agent() and ok
     if build_launcher_flag:
-        ok = build_launcher() and ok  # No longer requires cloud_server.exe
+        ok = build_launcher() and ok
 
     print(f"\n{'='*60}")
     if ok:

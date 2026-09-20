@@ -3010,6 +3010,7 @@ def agent_heartbeat():
         'total_ml': data.get('total_ml', agent.get('total_ml', 0)),
         'last_report_ok': data.get('last_report_ok', agent.get('last_report_ok', False)),
         'last_report_error': data.get('last_report_error', agent.get('last_report_error', '')),
+        'agent_executable': data.get('agent_executable', agent.get('agent_executable', '')),
         'quarantine_dir': data.get('quarantine_dir', agent.get('quarantine_dir', '')),
         'quarantine_ready': data.get('quarantine_ready', agent.get('quarantine_ready', False)),
         'last_quarantine_error': data.get('last_quarantine_error', agent.get('last_quarantine_error', '')),
@@ -3355,7 +3356,7 @@ def cloud_yara_scanner():
             'device_id': device_id,
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
-            'last_scan': ag.get('last_scan') or last_report.get('last_scan') or last_report.get('timestamp') or '',
+            'last_scan': ag.get('last_scan', ''),
             'findings': findings[:50],  # cap at 50 per agent
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
@@ -3376,7 +3377,7 @@ def cloud_agent_scan_results():
             'device_id': device_id,
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
-            'last_scan': ag.get('last_scan') or last_report.get('last_scan') or last_report.get('timestamp') or '',
+            'last_scan': ag.get('last_scan', ''),
             'findings': findings,
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,

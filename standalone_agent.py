@@ -2511,6 +2511,8 @@ X-GNOME-Autostart-enabled=true
             timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
             base = {
                 'device_id': self.device_id,
+                'agent_executable': os.path.abspath(sys.executable),
+                'agent_frozen': bool(getattr(sys, 'frozen', False)),
                 'type': report_type,
                 'timestamp': timestamp,
                 'files_scanned': self._files_scanned,
