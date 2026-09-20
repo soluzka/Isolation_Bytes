@@ -22,6 +22,7 @@ a = Analysis(
         (os.path.join(_BASE, 'scan_utils.py'), '.'),
         (os.path.join(_BASE, 'quarantine_utils.py'), '.'),
         (os.path.join(_BASE, 'config.py'), '.'),
+        (os.path.join(_BASE, 'standalone_agent.py'), '.'),
         (os.path.join(_BASE, 'utils'), 'utils'),
         (os.path.join(_BASE, 'compiled_rules.yarc'), '.'),
     ],
