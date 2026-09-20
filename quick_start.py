@@ -1615,16 +1615,18 @@ def stop_conditional_startup():
     if _is_stop_rate_limited(remote_addr):
         return jsonify({"status": "error", "message": "Stop requests are limited to 5 per minute"}), 429
     try:
-        from conditional_startup import STOP_EVENT
-        STOP_EVENT.set()
+        # Continuous protection is intentionally indefinite. There is no
+        # application-level stop event for the scanner.
         with conditional_startup_lock:
             conditional_startup_state.update({
-                'stop_requested': True,
+                'running': True,
+                'stop_requested': False,
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
             })
         return jsonify({
-            "status": "success",
-            "message": "Stop requested. The scan will exit as soon as the current file finishes."
+            "status": "ignored",
+            "success": True,
+            "message": "Continuous protection runs indefinitely and cannot be stopped by the dashboard."
         })
     except Exception as e:
         logger.error(f"Error stopping conditional startup: {e}")
