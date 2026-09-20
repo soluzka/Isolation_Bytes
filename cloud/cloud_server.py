@@ -189,6 +189,41 @@ def _canonical_yara_agent_state():
         report = agent.get('last_report') or {}
         current_scan_id = str(agent.get('scan_id') or report.get('scan_id') or '')
         scan_state = _agent_scan_state.get(device_id)
+        # Recover an active generation after a cloud worker restart. The
+        # generation state is intentionally in-memory, so a gunicorn restart
+        # (including one caused by an origin outage/502) used to make an
+        # already-running agent scan appear as 0 files / 0 quarantined.
+        # Only reconstruct state when the agent itself proves that a scan is
+        # currently queued or running and has a real scan_id; completed
+        # historical reports are never resurrected as a new scan.
+        if scan_state is None:
+            recovered_status = str(
+                agent.get('scan_status')
+                or report.get('scan_status')
+                or ''
+            ).lower()
+            recovered_scan_id = str(
+                agent.get('scan_id')
+                or report.get('scan_id')
+                or ''
+            )
+            if recovered_scan_id and recovered_status in {'queued', 'scanning'}:
+                recovered_started = agent.get('scan_started_at') or report.get('scan_started_at')
+                try:
+                    recovered_epoch = datetime.fromisoformat(
+                        str(recovered_started).replace('Z', '+00:00')
+                    ).timestamp()
+                except (TypeError, ValueError, OSError):
+                    recovered_epoch = now
+                scan_state = {
+                    'started_at': recovered_epoch,
+                    'report_marker': _agent_report_marker(agent),
+                    'previous_scan_id': '',
+                    'baseline_files_scanned': 0,
+                    'baseline_quarantined': 0,
+                    'recovered_after_restart': True,
+                }
+                _agent_scan_state[device_id] = scan_state
         if scan_state:
             previous_scan_id = str(scan_state.get('previous_scan_id') or '')
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
