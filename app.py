@@ -2311,6 +2311,10 @@ def run_conditional_startup_route():
             'quarantined_files': len(results.get('quarantined_files') or []),
             'errors': results.get('errors', []),
             'process_events': results.get('process_events', []),
+            'yara_suspicious': results.get('yara_suspicious', []),
+            'ml_detections': results.get('ml_detections', []),
+            'ransomware_indicators': results.get('ransomware_indicators', []),
+            'persistence_indicators': results.get('persistence_indicators', {}),
             'log': results.get('log', ''),
             'message': 'Conditional startup completed successfully'
         })
