@@ -38,7 +38,7 @@ a = Analysis(
     runtime_hooks=[],
     excludes=['tensorflow', 'torch', 'torchvision', 'torchaudio', 'h5py', 'numba',
               'IPython', 'ipykernel', 'notebook', 'pytest',
-              'nltk', 'transformers', 'accelerate', 'cv2', 'redis', 'onnxruntime',
+              'nltk', 'transformers', 'accelerate', 'safetensors', 'cv2', 'redis', 'onnxruntime',
               'pyssdeep', 'ssdeep', 'tlsh', 'lief', 'lightgbm', 'pefile',
               'pandas', 'matplotlib', 'seaborn', 'scipy', 'pydantic', 'pydantic_core', 'Crypto', 'Cryptodome', '_pyinstaller_hooks_contrib'],
     noarchive=False,
