@@ -14,6 +14,8 @@ import os
 import time
 from pathlib import Path
 
+from runtime_paths import runtime_path
+
 logger = logging.getLogger('scan_cache')
 
 # Locations that should never be quarantined/deleted by an unelevated scan.
@@ -93,7 +95,12 @@ def _file_fingerprint(path):
 class FileScanCache:
     """Persistent JSON cache keyed by file content fingerprint."""
 
-    def __init__(self, cache_path='data/scan_cache.json'):
+    def __init__(self, cache_path=None):
+        # Mutable scan state belongs in the per-user LocalAppData runtime,
+        # not beside the EXE/source checkout. This also keeps a deployment
+        # from silently switching to a second cache after replacement.
+        if cache_path is None:
+            cache_path = runtime_path('scan_cache.json')
         self.cache_path = Path(os.path.abspath(str(cache_path)))
         os.makedirs(str(self.cache_path.parent), exist_ok=True)
         self._cache = self._load()
