@@ -47,9 +47,18 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             and current_scan_id != previous_scan_id
         )
 
-        if active_started and not generation_started:
-            # New scan has been requested, but this agent has not published a
-            # report belonging to it yet. Never leak the previous run here.
+        if not active_started:
+            # No active server-owned scan: never replay persisted agent history.
+            files_scanned = 0
+            quarantined_count = 0
+            findings = []
+            status = "idle"
+            current_path = ""
+            last_scan = ""
+            scan_id = ""
+            started_at = ""
+        elif not generation_started:
+            # Scan requested, but the agent has not published its new scan_id.
             files_scanned = 0
             quarantined_count = 0
             findings = []
