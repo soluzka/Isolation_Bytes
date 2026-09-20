@@ -961,25 +961,42 @@ if (stopAutoUpdatesBtn) {
             };
 
             function refreshStatus() {
-                return fetch('/api/conditional_startup/status', {
+                // Do not rely on AbortSignal.timeout(): older embedded WebViews
+                // can leave the status panel untouched when that API is absent.
+                const controller = typeof AbortController !== 'undefined'
+                    ? new AbortController()
+                    : null;
+                const timeoutId = controller ? window.setTimeout(() => controller.abort(), 10000) : null;
+                return fetch('/api/conditional_startup/status?_=' + Date.now(), {
                     credentials: 'include',
+                    cache: 'no-store',
                     headers: {'Accept': 'application/json'},
-                    signal: AbortSignal.timeout(10000)
+                    signal: controller ? controller.signal : undefined
                 })
                     .then(async response => {
                         const text = await response.text();
-                        let data;
+                        let data = {};
                         try {
-                            data = JSON.parse(text);
+                            data = text ? JSON.parse(text) : {};
                         } catch (error) {
                             throw new Error(`Status endpoint returned non-JSON response (${response.status})`);
                         }
                         if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
                         return data;
                     })
-                    .then(renderStatus)
+                    .then(data => {
+                        renderStatus(data);
+                        return data;
+                    })
                     .catch(error => {
-                        statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${htmlEscape(error.message || error)}</div>`;
+                        const message = error && error.name === 'AbortError'
+                            ? 'Status request timed out after 10 seconds'
+                            : (error.message || String(error));
+                        statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${htmlEscape(message)}. <button type="button" onclick="refreshStatus()">Retry</button></div>`;
+                        throw error;
+                    })
+                    .finally(() => {
+                        if (timeoutId) window.clearTimeout(timeoutId);
                     });
             }
 
