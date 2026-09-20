@@ -354,22 +354,23 @@ if not args.skip_exe:
         else:
             print('WARNING: Universal launcher EXE not found.')
 
-    # ── Build the standalone agent as a single EXE ──
+    # ── Build the standalone agent as onedir ──
     agent_spec = os.path.join(BASE_DIR, 'standalone_agent.spec')
     if os.path.isfile(agent_spec):
-        print(f'\n{"="*60}\nBuilding standalone agent EXE\n{"="*60}')
-        _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent.exe'))
+        print(f'\n{"="*60}\nBuilding standalone agent onedir\n{"="*60}')
+        _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent', 'IsolationBytesAgent.exe'))
         _ensure_spec_excludes(agent_spec, ('pydantic', 'pydantic_core'))
         run([sys.executable, '-m', 'PyInstaller', agent_spec,
              '--noconfirm',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
-        agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
+        agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
+        agent_exe = os.path.join(agent_dir, 'IsolationBytesAgent.exe')
         if os.path.isfile(agent_exe):
             agent_size = os.path.getsize(agent_exe) / 1048576
-            print(f'Standalone agent: {agent_exe} ({agent_size:.1f} MB)')
+            print(f'Standalone agent onedir: {agent_dir} ({agent_size:.1f} MB)')
         else:
-            print('WARNING: Standalone agent EXE not found.')
+            print('WARNING: Standalone agent onedir not found.')
 else:
     print('Skipping PyInstaller build (--skip-exe)')
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
@@ -436,13 +437,14 @@ server_dst = os.path.join(stage_dir, 'antivirus_server')
 shutil.copytree(onedir, server_dst, dirs_exist_ok=True)
 print(f'Embedded antivirus_server onedir ({len(os.listdir(server_dst))} items) into MSIX staging')
 
-# Embed the standalone agent EXE inside the MSIX
-agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
-if os.path.isfile(agent_exe):
-    shutil.copy2(agent_exe, os.path.join(stage_dir, 'IsolationBytesAgent.exe'))
-    print(f'Embedded IsolationBytesAgent.exe into MSIX staging')
+# Embed the standalone agent onedir inside the MSIX
+agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
+if os.path.isdir(agent_dir):
+    agent_dst = os.path.join(stage_dir, 'IsolationBytesAgent')
+    shutil.copytree(agent_dir, agent_dst, dirs_exist_ok=True)
+    print(f'Embedded IsolationBytesAgent onedir ({len(os.listdir(agent_dst))} items) into MSIX staging')
 else:
-    print('WARNING: IsolationBytesAgent.exe not found — MSIX will not include the agent')
+    print('WARNING: IsolationBytesAgent onedir not found — MSIX will not include the agent')
 
 total_items = sum(len(files) for _, _, files in os.walk(stage_dir))
 print(f'Staged {total_items} total files in {stage_dir}')
@@ -666,6 +668,13 @@ cloud_exe = os.path.join(DIST_DIR, 'cloud_server.exe')
 if os.path.isfile(cloud_exe):
     cloud_size = os.path.getsize(cloud_exe) / (1024 * 1024)
     print(f'  Cloud:   {cloud_exe} ({cloud_size:.1f} MB)')
+# Show agent onedir if it was built
+agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
+if os.path.isdir(agent_dir):
+    agent_exe = os.path.join(agent_dir, 'IsolationBytesAgent.exe')
+    if os.path.isfile(agent_exe):
+        agent_size = os.path.getsize(agent_exe) / (1024 * 1024)
+        print(f'  Agent:   {agent_dir} ({agent_size:.1f} MB)')
 if os.path.isfile(pwa_zip):
     pwa_size = os.path.getsize(pwa_zip) / (1024 * 1024)
     print(f'  PWA:     {pwa_zip} ({pwa_size:.1f} MB)')
