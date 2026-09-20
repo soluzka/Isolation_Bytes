@@ -3369,7 +3369,10 @@ def cloud_yara_scanner():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:50],  # cap at 50 per agent
+            'findings': findings[:50],  # browser view only; stored history is untouched
+            'scan_dirs': ag.get('scan_dirs') or [],
+            'scan_status': ag.get('scan_status', 'idle'),
+            'scan_current_path': ag.get('scan_current_path', ''),
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
 
