@@ -1704,37 +1704,45 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
 
 
 def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback):
-    """Run the normal filesystem scan over every monitored directory."""
+    """Run the normal scan as an infinite scan stream.
+
+    The function intentionally never reaches a scan-completion boundary.
+    The normal filesystem traversal is restarted immediately from inside this
+    function, so the first scan remains one indefinitely running scan session.
+    """
     scan_utils = modules['scan_utils']
     yara_scanner = modules['yara_scanner']
     quarantine_utils = modules['quarantine_utils']
 
-    for folder in monitored_folders:
-        for root, dirs, files in os.walk(folder):
-            if "OneDriveTemp" in root:
-                continue
-
-            for filename in files:
-                filepath = os.path.join(root, filename)
-
-                try:
-                    with open(filepath, 'rb'):
-                        pass
-                except (PermissionError, OSError):
-                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
+    while True:
+        for folder in monitored_folders:
+            for root, dirs, files in os.walk(folder):
+                if "OneDriveTemp" in root:
                     continue
 
-                _scan_file_and_record(
-                    filepath,
-                    scan_utils,
-                    yara_scanner,
-                    quarantine_utils,
-                    results,
-                    scanned_file_status,
-                    output,
-                    progress_callback,
-                )
+                for filename in files:
+                    filepath = os.path.join(root, filename)
 
+                    try:
+                        with open(filepath, 'rb'):
+                            pass
+                    except (PermissionError, OSError):
+                        output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
+                        continue
+
+                    _scan_file_and_record(
+                        filepath,
+                        scan_utils,
+                        yara_scanner,
+                        quarantine_utils,
+                        results,
+                        scanned_file_status,
+                        output,
+                        progress_callback,
+                    )
+
+        # Deliberately do not return. The next traversal starts immediately
+        # inside the same scan operation, with no completion state or pause.
 
 def _open_browser_when_ready(output):
     """Wait for the local server to come up, then open it in a browser."""
