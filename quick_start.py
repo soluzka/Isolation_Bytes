@@ -3275,7 +3275,7 @@ def quarantine_list():
         return jsonify({'files': service_listing.get('files', []), 'source': 'administrator-service'})
 
     # Path to the quarantine directory (standalone fallback)
-    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantine_dir = QUARANTINE_FOLDER
     os.makedirs(quarantine_dir, exist_ok=True)
     
     quarantined_files = []
@@ -3305,7 +3305,7 @@ def quarantine_list():
 def quarantine_yara_matches():
     """Quarantine cached files with ransomware/persistence YARA matches."""
     global latest_yara_suspicious
-    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantine_dir = QUARANTINE_FOLDER
     quarantined = []
     failed = []
     seen = set()
@@ -3490,7 +3490,7 @@ def quarantine_selected_findings():
     if not paths:
         return jsonify({'status': 'error', 'error': 'No paths selected'}), 400
 
-    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantine_dir = QUARANTINE_FOLDER
     quarantined = []
     failed = []
     for path in paths:
@@ -3786,10 +3786,7 @@ def run_scheduled_scans():
             # monitored roots from rescanning the same file without trusting stale
             # JSON verdicts from an earlier run.
             scanned_paths = set()
-            quarantine_dir = os.path.join(
-                os.environ.get('USERPROFILE', 'C:\\Users\\Default'),
-                'AppData', 'Local', 'Temp', 'Defender_Quarantine'
-            )
+            quarantine_dir = QUARANTINE_FOLDER
             
             for scan_dir in monitored_dirs:
                 if not os.path.exists(scan_dir):
@@ -3938,7 +3935,7 @@ def delete_quarantined_files_quick_start():
     """Delete quarantined files from the quarantine folder."""
     try:
         deleted_count = 0
-        quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+        quarantine_dir = QUARANTINE_FOLDER
         
         if os.path.exists(quarantine_dir):
             for filename in os.listdir(quarantine_dir):
@@ -4091,7 +4088,7 @@ def break_the_cycle_engage():
     if not _admin_service_read('service.status'):
         return jsonify({'ok': False, 'error': 'Antivirus Protected Administrator service is not running.'}), 503
     results = []
-    quarantine_dir = os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    quarantine_dir = QUARANTINE_FOLDER
 
     # 1. Clear old quarantine so AI can fill it with fresh detections
     try:
@@ -4187,7 +4184,7 @@ def break_the_cycle_engage():
 
     # 3. Purge known malware staging temp
     temp_dir = os.environ.get('TEMP', os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp'))
-    staging_patterns = ['Defender_Quarantine*', 'tmp*', 'temp*.exe', 'payload*.tmp']
+    staging_patterns = ['tmp*', 'temp*.exe', 'payload*.tmp']
     purged = 0
     for pattern in staging_patterns:
         for f in glob.glob(os.path.join(temp_dir, pattern)):
