@@ -2313,8 +2313,15 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
 
 @app.route('/api/conditional_startup/status', methods=['GET'])
 def conditional_startup_status():
-    """Status of the last conditional startup run, plus network monitor state."""
+    """Return the live Conditional Startup scanner state from canonical JSON."""
     state = dict(conditional_startup_state)
+    try:
+        with open(_CONDITIONAL_STATE_PATH, 'r', encoding='utf-8') as handle:
+            persisted = json.load(handle)
+        if isinstance(persisted, dict):
+            state.update(persisted)
+    except (OSError, ValueError, TypeError):
+        pass
     state['network_monitor_running'] = bool(globals().get('network_monitor_running'))
     return jsonify(state)
 
