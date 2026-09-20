@@ -3104,6 +3104,56 @@ def agent_report():
     if not device_id or not _get_agent(device_id):
         return jsonify({'error': 'unknown device'}), 404
 
+    # Reassemble chunked scan reports before enrichment so large scans are
+    # never truncated or rejected merely because the finding list is large.
+    scan_id = str(data.get('scan_id') or '').strip()
+    if scan_id and data.get('scan_parts') is not None:
+        try:
+            part_index = int(data.get('scan_part', 0))
+            part_total = max(1, int(data.get('scan_parts', 1)))
+        except (TypeError, ValueError):
+            return jsonify({'error': 'invalid scan chunk metadata'}), 400
+        if part_index < 0 or part_index >= part_total:
+            return jsonify({'error': 'invalid scan chunk index'}), 400
+
+        existing_agent = _get_agent(device_id) or {}
+        pending = existing_agent.get('pending_scan_parts') or {}
+        pending_scan = pending.get(scan_id) or {
+            'parts': {},
+            'total': part_total,
+            'type': data.get('type', 'scan'),
+            'timestamp': data.get('timestamp'),
+            'files_scanned': data.get('files_scanned', existing_agent.get('files_scanned', 0)),
+            'quarantined_count': data.get('quarantined_count', existing_agent.get('quarantined_count', 0)),
+        }
+        pending_scan['parts'][str(part_index)] = data.get('findings') or []
+        pending_scan['total'] = part_total
+        pending[scan_id] = pending_scan
+
+        complete = bool(data.get('scan_complete')) and len(pending_scan['parts']) == part_total
+        if not complete:
+            _update_agent(device_id, {'pending_scan_parts': pending})
+            return jsonify({
+                'ok': True,
+                'findings_processed': len(data.get('findings') or []),
+                'scan_id': scan_id,
+                'scan_part': part_index,
+                'scan_complete': False,
+            }), 200
+
+        merged = []
+        for index in range(part_total):
+            merged.extend(pending_scan['parts'].get(str(index), []))
+        data = dict(data)
+        data['type'] = pending_scan.get('type') or data.get('type', 'scan')
+        data['timestamp'] = pending_scan.get('timestamp') or data.get('timestamp')
+        data['files_scanned'] = pending_scan.get('files_scanned', data.get('files_scanned', 0))
+        data['quarantined_count'] = pending_scan.get('quarantined_count', data.get('quarantined_count', 0))
+        data['findings'] = merged
+        pending.pop(scan_id, None)
+        data['_clear_pending_scan_parts'] = True
+        # Do not persist the temporary chunk accumulator in the final report.
+
     # Enrich findings with classification, risk score, and timestamps
     raw_findings = data.get('findings') or data.get('results') or []
     enriched = []
@@ -3232,6 +3282,9 @@ def agent_report():
         'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,
         'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,
     }
+    if data.get('_clear_pending_scan_parts'):
+        update_fields['pending_scan_parts'] = {}
+
     # Store agent quarantine list when the agent reports it
     if data.get('type') == 'quarantine_list' and 'quarantine_files' in data:
         update_fields['quarantine_files'] = data['quarantine_files']
