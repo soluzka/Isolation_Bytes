@@ -961,6 +961,49 @@ def _persist_conditional_startup_state():
     except Exception as exc:
         logger.warning('Could not persist Conditional Startup state: %s', exc)
 
+def _ensure_conditional_startup_state_files():
+    """Create the current-generation runtime JSON files before scanning starts."""
+    try:
+        os.makedirs(_CONDITIONAL_STATE_DIR, exist_ok=True)
+        with conditional_startup_lock:
+            payload = dict(conditional_startup_state)
+            payload.setdefault('run_id', '')
+            payload.setdefault('started_at', None)
+            payload.setdefault('last_updated', None)
+            payload.setdefault('last_run', None)
+            payload.setdefault('duration', None)
+            payload.setdefault('blocked_threats', 0)
+            payload.setdefault('scan_phase', 'idle')
+            payload['findings'] = list(payload.get('findings') or [])
+            payload['scanner_counters'] = {
+                'scanned_files': int(payload.get('scanned_files') or 0),
+                'quarantined_files': int(payload.get('quarantined_files') or 0),
+                'errors': int(payload.get('errors') or 0),
+                'process_events': int(payload.get('process_events') or 0),
+                'ml_detections': int(payload.get('ml_detections') or 0),
+                'ransomware_indicators': int(payload.get('ransomware_indicators') or 0),
+                'persistence_indicators': int(payload.get('persistence_indicators') or 0),
+                'yara_suspicious': int(payload.get('yara_suspicious') or 0),
+            }
+            payload['scanner_results'] = {
+                'errors': list(latest_errors)[-500:],
+                'process_events': list(latest_process_events)[-500:],
+                'ml_detections': list(latest_ml_detections)[-500:],
+                'ransomware_indicators': list(latest_ransomware_indicators)[-500:],
+                'persistence_indicators': dict(latest_persistence_indicators),
+                'yara_suspicious': list(latest_yara_suspicious)[-500:],
+                'quarantined_files': list(latest_quarantined_files)[-500:],
+            }
+        for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
+            tmp = target + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, target)
+        return True
+    except Exception as exc:
+        logger.warning('Could not initialize Conditional Startup state files: %s', exc)
+        return False
+
 def _refresh_conditional_startup_state():
     """Refresh counters from the shared state file when another worker wrote them."""
     try:
@@ -1519,6 +1562,8 @@ def start_conditional_startup_scan():
     the cloud's /run_startup endpoint cannot reset counters without starting
     the actual scanner.
     """
+    _ensure_conditional_startup_state_files()
+
     global conditional_startup_thread
 
     with conditional_startup_lock:
