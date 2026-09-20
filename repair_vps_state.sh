@@ -53,7 +53,7 @@ create_json "$APP/trusted_hashes.json" '{}'
 create_json "$APP/yara_rule_reputation.json" '{}'
 create_json "$APP/voice_scan_status.json" '{}'
 create_json "$APP/scheduled_scan_state.json" '{"enabled": false}'
-create_json "$APP/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}'
+# Indicator history is never recreated or cleared by repair; these calls only create missing files.\ncreate_json "$APP/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}'
 create_json "$APP/scanner_results.json" '{"scanner_counters": {"scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}, "scanner_results": {"errors": [], "process_events": [], "ml_detections": [], "ransomware_indicators": [], "persistence_indicators": {}, "yara_suspicious": [], "quarantined_files": []}}'
 create_json "$APP/data/scan_cache.json" '{}'
 # Ensure the deployed runtime points at the application-owned state directory.
