@@ -1284,120 +1284,137 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
 
 
 def run_conditional_startup_background():
-    """Run the conditional startup scan once in a background thread."""
+    """Run Conditional Startup continuously until the process is stopped.
+
+    Each completed pass immediately schedules the next pass. The shared state
+    remains running between passes so the dashboard never reports a completed
+    scan while continuous protection is enabled.
+    """
     global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
     from conditional_startup import run_conditional_startup_logic, STOP_EVENT
-    STOP_EVENT.clear()
-    start_time = time.time()
-    _last_progress_report = 0.0
 
-    def report_progress(partial_results):
-        """Publish current-run progress to shared state."""
-        global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators, latest_errors, latest_ml_detections, latest_process_events, latest_quarantined_files
-        nonlocal _last_progress_report
-        now = time.time()
-        if now - _last_progress_report < 0.2:
-            return
-        _last_progress_report = now
-        errors = partial_results.get('errors', [])
-        # Publish the scanner's current-run counters directly to the dashboard state.
-        # Keep the durable scanner-results document synchronized with the
-        # exact same progress snapshot used by the dashboard.
-        new_counts = {
-            'scanned_files': int(partial_results.get('scanned_files_count') or 0),
-            'quarantined_files': len(partial_results.get('quarantined_files') or []),
-            'errors': len(partial_results.get('errors') or []),
-            'process_events': len(partial_results.get('process_events') or []),
-            'ml_detections': len(partial_results.get('ml_detections') or []),
-            'ransomware_indicators': len(partial_results.get('ransomware_indicators') or []),
-            'persistence_indicators': _count_persistence_indicators(partial_results),
-            'yara_suspicious': len(partial_results.get('yara_suspicious') or []),
-        }
+    while True:
+        if STOP_EVENT.is_set():
+            STOP_EVENT.clear()
+
+        start_time = time.time()
+        _last_progress_report = 0.0
+
+        def report_progress(partial_results):
+            """Publish current-pass progress to shared state."""
+            global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators, latest_errors, latest_ml_detections, latest_process_events, latest_quarantined_files
+            nonlocal _last_progress_report
+            now = time.time()
+            if now - _last_progress_report < 0.2:
+                return
+            _last_progress_report = now
+            errors = partial_results.get('errors', [])
+            new_counts = {
+                'scanned_files': int(partial_results.get('scanned_files_count') or 0),
+                'quarantined_files': len(partial_results.get('quarantined_files') or []),
+                'errors': len(partial_results.get('errors') or []),
+                'process_events': len(partial_results.get('process_events') or []),
+                'ml_detections': len(partial_results.get('ml_detections') or []),
+                'ransomware_indicators': len(partial_results.get('ransomware_indicators') or []),
+                'persistence_indicators': _count_persistence_indicators(partial_results),
+                'yara_suspicious': len(partial_results.get('yara_suspicious') or []),
+            }
+            with conditional_startup_lock:
+                conditional_startup_state.update({
+                    'running': True,
+                    'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'scanned_files': new_counts['scanned_files'],
+                    'quarantined_files': new_counts['quarantined_files'],
+                    'errors': new_counts['errors'],
+                    'process_events': new_counts['process_events'],
+                    'ml_detections': new_counts['ml_detections'],
+                    'ransomware_indicators': new_counts['ransomware_indicators'],
+                    'persistence_indicators': new_counts['persistence_indicators'],
+                    'yara_suspicious': new_counts['yara_suspicious'],
+                    'blocked_threats': 0,
+                    'last_error': str(errors[-1]) if errors else None,
+                    'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
+                })
+                latest_yara_suspicious = list(partial_results.get('yara_suspicious') or [])
+                latest_ransomware_indicators = list(partial_results.get('ransomware_indicators') or [])
+                latest_persistence_indicators = partial_results.get('persistence_indicators', {}) or {}
+                latest_errors = list(partial_results.get('errors') or [])
+                latest_ml_detections = list(partial_results.get('ml_detections') or [])
+                latest_process_events = list(partial_results.get('process_events') or [])
+                latest_quarantined_files = list(partial_results.get('quarantined_files') or [])
+                try:
+                    conditional_startup_state['findings'] = _findings_for_review()
+                except Exception:
+                    conditional_startup_state['findings'] = []
+            _persist_conditional_startup_state()
+
         with conditional_startup_lock:
+            run_started = str(conditional_startup_state.get('started_at') or '') or time.strftime('%Y-%m-%d %H:%M:%S')
+            run_id = str(conditional_startup_state.get('run_id') or '') or hashlib.sha256(
+                f'{run_started}:{time.time_ns()}'.encode()
+            ).hexdigest()[:24]
             conditional_startup_state.update({
+                'run_id': run_id,
                 'running': True,
+                'started_at': run_started,
+                'last_run': run_started,
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-                'scanned_files': new_counts['scanned_files'],
-                'quarantined_files': new_counts['quarantined_files'],
-                'errors': new_counts['errors'],
-                'process_events': new_counts['process_events'],
-                'ml_detections': new_counts['ml_detections'],
-                'ransomware_indicators': new_counts['ransomware_indicators'],
-                'persistence_indicators': new_counts['persistence_indicators'],
-                'yara_suspicious': new_counts['yara_suspicious'],
-                'blocked_threats': 0,
-                'last_error': str(errors[-1]) if errors else None,
-                'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
+                'duration': None,
+                'last_error': None,
+                'scan_phase': 'starting',
             })
-            latest_yara_suspicious = list(partial_results.get('yara_suspicious') or [])
-            latest_ransomware_indicators = list(partial_results.get('ransomware_indicators') or [])
-            latest_persistence_indicators = partial_results.get('persistence_indicators', {}) or {}
-            latest_errors = list(partial_results.get('errors') or [])
-            latest_ml_detections = list(partial_results.get('ml_detections') or [])
-            latest_process_events = list(partial_results.get('process_events') or [])
-            latest_quarantined_files = list(partial_results.get('quarantined_files') or [])
-            try:
-                conditional_startup_state['findings'] = _findings_for_review()
-            except Exception:
-                conditional_startup_state['findings'] = []
         _persist_conditional_startup_state()
 
-    # If the caller already created a live generation, keep its run_id.
-    # Otherwise create one here for direct/internal callers.
-    with conditional_startup_lock:
-        existing_run_id = str(conditional_startup_state.get('run_id') or '')
-        already_running = bool(conditional_startup_state.get('running') and existing_run_id)
-        run_started = str(conditional_startup_state.get('started_at') or '') or time.strftime('%Y-%m-%d %H:%M:%S')
-        run_id = existing_run_id or hashlib.sha256(
-            f'{run_started}:{time.time_ns()}'.encode()
-        ).hexdigest()[:24]
-        conditional_startup_state.update({
-            'run_id': run_id,
-            'findings': [] if not already_running else list(conditional_startup_state.get('findings') or []),
-            'running': True,
-            'started_at': run_started,
-            'last_run': run_started,
-            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'duration': None,
-            'scanned_files': int(conditional_startup_state.get('scanned_files') or 0) if already_running else 0,
-            'quarantined_files': int(conditional_startup_state.get('quarantined_files') or 0) if already_running else 0,
-            'errors': int(conditional_startup_state.get('errors') or 0) if already_running else 0,
-            'process_events': int(conditional_startup_state.get('process_events') or 0) if already_running else 0,
-            'ml_detections': int(conditional_startup_state.get('ml_detections') or 0) if already_running else 0,
-            'ransomware_indicators': int(conditional_startup_state.get('ransomware_indicators') or 0) if already_running else 0,
-            'persistence_indicators': int(conditional_startup_state.get('persistence_indicators') or 0) if already_running else 0,
-            'yara_suspicious': int(conditional_startup_state.get('yara_suspicious') or 0) if already_running else 0,
-            'last_error': None,
-            'scan_phase': 'starting',
-        })
-    _persist_conditional_startup_state()
+        try:
+            with scanning_lock:
+                critical_dirs = list(folder_watcher_state.get('monitored_paths', []))
+                if not critical_dirs:
+                    critical_dirs = None
+                scan_data = run_conditional_startup_logic(
+                    open_browser=False,
+                    progress_callback=report_progress,
+                    critical_dirs=critical_dirs
+                )
 
-    try:
-        with scanning_lock:
-            critical_dirs = list(folder_watcher_state.get('monitored_paths', []))
-            if not critical_dirs:
-                critical_dirs = None
-            scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress, critical_dirs=critical_dirs)
-        with conditional_startup_lock:
-            record_conditional_startup_run(scan_data, time.time() - start_time)
+            # Keep the continuous generation alive instead of recording a
+            # completed/idle state. Counters represent the latest live pass;
+            # findings are refreshed for the next pass.
             if isinstance(scan_data, dict):
                 latest_yara_suspicious = scan_data.get('yara_suspicious', [])
                 latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
                 latest_persistence_indicators = scan_data.get('persistence_indicators', {})
-            else:
-                latest_yara_suspicious = []
-                latest_ransomware_indicators = []
-                latest_persistence_indicators = {}
-        _persist_conditional_startup_state()
-        logger.info("Conditional startup scan completed")
-    except BaseException as e:
-        # BaseException so SystemExit raised by imported modules (e.g. missing
-        # FERNET_KEY) is recorded instead of leaving the state stuck on running
-        logger.error(f"Error running conditional startup: {e!r}")
-        with conditional_startup_lock:
-            record_conditional_startup_run(error=e, duration=time.time() - start_time)
-        _persist_conditional_startup_state()
+                with conditional_startup_lock:
+                    conditional_startup_state.update({
+                        'running': True,
+                        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                        'duration': round(time.time() - start_time, 2),
+                        'scan_phase': 'continuous-wait',
+                        'last_error': None,
+                    })
+                    try:
+                        conditional_startup_state['findings'] = _findings_for_review()
+                    except Exception:
+                        conditional_startup_state['findings'] = []
+            _persist_conditional_startup_state()
+            logger.info("Conditional startup scan pass completed; continuing continuous protection")
+        except BaseException as e:
+            logger.error(f"Error running continuous conditional startup scan: {e!r}")
+            with conditional_startup_lock:
+                conditional_startup_state.update({
+                    'running': True,
+                    'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'duration': round(time.time() - start_time, 2),
+                    'last_error': str(e),
+                    'scan_phase': 'continuous-error',
+                })
+            _persist_conditional_startup_state()
 
+        # Brief yield between full passes. The next pass starts automatically.
+        for _ in range(2):
+            if STOP_EVENT.is_set():
+                break
+            time.sleep(1)
 
 def _find_models_dir():
     """Find the models directory — works both in dev mode and when running
