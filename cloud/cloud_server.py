@@ -277,23 +277,12 @@ def _canonical_yara_agent_state():
                 # Keep the generation baseline after completion so the dashboard
                 # continues to expose only this run's counters. The next explicit
                 # scan trigger replaces this state with a fresh baseline.
-            elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
-                # A queued trigger is only considered live for a short
-                # acknowledgement window. If the agent never consumes the
-                # command, do not leave the dashboard permanently stuck at
-                # Running... with zero counters.
-                if started and now - started >= 120 and not current_scan_id:
-                    running = False
-                    _agent_scan_state.pop(device_id, None)
-                    try:
-                        _legacy.commands[device_id] = [
-                            cmd for cmd in _legacy.commands.get(device_id, [])
-                            if not (isinstance(cmd, dict) and cmd.get('action') == 'scan_now')
-                        ]
-                    except Exception:
-                        pass
-                else:
-                    running = True
+            elif pending_scan or started:
+                # A scan generation is persistent. Do not turn it idle merely
+                # because two minutes have elapsed or because the agent has not
+                # published its scan_id yet. The Windows normal scan is intended
+                # to remain active indefinitely until the process itself exits.
+                running = True
             else:
                 running = False
         elif pending_scan:
