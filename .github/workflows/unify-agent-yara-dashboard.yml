@@ -23,7 +23,7 @@ jobs:
         run: |
           set -euo pipefail
           grep -F "def _complete_agent_scan_results_response" cloud/cloud_server.py >/dev/null
-          grep -F "build_complete_agent_scan_results(_legacy)" cloud/cloud_server.py >/dev/null
+          grep -F "build_complete_agent_scan_results(_legacy, _agent_scan_state)" cloud/cloud_server.py >/dev/null
           grep -F "def _agent_trigger_scan_response" cloud/cloud_server.py >/dev/null
           grep -F "'status': 'started'" cloud/cloud_server.py >/dev/null
           grep -F "data.status === 'started'" templates/index.html >/dev/null
