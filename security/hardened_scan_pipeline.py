@@ -200,10 +200,19 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         evidence,
         yara_severity=yara_severity,
         ml_confidence=ml_confidence,
+        code_analysis_score=static_score,
+        threat_score=threat.get("score", 0.0),
         antivirus_confirmed=False,
     )
     independent_decision = (
-        quarantine_decision(evidence, yara_severity="", ml_confidence=ml_confidence, antivirus_confirmed=False)
+        quarantine_decision(
+            evidence,
+            yara_severity="",
+            ml_confidence=ml_confidence,
+            code_analysis_score=static_score,
+            threat_score=threat.get("score", 0.0),
+            antivirus_confirmed=False,
+        )
         if research_asset else decision
     )
 
