@@ -1064,10 +1064,48 @@ def _persist_conditional_startup_state():
         logger.warning('Could not persist Conditional Startup state: %s', exc)
 
 def _ensure_conditional_startup_state_files():
-    """Create the current-generation runtime JSON files before scanning starts."""
+    """Create runtime JSON files without replacing persisted scanner history."""
     try:
         os.makedirs(_CONDITIONAL_STATE_DIR, exist_ok=True)
+        persisted = {}
+        try:
+            if os.path.isfile(_SCANNER_RESULTS_FILE):
+                with open(_SCANNER_RESULTS_FILE, 'r', encoding='utf-8') as handle:
+                    persisted = json.load(handle) or {}
+                if isinstance(persisted.get('scanner_results'), dict):
+                    persisted = {**persisted, **persisted['scanner_results']}
+        except (OSError, ValueError, TypeError):
+            persisted = {}
+
         with conditional_startup_lock:
+            # Persisted collections are authoritative across worker/process restarts.
+            # Never write an empty default over existing scanner evidence.
+            for key in (
+                'errors', 'process_events', 'ml_detections',
+                'ransomware_indicators', 'yara_suspicious', 'quarantined_files'
+            ):
+                if key in persisted:
+                    conditional_startup_state[key] = list(persisted.get(key) or [])
+            if isinstance(persisted.get('persistence_indicators'), dict):
+                conditional_startup_state['persistence_indicators'] = dict(
+                    persisted.get('persistence_indicators') or {}
+                )
+            for key in (
+                'scanned_files', 'quarantined_files', 'errors', 'process_events',
+                'ml_detections', 'ransomware_indicators', 'persistence_indicators',
+                'yara_suspicious', 'blocked_threats'
+            ):
+                value = persisted.get(key)
+                if value is None:
+                    value = (persisted.get('counts') or {}).get(key)
+                if value is not None:
+                    try:
+                        conditional_startup_state[key] = max(
+                            int(conditional_startup_state.get(key) or 0),
+                            int(value or 0),
+                        )
+                    except (TypeError, ValueError):
+                        pass
             payload = dict(conditional_startup_state)
             payload.setdefault('run_id', '')
             payload.setdefault('started_at', None)
@@ -1076,36 +1114,37 @@ def _ensure_conditional_startup_state_files():
             payload.setdefault('duration', None)
             payload.setdefault('blocked_threats', 0)
             payload.setdefault('scan_phase', 'idle')
-            payload['findings'] = list(payload.get('findings') or [])
+            payload['findings'] = list(payload.get('findings') or persisted.get('findings') or [])
             payload['scanner_counters'] = {
                 'scanned_files': int(payload.get('scanned_files') or 0),
-                'quarantined_files': int(payload.get('quarantined_files') or 0),
-                'errors': int(payload.get('errors') or 0),
-                'process_events': int(payload.get('process_events') or 0),
-                'ml_detections': int(payload.get('ml_detections') or 0),
-                'ransomware_indicators': int(payload.get('ransomware_indicators') or 0),
+                'quarantined_files': len(payload.get('quarantined_files') or []),
+                'errors': len(payload.get('errors') or []),
+                'process_events': len(payload.get('process_events') or []),
+                'ml_detections': len(payload.get('ml_detections') or []),
+                'ransomware_indicators': len(payload.get('ransomware_indicators') or []),
                 'persistence_indicators': int(payload.get('persistence_indicators') or 0),
-                'yara_suspicious': int(payload.get('yara_suspicious') or 0),
+                'yara_suspicious': len(payload.get('yara_suspicious') or []),
+                'blocked_threats': int(payload.get('blocked_threats') or 0),
             }
+            payload['counts'] = dict(payload['scanner_counters'])
             payload['scanner_results'] = {
-                'errors': list(latest_errors),
-                'process_events': list(latest_process_events),
-                'ml_detections': list(latest_ml_detections),
-                'ransomware_indicators': list(latest_ransomware_indicators),
-                'persistence_indicators': dict(latest_persistence_indicators),
-                'yara_suspicious': list(latest_yara_suspicious),
-                'quarantined_files': list(latest_quarantined_files),
+                'errors': list(payload.get('errors') or []),
+                'process_events': list(payload.get('process_events') or []),
+                'ml_detections': list(payload.get('ml_detections') or []),
+                'ransomware_indicators': list(payload.get('ransomware_indicators') or []),
+                'persistence_indicators': dict(payload.get('persistence_indicators') or {}),
+                'yara_suspicious': list(payload.get('yara_suspicious') or []),
+                'quarantined_files': list(payload.get('quarantined_files') or []),
+                'counts': payload['counts'],
+                'scanner_counters': payload['scanner_counters'],
             }
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
             with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(payload, f, ensure_ascii=False)
             os.replace(tmp, target)
-        return True
     except Exception as exc:
         logger.warning('Could not initialize Conditional Startup state files: %s', exc)
-        return False
-
 def _refresh_conditional_startup_state():
     """Refresh counters from the shared state file when another worker wrote them."""
     try:
