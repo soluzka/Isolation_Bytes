@@ -26,11 +26,42 @@ try:
 except ImportError:
     pass
 
-from cloud.cloud_server import create_cloud_app
+import logging
+from flask import Flask, jsonify
 
-# Build the app once at module import. WSGI servers import this module and
-# look up `application` (the conventional WSGI callable name).
-application = create_cloud_app()
+logger = logging.getLogger("isolation_bytes_wsgi")
+
+# Build the production application once at module import. If a newly deployed
+# optional dependency or application import fails, keep Gunicorn alive with a
+# minimal diagnostic application instead of allowing the upstream to disappear
+# and Cloudflare to return a generic 502. The original exception is logged to
+# stderr/journal and exposed only as a generic health status.
+try:
+    from cloud.cloud_server import create_cloud_app
+    application = create_cloud_app()
+    _startup_error = None
+except Exception as exc:
+    _startup_error = exc
+    logger.exception("Isolation Bytes WSGI application failed to initialize")
+    application = Flask("isolation_bytes_startup_fallback")
+
+    @application.get("/healthz")
+    def _startup_healthz():
+        return jsonify({
+            "status": "degraded",
+            "application": "Isolation Bytes",
+            "error": "Application startup failed; inspect antivirus-cloud journal.",
+        }), 503
+
+    @application.route("/", methods=["GET", "HEAD"])
+    @application.route("/login", methods=["GET", "HEAD"])
+    def _startup_unavailable():
+        return (
+            "Isolation Bytes is temporarily unavailable while the server "
+            "application is recovering. Check the antivirus-cloud service log.",
+            503,
+            {"Content-Type": "text/plain; charset=utf-8"},
+        )
 
 
 if __name__ == '__main__':
