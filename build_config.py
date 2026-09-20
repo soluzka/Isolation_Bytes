@@ -90,76 +90,107 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Repair the Analysis options needed for a reproducible PyInstaller build."""
+    """Normalize PyInstaller Analysis options without spec-incompatible CLI flags."""
     import ast
 
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
-
-    if 'Analysis(' not in content:
+    if not re.search(r'\bAnalysis\s*\(', content):
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
-
     wanted = list(dict.fromkeys(str(m) for m in modules))
     lines = content.splitlines()
     normalized = []
+    hook_found = False
     excludes_found = False
-    analysis_found = False
     skip_excludes_continuation = False
-    existing_excludes = []
-
     for line in lines:
         stripped = line.strip()
-
         if skip_excludes_continuation:
-            # The excludes option is conventionally followed by noarchive.
-            # This also repairs specs whose excludes list was left malformed.
             if stripped.startswith('noarchive=') or stripped.startswith('noarchive ='):
                 skip_excludes_continuation = False
                 normalized.append(line)
             continue
-
         if stripped.startswith('hookspath=') or stripped.startswith('hookspath ='):
             indent = line[:len(line) - len(line.lstrip())]
             hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks')
             normalized.append(indent + 'hookspath=[' + repr(hook_dir) + '],')
+            hook_found = True
             continue
-
         if stripped.startswith('excludes=') or stripped.startswith('excludes ='):
             indent = line[:len(line) - len(line.lstrip())]
+            existing = []
             try:
                 value = stripped.split('=', 1)[1].strip().rstrip(',')
                 parsed = ast.literal_eval(value)
                 if isinstance(parsed, (list, tuple)):
-                    existing_excludes = [str(x) for x in parsed]
+                    existing = [str(x) for x in parsed]
             except (SyntaxError, ValueError):
-                existing_excludes = []
-
-            merged = list(dict.fromkeys(existing_excludes + wanted))
+                pass
+            merged = list(dict.fromkeys(existing + wanted))
             normalized.append(indent + 'excludes=[' + ', '.join(repr(x) for x in merged) + '],')
             excludes_found = True
-            # If the original option spans multiple lines, discard its
-            # continuation until the next Analysis option.
             if not stripped.endswith(']'):
                 skip_excludes_continuation = True
             continue
-
         normalized.append(line)
-        if stripped.startswith('Analysis('):
-            analysis_found = True
-
-    if not analysis_found:
-        raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
-
+    content = chr(10).join(normalized) + chr(10)
+    if not hook_found:
+        content = re.sub(r'(\bAnalysis\s*\(\s*\n)', lambda m: m.group(1) + '    hookspath=[' + repr(os.path.join(BASE_DIR, 'pyinstaller_hooks')) + '],\n', content, count=1)
     if not excludes_found:
-        for i, line in enumerate(normalized):
-            if line.strip().startswith('Analysis('):
-                normalized.insert(i + 1, '    excludes=[' + ', '.join(repr(x) for x in wanted) + '],')
-                break
-
+        content = re.sub(r'(\bAnalysis\s*\(\s*\n)', lambda m: m.group(1) + '    excludes=[' + ', '.join(repr(x) for x in wanted) + '],\n', content, count=1)
     with open(spec_path, 'w', encoding='utf-8') as f:
-        f.write(chr(10).join(normalized) + chr(10))
+        f.write(content)
+    print(f'PyInstaller spec normalized: {os.path.basename(spec_path)}')
+    print(f'  exclusions: {", ".join(wanted)}')
 
-    print(f'PyInstaller spec exclusions ensured: {", ".join(wanted)}')
+def _generate_antivirus_server_spec(spec_path):
+    """Generate the antivirus server spec so stale local specs cannot break builds."""
+    project = BASE_DIR.replace('\\', '\\\\')
+    data_dirs = ['templates', 'static', 'website', 'security', 'blocklists', 'utils', 'yara_rules']
+    datas = []
+    for directory in data_dirs:
+        source = os.path.join(BASE_DIR, directory)
+        if os.path.isdir(source):
+            datas.append((source, directory))
+    data_str = ',\n    '.join('(' + repr(src) + ', ' + repr(dst) + ')' for src, dst in datas)
+    hidden = ['flask','flask.sessions','flask_cors','flask_limiter','flask_wtf','werkzeug','requests','psutil','ssl','dotenv','cryptography','cryptography.fernet','bcrypt','pyotp','security.yara_scanner','security.c2_detector','security.secure_memory','security.local_assistant','security.assistant_trainer','security.assistant_database','security.local_agent','quarantine_utils','file_crypto','utils.paths','waitress','sklearn','sklearn.ensemble','sklearn.linear_model','sklearn.svm','sklearn.tree','sklearn.neural_network','sklearn.preprocessing','sklearn.decomposition','sklearn.pipeline','sklearn.metrics','sklearn.model_selection','numpy','scipy','scipy.sparse','onnxruntime','yara','joblib','pefile','tlsh','lief']
+    excludes = ['tensorflow','torch','torchvision','sentence_transformers','transformers','safetensors','matplotlib','IPython','ipykernel','notebook','pytest','pydantic','pydantic_core']
+    spec = """# -*- mode: python ; coding: utf-8 -*-
+# AUTO-GENERATED by build_config.py. Do not edit manually.
+datas = [
+    %s
+]
+binaries = []
+hiddenimports = [%s]
+excludes = [%s]
+
+a = Analysis(
+    [r'%s\\app.py'],
+    pathex=[r'%s'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[r'%s\\pyinstaller_hooks'],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz, a.scripts, a.binaries, a.datas, [],
+    name='antivirus_server',
+    debug=False, bootloader_ignore_signals=False, strip=False,
+    upx=True, upx_exclude=[], runtime_tmpdir=None,
+    console=True, disable_windowed_traceback=False, argv_emulation=False,
+    target_arch=None, codesign_identity=None, entitlements_file=None,
+)
+""" % (data_str, ', '.join(repr(x) for x in hidden), ', '.join(repr(x) for x in excludes), project, project, project)
+    with open(spec_path, 'w', encoding='utf-8') as f:
+        f.write(spec)
+    print(f'Generated antivirus_server.spec: {spec_path}')
+
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
@@ -287,14 +318,11 @@ if not args.skip_exe:
         shutil.rmtree(BUILD_DIR, ignore_errors=True)
 
     spec = os.path.join(BASE_DIR, 'antivirus_server.spec')
-    if not os.path.isfile(spec):
-        print(f'ERROR: {spec} not found')
-        sys.exit(1)
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
-    # Exclusions must be encoded in the .spec Analysis() call; PyInstaller
-    # rejects --exclude-module when a .spec file is supplied.
-    _ensure_spec_excludes(spec, ('pydantic', 'pydantic_core'))
+    # Always regenerate this local spec from repository configuration. This
+    # prevents stale/manual specs from causing syntax or option errors.
+    _generate_antivirus_server_spec(spec)
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
          '--distpath', DIST_DIR,
