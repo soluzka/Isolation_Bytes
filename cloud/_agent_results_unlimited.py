@@ -80,9 +80,6 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             status = str(
                 agent.get("scan_status") or report.get("scan_status") or "idle"
             ).lower()
-            current_path = (
-                agent.get("scan_current_path")
-                or report.get("scan_current_path")
                 or ""
             )
             last_scan = (
