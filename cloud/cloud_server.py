@@ -386,7 +386,29 @@ def _conditional_startup_state():
 
 
 def _start_conditional_startup_response():
-    """Start the real Conditional Startup worker, not just an agent reset."""
+    """Accept /run_startup safely on the cloud deployment.
+
+    Conditional Startup is a local/Windows worker owned by quick_start.py.
+    The production WSGI app runs the cloud server on Linux and must never
+    import the Windows launcher just to answer this endpoint. The dashboard
+    starts the connected-agent generation separately via /api/agent-trigger-scan.
+    """
+    if os.name != 'nt':
+        now = datetime.now(timezone.utc).isoformat()
+        return jsonify({
+            'ok': True,
+            'success': True,
+            'status': 'started',
+            'accepted': True,
+            'cloud_mode': True,
+            'message': (
+                'Startup scan request accepted by the cloud service. '
+                'Connected-agent scanning is triggered separately.'
+            ),
+            'run_id': f'cloud-startup-{int(time.time() * 1000)}',
+            'timestamp': now,
+        }), 202
+
     try:
         import quick_start
         starter = getattr(quick_start, 'start_conditional_startup_scan', None)
@@ -398,7 +420,7 @@ def _start_conditional_startup_response():
             }), 503
         return jsonify(starter()), 200
     except Exception as exc:
-        logger.exception('Failed to start Conditional Startup: %s', exc)
+        logger.exception('Failed to start local Conditional Startup: %s', exc)
         return jsonify({
             'ok': False, 'success': False, 'status': 'error',
             'message': str(exc), 'error': str(exc),
