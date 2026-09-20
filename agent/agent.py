@@ -63,6 +63,13 @@ except Exception as exc:
     quarantine_utils = None
     print(f'Could not load quarantine_utils: {exc}')
 
+try:
+    from agent.prompt_learning import learn_from_prompt, recall_prompt_lessons
+except Exception as exc:
+    learn_from_prompt = None
+    recall_prompt_lessons = lambda prompt, limit=5: []
+    print(f'Prompt learning unavailable: {exc}')
+
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / '.env')
 CLOUD_URL = os.environ.get('CLOUD_URL', 'http://localhost:5002').rstrip('/')
@@ -398,12 +405,32 @@ def _execute_voice_command(cmd):
     raw = cmd.get('command', '')
     apply_fix = bool(cmd.get('apply_fix', False))
     try:
+        # Prior lessons are context only. They are never executed as commands.
+        lessons = recall_prompt_lessons(raw, limit=3)
         import voice_assistant
-        result = voice_assistant.run_command(voice_assistant.parse_intent(raw), raw_command=raw, apply_fix=apply_fix)
-        _post_voice_result(job_id, 'completed', result)
+        result = voice_assistant.run_command(
+            voice_assistant.parse_intent(raw),
+            raw_command=raw,
+            apply_fix=apply_fix,
+        )
+        if learn_from_prompt is not None:
+            learn_from_prompt(
+                raw,
+                str(result),
+                outcome='completed',
+                feedback=0,
+            )
+        _post_voice_result(job_id, 'completed', {
+            'result': result,
+            'learned_context': lessons,
+        })
     except ImportError:
+        if learn_from_prompt is not None:
+            learn_from_prompt(raw, 'voice assistant unavailable', outcome='error', feedback=-1)
         _post_voice_result(job_id, 'error', 'This agent build does not support voice commands yet.')
     except Exception as exc:
+        if learn_from_prompt is not None:
+            learn_from_prompt(raw, str(exc), outcome='error', feedback=-1)
         _post_voice_result(job_id, 'error', str(exc))
 
 
