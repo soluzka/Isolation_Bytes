@@ -182,6 +182,8 @@ def _canonical_yara_agent_state():
     ransomware_indicators = 0
     persistence_indicators = 0
     blocked_threats = 0
+    errors = 0
+    process_events = 0
     last_scan = ''
     current_status = 'idle'
     current_started_at = ''
@@ -249,6 +251,19 @@ def _canonical_yara_agent_state():
                 blocked_threats += max(0, int(
                     agent.get('threats_blocked', report.get('threats_blocked', 0)) or 0
                 ))
+                counters = report.get('scanner_counters') or agent.get('scanner_counters') or {}
+                errors += max(0, int(counters.get('errors', 0) or 0))
+                process_events += max(0, int(counters.get('process_events', 0) or 0))
+                # Prefer authoritative agent counters for the current generation.
+                ml_detections += max(0, int(
+                    agent.get('total_ml', report.get('total_ml', counters.get('ml_detections', 0))) or 0
+                ))
+                ransomware_indicators += max(0, int(
+                    agent.get('total_ransomware', report.get('total_ransomware', counters.get('ransomware_indicators', 0))) or 0
+                ))
+                persistence_indicators += max(0, int(
+                    agent.get('total_persistence', report.get('total_persistence', counters.get('persistence_indicators', 0))) or 0
+                ))
             # If the agent has not published this generation's scan_id yet,
             # keep the dashboard at zero/queued rather than showing history.
         else:
@@ -315,10 +330,8 @@ def _canonical_yara_agent_state():
             findings.append(item)
             threat = str(item.get('threat_type') or '').lower()
             rule = str(item.get('rule') or '').lower()
-            if 'ransom' in threat or 'ransom' in rule:
-                ransomware_indicators += 1
-            if 'persist' in threat or 'persist' in rule:
-                persistence_indicators += 1
+            # Threat counters are taken from the authoritative generation totals above.
+            # Do not increment them again from the latest report's findings.
 
         for finding in report_findings:
             if not isinstance(finding, dict):
@@ -354,8 +367,8 @@ def _canonical_yara_agent_state():
         'scanned_files': scanned_files,
         'quarantined_files': quarantined_files,
         'blocked_threats': blocked_threats,
-        'errors': 0,
-        'process_events': 0,
+        'errors': errors,
+        'process_events': process_events,
         'ml_detections': ml_detections,
         'ransomware_indicators': ransomware_indicators,
         'persistence_indicators': persistence_indicators,
