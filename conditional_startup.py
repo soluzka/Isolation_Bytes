@@ -1481,11 +1481,12 @@ def _sync_scan_state_from_results(results, status=None):
         current_process_events = len(results.get("process_events") or [])
         state.update({
             "scan_id": scan_id,
+            "scan_owner": "conditional-startup",
             "status": status or ("complete" if results.get("_scan_complete") else "scanning"),
             "started_at": state.get("started_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "complete": bool(status == "complete" or results.get("_scan_complete")),
-            "files_scanned": max(int(state.get("files_scanned") or 0), current_files),
+            "files_scanned": current_files,
             "quarantined_count": max(int(state.get("quarantined_count") or 0), current_quarantined),
             "threats_blocked": max(int(state.get("threats_blocked") or 0), current_blocked),
             "findings": max(int(state.get("findings") or 0), current_findings),
