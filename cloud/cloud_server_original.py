@@ -2856,7 +2856,8 @@ def github_webhook():
                 pass
         return jsonify({'error': f'deployment update failed: {e}'}), 500
 
-    # Restart only after the new revision passes syntax validation.
+    # Restart only after the new revision passes syntax validation, then
+    # verify the actual localhost origin before reporting deployment success.
     try:
         restarted = _sp.run(
             ['systemctl', 'restart', 'antivirus-cloud'],
@@ -2867,10 +2868,52 @@ def github_webhook():
                 'error': 'service restart failed',
                 'details': (restarted.stderr or restarted.stdout or '').strip(),
             }), 500
-    except Exception as e:
-        return jsonify({'error': f'service restart failed: {e}'}), 500
 
-    return jsonify({'msg': 'validated, pulled, and restarted'}), 200
+        healthy = False
+        health_error = ''
+        for _attempt in range(20):
+            try:
+                probe = _sp.run(
+                    ['curl', '-fsS', '--max-time', '5', '-o', '/dev/null',
+                     'http://127.0.0.1:5002/'],
+                    capture_output=True, text=True, timeout=8
+                )
+                if probe.returncode == 0:
+                    healthy = True
+                    break
+                health_error = (probe.stderr or probe.stdout or '').strip()
+            except Exception as exc:
+                health_error = str(exc)
+            time.sleep(1)
+
+        if not healthy:
+            details = health_error
+            try:
+                status = _sp.run(
+                    ['systemctl', '--no-pager', '--full', 'status',
+                     'antivirus-cloud'],
+                    capture_output=True, text=True, timeout=15
+                )
+                details = (status.stdout or status.stderr or details).strip()
+            except Exception:
+                pass
+            if previous_revision:
+                _sp.run(
+                    ['git', 'reset', '--hard', previous_revision],
+                    cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
+                )
+                _sp.run(
+                    ['systemctl', 'restart', 'antivirus-cloud'],
+                    capture_output=True, text=True, timeout=30
+                )
+            return jsonify({
+                'error': 'deployment health check failed; previous revision restored',
+                'details': details,
+            }), 500
+    except Exception as e:
+        return jsonify({'error': f'service restart/health check failed: {e}'}), 500
+
+    return jsonify({'msg': 'validated, restarted, and origin healthy'}), 200
 
 
 # ---------------------------------------------------------------------------
