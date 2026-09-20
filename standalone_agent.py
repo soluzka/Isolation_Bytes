@@ -2171,8 +2171,28 @@ X-GNOME-Autostart-enabled=true
             return findings
         if not hasattr(self, '_skipped_files'):
             self._skipped_files = set()
+        # Never scan the scanner's own runtime state or quarantine tree.
+        # Full-PC roots such as C:\\ and C:\\Users would otherwise recurse
+        # into LocalAppData\\IsolationBytes and count historical quarantine
+        # artifacts/state files as current scan files.
+        runtime_root = os.path.normcase(os.path.abspath(
+            os.environ.get(
+                'ANTIVIRUS_RUNTIME_DIR',
+                os.path.join(
+                    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+                    'IsolationBytes'
+                )
+            )
+        ))
+        quarantine_root = os.path.normcase(os.path.abspath(QUARANTINE_DIR))
+        excluded_roots = {runtime_root, quarantine_root}
+
         for root, dirs, files in os.walk(dirpath):
-            # Stop scanning this directory tree if the overall cycle is over budget
+            # Prevent os.walk from descending into Isolation Bytes runtime data.
+            dirs[:] = [
+                d for d in dirs
+                if os.path.normcase(os.path.abspath(os.path.join(root, d))) not in excluded_roots
+            ]
             if cycle_start and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
                 break
             for filename in files:
