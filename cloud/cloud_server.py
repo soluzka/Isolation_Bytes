@@ -331,7 +331,6 @@ def _complete_agent_scan_results_response():
                 'scan_id': str(conditional.get('run_id') or ''),
                 'scan_dirs': [],
                 'scan_status': 'scanning',
-                'scan_current_path': str(conditional.get('scan_current_path') or ''),
                 'scan_started_at': started,
                 'last_scan': started,
             }],
