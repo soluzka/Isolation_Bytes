@@ -90,62 +90,44 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Repair PyInstaller Analysis() options in an existing spec file."""
+    """Ensure a valid PyInstaller Analysis(excludes=...) entry without using CLI options."""
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
     if 'Analysis(' not in content:
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
 
-    wanted = list(dict.fromkeys(modules))
+    wanted = list(dict.fromkeys(str(m) for m in modules))
     exclusions = ', '.join(repr(m) for m in wanted)
-    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks')
-    hook_entry = repr(hook_dir)
 
-    # Normalize option lines without parsing the spec as Python. This also
-    # repairs older malformed lines such as "hookspath=[, r'...']".
+    # A .spec file is executable Python. Do not pass --exclude-module on the
+    # PyInstaller command line, and do not rewrite hookspath: both approaches
+    # can produce an invalid spec or are rejected by PyInstaller.
     lines = content.splitlines()
-    hook_found = False
-    excludes_found = False
     normalized = []
+    excludes_found = False
+    analysis_found = False
+
     for line in lines:
         stripped = line.strip()
-        if stripped.startswith('hookspath=') or stripped.startswith('hookspath ='):
-            indent = line[:len(line) - len(line.lstrip())]
-            normalized.append(indent + 'hookspath=[' + hook_entry + '],')
-            hook_found = True
-        elif stripped.startswith('excludes=') or stripped.startswith('excludes ='):
+        if stripped.startswith('excludes=') or stripped.startswith('excludes ='):
             indent = line[:len(line) - len(line.lstrip())]
             normalized.append(indent + 'excludes=[' + exclusions + '],')
             excludes_found = True
-        else:
-            normalized.append(line)
+            continue
+        normalized.append(line)
+        if stripped.startswith('Analysis('):
+            analysis_found = True
+            if not excludes_found:
+                normalized.append('    excludes=[' + exclusions + '],')
 
-    content = chr(10).join(normalized) + chr(10)
-
-    if not hook_found:
-        content = content.replace(
-            'Analysis(' + chr(10),
-            'Analysis(' + chr(10) + '    hookspath=[' + hook_entry + '],' + chr(10),
-            1,
-        )
-        print(f'Added project PyInstaller hook path: {hook_dir}')
-    else:
-        print(f'Normalized project PyInstaller hook path: {hook_dir}')
-
-    if not excludes_found:
-        content = content.replace(
-            'Analysis(' + chr(10),
-            'Analysis(' + chr(10) + '    excludes=[' + exclusions + '],' + chr(10),
-            1,
-        )
-        print(f'Added PyInstaller spec exclusions: {exclusions}')
-    else:
-        print(f'Normalized PyInstaller spec exclusions: {exclusions}')
+    if not analysis_found:
+        raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
 
     with open(spec_path, 'w', encoding='utf-8') as f:
-        f.write(content)
+        f.write(chr(10).join(normalized) + chr(10))
 
+    print(f'PyInstaller spec exclusions: {exclusions}')
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
