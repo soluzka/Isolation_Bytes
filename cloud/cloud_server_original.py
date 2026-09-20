@@ -3010,6 +3010,7 @@ def agent_heartbeat():
         'total_ml': data.get('total_ml', agent.get('total_ml', 0)),
         'last_report_ok': data.get('last_report_ok', agent.get('last_report_ok', False)),
         'last_report_error': data.get('last_report_error', agent.get('last_report_error', '')),
+        'agent_executable': data.get('agent_executable', agent.get('agent_executable', '')),
         'quarantine_dir': data.get('quarantine_dir', agent.get('quarantine_dir', '')),
         'quarantine_ready': data.get('quarantine_ready', agent.get('quarantine_ready', False)),
         'last_quarantine_error': data.get('last_quarantine_error', agent.get('last_quarantine_error', '')),
