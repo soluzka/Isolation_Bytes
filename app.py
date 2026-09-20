@@ -2226,6 +2226,52 @@ _CONDITIONAL_STATE_PATH = runtime_path("conditional_startup_state.json")
 _SCANNER_RESULTS_PATH = runtime_path("scanner_results.json")
 ensure_runtime_state_files()
 
+# Restore the last known Conditional Startup counters/findings before any
+# button-triggered scan begins.  A new scan is a continuation of the same
+# evidence history, not a new zero-based generation.
+try:
+    with open(_CONDITIONAL_STATE_PATH, "r", encoding="utf-8") as handle:
+        _persisted_conditional = json.load(handle)
+    if isinstance(_persisted_conditional, dict):
+        _persisted_counts = _persisted_conditional.get("scanner_counters") or _persisted_conditional.get("counts") or {}
+        for _key in (
+            "scanned_files", "quarantined_files", "errors", "process_events",
+            "ml_detections", "ransomware_indicators", "persistence_indicators",
+            "yara_suspicious", "blocked_threats",
+        ):
+            if _key in _persisted_conditional:
+                conditional_startup_state[_key] = max(
+                    int(conditional_startup_state.get(_key) or 0),
+                    int(_persisted_conditional.get(_key) or 0),
+                )
+            elif _key in _persisted_counts:
+                conditional_startup_state[_key] = max(
+                    int(conditional_startup_state.get(_key) or 0),
+                    int(_persisted_counts.get(_key) or 0),
+                )
+        conditional_startup_state["last_run"] = _persisted_conditional.get("last_run")
+        conditional_startup_state["last_updated"] = _persisted_conditional.get("last_updated")
+        conditional_startup_state["run_id"] = _persisted_conditional.get("run_id", "")
+except (OSError, ValueError, TypeError):
+    pass
+
+_persisted_scanner = {}
+try:
+    with open(_SCANNER_RESULTS_PATH, "r", encoding="utf-8") as handle:
+        _persisted_scanner = json.load(handle)
+    if isinstance(_persisted_scanner, dict) and isinstance(_persisted_scanner.get("scanner_results"), dict):
+        _persisted_scanner = _persisted_scanner["scanner_results"]
+except (OSError, ValueError, TypeError):
+    _persisted_scanner = {}
+
+latest_errors = list(_persisted_scanner.get("errors") or [])
+latest_process_events = list(_persisted_scanner.get("process_events") or [])
+latest_ml_detections = list(_persisted_scanner.get("ml_detections") or [])
+latest_ransomware_indicators = list(_persisted_scanner.get("ransomware_indicators") or [])
+latest_persistence_indicators = dict(_persisted_scanner.get("persistence_indicators") or {})
+latest_yara_suspicious = list(_persisted_scanner.get("yara_suspicious") or [])
+latest_quarantined_files = list(_persisted_scanner.get("quarantined_files") or [])
+
 
 def _persist_conditional_startup_state():
     """Publish Conditional Startup state to the canonical LocalAppData JSON files."""
