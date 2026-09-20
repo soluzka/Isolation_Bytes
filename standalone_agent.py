@@ -265,7 +265,6 @@ class StandaloneAgent:
         self._last_report_error = ''
         self._scan_status = 'idle'
         self._scan_started_at = ''
-        self._scan_current_path = ''
         self._scan_id = ''
         self._scan_progress_reported = 0
         self._scan_lock = threading.Lock()
@@ -2138,7 +2137,6 @@ X-GNOME-Autostart-enabled=true
                     # the live scan counter instead of falling through to the
                     # outer exception handler before the old increment.
                     self._files_scanned += 1
-                    self._scan_current_path = filepath
                     # Publish live YARA progress frequently enough for the
                     # dashboard to track the current file/path without waiting
                     # hundreds of files.
@@ -2620,7 +2618,6 @@ X-GNOME-Autostart-enabled=true
 
     def _report(self, findings, report_type='scan'):
         try:
-            yara_current_path = self._scan_current_path
             yara_status = self._scan_status
             # Count findings by type for cumulative counters.
             for f in findings:
@@ -2652,9 +2649,7 @@ X-GNOME-Autostart-enabled=true
                 'scan_dirs': list(self._scan_dirs),
                 'scan_dir_count': len(self._scan_dirs),
                 'scan_status': yara_status,
-                'scan_current_path': yara_current_path,
                 'scan_started_at': self._scan_started_at,
-                'scan_current_path': self._scan_current_path,
                 'yara_scan_state': self._get_yara_scan_state(),
                 'scan_complete': self._scan_status == 'complete',
                 'scan_id': self._scan_id,
@@ -2719,7 +2714,6 @@ X-GNOME-Autostart-enabled=true
                 f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
             ).hexdigest()[:24]
             self._files_scanned = 0
-            self._scan_current_path = ''
             self._scan_progress_reported = 0
             all_findings = []
             scanned_roots = []
@@ -2748,8 +2742,6 @@ X-GNOME-Autostart-enabled=true
                     for root in scanned_roots
                 ):
                     continue
-
-                self._scan_current_path = dirpath
                 try:
                     findings = self._scan_directory(
                         dirpath, cycle_start=cycle_start
@@ -2759,8 +2751,6 @@ X-GNOME-Autostart-enabled=true
                 except Exception as exc:
                     print(f"[SCAN] Directory scan error for {dirpath}: {exc}")
                     continue
-
-            self._scan_current_path = ''
             self._scan_status = 'complete' if self._running else 'stopped'
             if all_findings:
                 print(
