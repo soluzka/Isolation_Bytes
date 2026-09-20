@@ -2803,20 +2803,74 @@ def github_webhook():
         return jsonify({'msg': 'ignored'}), 200
     if payload.get('deleted') is True:
         return jsonify({'msg': 'ignored'}), 200
-    # Pull latest code
+    # Pull latest code, but never restart into an unvalidated/broken revision.
     import subprocess as _sp
+    previous_revision = ''
     try:
-        _sp.run(['git', 'fetch', 'origin'], cwd=str(BASE_DIR), capture_output=True, timeout=60)
-        _sp.run(['git', 'reset', '--hard', 'origin/security-v2'], cwd=str(BASE_DIR), capture_output=True, timeout=60)
-        _sp.run(['git', 'pull', 'origin', 'security-v2'], cwd=str(BASE_DIR), capture_output=True, timeout=60)
+        current = _sp.run(
+            ['git', 'rev-parse', 'HEAD'],
+            cwd=str(BASE_DIR), capture_output=True, text=True, timeout=15
+        )
+        previous_revision = (current.stdout or '').strip()
+        fetched = _sp.run(
+            ['git', 'fetch', 'origin', 'security-v2'],
+            cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
+        )
+        if fetched.returncode != 0:
+            return jsonify({'error': f'git fetch failed: {(fetched.stderr or fetched.stdout or "").strip()}'}), 500
+        checked_out = _sp.run(
+            ['git', 'reset', '--hard', 'origin/security-v2'],
+            cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
+        )
+        if checked_out.returncode != 0:
+            return jsonify({'error': f'git reset failed: {(checked_out.stderr or checked_out.stdout or "").strip()}'}), 500
+
+        python_bin = str(BASE_DIR / 'venv' / 'bin' / 'python')
+        if not os.path.exists(python_bin):
+            python_bin = sys.executable
+        validation = _sp.run(
+            [python_bin, '-m', 'py_compile',
+             'cloud/cloud_server.py',
+             'cloud/cloud_server_original.py',
+             'cloud/_agent_results_unlimited.py'],
+            cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
+        )
+        if validation.returncode != 0:
+            if previous_revision:
+                _sp.run(
+                    ['git', 'reset', '--hard', previous_revision],
+                    cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
+                )
+            return jsonify({
+                'error': 'deployment validation failed; previous revision restored',
+                'details': (validation.stderr or validation.stdout or '').strip(),
+            }), 500
     except Exception as e:
-        return jsonify({'error': f'git pull failed: {e}'}), 500
-    # Restart the service so new code loads
+        if previous_revision:
+            try:
+                _sp.run(
+                    ['git', 'reset', '--hard', previous_revision],
+                    cwd=str(BASE_DIR), capture_output=True, timeout=60
+                )
+            except Exception:
+                pass
+        return jsonify({'error': f'deployment update failed: {e}'}), 500
+
+    # Restart only after the new revision passes syntax validation.
     try:
-        _sp.run(['systemctl', 'restart', 'antivirus-cloud'], capture_output=True, timeout=30)
-    except Exception:
-        pass
-    return jsonify({'msg': 'pulled and restarted'}), 200
+        restarted = _sp.run(
+            ['systemctl', 'restart', 'antivirus-cloud'],
+            capture_output=True, text=True, timeout=30
+        )
+        if restarted.returncode != 0:
+            return jsonify({
+                'error': 'service restart failed',
+                'details': (restarted.stderr or restarted.stdout or '').strip(),
+            }), 500
+    except Exception as e:
+        return jsonify({'error': f'service restart failed: {e}'}), 500
+
+    return jsonify({'msg': 'validated, pulled, and restarted'}), 200
 
 
 # ---------------------------------------------------------------------------
