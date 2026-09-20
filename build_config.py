@@ -90,7 +90,7 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Ensure Analysis(excludes=...) contains the requested modules."""
+    """Repair the Analysis options needed for a reproducible PyInstaller build."""
     import ast
 
     with open(spec_path, 'r', encoding='utf-8') as f:
@@ -104,24 +104,43 @@ def _ensure_spec_excludes(spec_path, modules):
     normalized = []
     excludes_found = False
     analysis_found = False
+    skip_excludes_continuation = False
+    existing_excludes = []
 
     for line in lines:
         stripped = line.strip()
+
+        if skip_excludes_continuation:
+            # The excludes option is conventionally followed by noarchive.
+            # This also repairs specs whose excludes list was left malformed.
+            if stripped.startswith('noarchive=') or stripped.startswith('noarchive ='):
+                skip_excludes_continuation = False
+                normalized.append(line)
+            continue
+
+        if stripped.startswith('hookspath=') or stripped.startswith('hookspath ='):
+            indent = line[:len(line) - len(line.lstrip())]
+            hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks')
+            normalized.append(indent + 'hookspath=[' + repr(hook_dir) + '],')
+            continue
+
         if stripped.startswith('excludes=') or stripped.startswith('excludes ='):
             indent = line[:len(line) - len(line.lstrip())]
-            existing = []
             try:
                 value = stripped.split('=', 1)[1].strip().rstrip(',')
                 parsed = ast.literal_eval(value)
                 if isinstance(parsed, (list, tuple)):
-                    existing = [str(x) for x in parsed]
+                    existing_excludes = [str(x) for x in parsed]
             except (SyntaxError, ValueError):
-                # If an earlier build attempt left a malformed excludes line,
-                # replace only that option with the required safe exclusions.
-                existing = []
-            merged = list(dict.fromkeys(existing + wanted))
+                existing_excludes = []
+
+            merged = list(dict.fromkeys(existing_excludes + wanted))
             normalized.append(indent + 'excludes=[' + ', '.join(repr(x) for x in merged) + '],')
             excludes_found = True
+            # If the original option spans multiple lines, discard its
+            # continuation until the next Analysis option.
+            if not stripped.endswith(']'):
+                skip_excludes_continuation = True
             continue
 
         normalized.append(line)
