@@ -255,9 +255,25 @@ def update_yara_rules():
                             os.remove(backup_file)
                         os.rename(rule_file, backup_file)
                     
+                    # Normalize known upstream false positives before writing.
+                    # Neo23x0's generic_anomalies.yar has historically defined
+                    # FileSizeAnomaly using only filesize, which can flag tiny
+                    # legitimate non-executable marker files such as C:\\.GamingRoot.
+                    # This rule is explicitly intended for executables, so require
+                    # the Windows PE MZ header while retaining the upstream update.
+                    rule_text = response.text
+                    if source['filename'] == 'generic_anomalies.yar':
+                        rule_text = re.sub(
+                            r'(rule\\s+FileSizeAnomaly\\s*\\{.*?condition:\\s*)filesize\\s*>\\s*10MB\\s+or\\s+filesize\\s*<\\s*1KB',
+                            r'\\1uint16(0) == 0x5A4D and (filesize > 10MB or filesize < 1KB)',
+                            rule_text,
+                            count=1,
+                            flags=re.DOTALL | re.IGNORECASE,
+                        )
+
                     # Write new rules
                     with open(get_resource_path(os.path.join(rule_file)), 'w', encoding='utf-8') as f:
-                        f.write(response.text)
+                        f.write(rule_text)
                     
                     logging.info(f"YARA rules updated successfully from {source['name']}")
                     success = True
