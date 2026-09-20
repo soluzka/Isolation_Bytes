@@ -2364,11 +2364,23 @@ def run_startup():
     _persist_conditional_startup_state()
 
     def _progress(results):
-        """Called by conditional_startup after every file completes."""
+        """Publish every scanner result into the dashboard and runtime JSON."""
         persistence = results.get('persistence_indicators') or {}
         persistence_count = sum(
             len(v) for v in persistence.values() if isinstance(v, (list, tuple, dict))
         )
+        # Copy the actual findings into the shared indicator lists as well as
+        # their counts. This keeps the UI from showing counters without data.
+        global latest_errors, latest_process_events, latest_ml_detections
+        global latest_ransomware_indicators, latest_persistence_indicators
+        global latest_yara_suspicious, latest_quarantined_files
+        latest_errors = list(results.get('errors') or [])
+        latest_process_events = list(results.get('process_events') or [])
+        latest_ml_detections = list(results.get('ml_detections') or [])
+        latest_ransomware_indicators = list(results.get('ransomware_indicators') or [])
+        latest_persistence_indicators = dict(persistence) if isinstance(persistence, dict) else {}
+        latest_yara_suspicious = list(results.get('yara_suspicious') or [])
+        latest_quarantined_files = list(results.get('quarantined_files') or [])
         conditional_startup_state.update({
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'scanned_files': int(results.get('scanned_files_count') or 0),
