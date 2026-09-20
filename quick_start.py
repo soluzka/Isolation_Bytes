@@ -1457,7 +1457,10 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     latest_persistence_indicators = merged_persistence
 
     scanned_now = int(scan_data.get('scanned_files_count') or 0)
-    persistence_count = len(latest_persistence_indicators)
+    persistence_count = sum(
+        len(value) if isinstance(value, (list, tuple, dict, set)) else 1
+        for value in (latest_persistence_indicators or {}).values()
+    )
     internal_error = str((scan_data.get('errors') or [])[-1]) if scan_data.get('errors') else None
 
     with conditional_startup_lock:
