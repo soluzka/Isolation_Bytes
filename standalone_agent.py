@@ -363,8 +363,8 @@ class StandaloneAgent:
             "scanner_counters": {
                 "scanned_files": int(self._files_scanned),
                 "quarantined_files": int(self._quarantined_count),
-                "errors": 0,
-                "process_events": 0,
+                "errors": int(scanner_results.get("errors_count", 0) or 0),
+                "process_events": int(scanner_results.get("process_events_count", 0) or 0),
                 "ml_detections": int(self._total_ml),
                 "ransomware_indicators": int(self._total_ransomware),
                 "persistence_indicators": int(self._total_persistence),
@@ -2932,6 +2932,23 @@ X-GNOME-Autostart-enabled=true
             for f in findings:
                 ttype = (f.get('threat_type') or '').lower()
                 self._total_findings += 1
+                if not hasattr(self, '_scanner_results'):
+                    self._scanner_results = {
+                        "errors": [], "errors_count": 0,
+                        "process_events": [], "process_events_count": 0,
+                        "ml_detections": [], "ransomware_indicators": [],
+                        "persistence_indicators": {}, "yara_suspicious": [],
+                        "quarantined_files": [],
+                    }
+                if ttype == 'ransomware':
+                    self._scanner_results["ransomware_indicators"].append(dict(f))
+                elif ttype == 'persistence':
+                    self._scanner_results["persistence_indicators"][str(f.get("file") or f.get("path") or len(self._scanner_results["persistence_indicators"]))] = dict(f)
+                elif ttype == 'ml_suspicious':
+                    self._scanner_results["ml_detections"].append(dict(f))
+                elif ttype in ('yara_match', 'blocked') or f.get('rule'):
+                    self._scanner_results["yara_suspicious"].append(dict(f))
+
                 if ttype == 'ransomware':
                     self._total_ransomware += 1
                 elif ttype == 'persistence':
