@@ -121,7 +121,7 @@ def _ensure_spec_excludes(spec_path, modules):
         else:
             normalized.append(line)
 
-    content = '\\n'.join(normalized) + '\\n'
+    content = chr(10).join(normalized) + chr(10)
 
     if not hook_found:
         content = content.replace(
