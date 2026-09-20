@@ -1880,6 +1880,9 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     cumulative_persistence = {}
     last_result = None
 
+    # In continuous mode, the very first filesystem traversal is itself the
+    # live protection session. There is no finite "first scan" to complete.
+    # Keep the worker in continuous mode from the moment the first traversal starts.
     while True:
         def _continuous_progress(results):
             if not callable(progress_callback):
