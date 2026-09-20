@@ -359,7 +359,7 @@ def _canonical_yara_agent_state():
         'running': running,
         'last_run': live_last_scan,
         'last_updated': live_last_scan,
-        'started_at': active_started or None,
+        'started_at': _format_scan_timestamp(active_started),
         'scan_generation': scan_generation,
         'duration': None,
         'scanned_files': scanned_files,
@@ -377,6 +377,22 @@ def _canonical_yara_agent_state():
         'scan_status': current_status,
         'scan_started_at': current_started_at,
     }
+
+
+def _format_scan_timestamp(value):
+    """Return dashboard timestamps as ISO-8601, never raw Unix epoch floats."""
+    if value in (None, ''):
+        return None
+    try:
+        if isinstance(value, (int, float)):
+            return datetime.fromtimestamp(float(value), timezone.utc).isoformat()
+        text_value = str(value)
+        # Numeric strings are also treated as Unix timestamps.
+        if text_value.replace('.', '', 1).isdigit():
+            return datetime.fromtimestamp(float(text_value), timezone.utc).isoformat()
+        return text_value
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
 
 
 def _conditional_startup_status_response():
@@ -398,9 +414,9 @@ def _conditional_startup_status_response():
         'success': True,
         'status': 'running' if state.get('running') else 'idle',
         'running': bool(state.get('running')),
-        'started_at': state.get('started_at'),
-        'last_run': state.get('last_run'),
-        'last_updated': state.get('last_updated'),
+        'started_at': _format_scan_timestamp(state.get('started_at')),
+        'last_run': _format_scan_timestamp(state.get('last_run')),
+        'last_updated': _format_scan_timestamp(state.get('last_updated')),
         'duration': state.get('duration'),
         'scanned_files': int(state.get('scanned_files') or 0),
         'quarantined_files': int(state.get('quarantined_files') or 0),
