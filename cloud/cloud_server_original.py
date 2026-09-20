@@ -3016,6 +3016,9 @@ def agent_heartbeat():
         'last_quarantine_error': data.get('last_quarantine_error', agent.get('last_quarantine_error', '')),
         'scan_status': data.get('scan_status', agent.get('scan_status', 'idle')),
         'scan_current_path': data.get('scan_current_path', agent.get('scan_current_path', '')),
+        'scan_id': data.get('scan_id', agent.get('scan_id', '')),
+        'scan_started_at': data.get('scan_started_at', agent.get('scan_started_at', '')),
+        'scan_status': data.get('scan_status', agent.get('scan_status', 'idle')),
     }
     _update_agent(device_id, updates)
     # Auto-block: scan heartbeat connections for threats and queue block
@@ -3287,6 +3290,12 @@ def agent_report():
         'total_persistence': (existing.get('total_persistence', 0) or 0) + report_persistence,
         'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,
         'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,
+        # Persist the current scan generation even for clean/progress reports.
+        # Without this, a new scan with a lower counter inherits the previous
+        # run's 8,204-style value in the dashboard normalizer.
+        'scan_id': data.get('scan_id', existing.get('scan_id', '')),
+        'scan_started_at': data.get('scan_started_at', existing.get('scan_started_at', '')),
+        'scan_status': data.get('scan_status', existing.get('scan_status', 'idle')),
     }
     if data.get('_clear_pending_scan_parts'):
         update_fields['pending_scan_parts'] = {}
