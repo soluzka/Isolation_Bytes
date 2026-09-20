@@ -2246,8 +2246,8 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         # Use the stable integer counter so the number never decreases mid-scan.
         # scanned_files is a dict that grows during scanning; len() on it
         # fluctuates when the UI polls mid-run, causing the counter to jump.
-        'scanned_files': results.get('scanned_files_count') or count('scanned_files'),
-        'quarantined_files': count('quarantined_files'),
+        'scanned_files': 0,
+        'quarantined_files': 0,
         'errors': count('errors'),
         'process_events': count('process_events'),
         'ml_detections': count('ml_detections'),
@@ -2309,8 +2309,8 @@ def run_startup():
         )
         conditional_startup_state.update({
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'scanned_files': results.get('scanned_files_count', 0),
-            'quarantined_files': len(results.get('quarantined_files') or []),
+            'scanned_files': 0, 0),
+            'quarantined_files': 0,
             'errors': len(results.get('errors') or []),
             'process_events': len(results.get('process_events') or []),
             'ml_detections': len(results.get('ml_detections') or []),
@@ -2350,8 +2350,8 @@ def run_conditional_startup_route():
         results = conditional_startup.run_conditional_startup_logic(open_browser=False)
         return jsonify({
             'status': 'success',
-            'scanned_files': results.get('scanned_files_count') or len(results.get('scanned_files') or []),
-            'quarantined_files': results.get('quarantined_files', []),
+            'scanned_files': 0,
+            'quarantined_files': 0, []),
             'errors': results.get('errors', []),
             'process_events': results.get('process_events', []),
             'log': results.get('log', ''),
