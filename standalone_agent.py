@@ -289,8 +289,8 @@ class StandaloneAgent:
         # destination is reported explicitly instead of appearing as a blank
         # "—" in the findings table.
         self._quarantine_ready = self._prepare_quarantine_dir()
-        # Count existing quarantined files so the counter survives restarts
-        self._quarantined_count = self._count_existing_quarantined()
+        # Quarantine is a per-scan result counter. Existing quarantine contents
+        # must never appear as findings in a newly started scan.
         # Load persisted blocked-files registry so unblock works after restart
         self._blocked_files = self._load_blocked_registry()
 
@@ -2716,7 +2716,16 @@ X-GNOME-Autostart-enabled=true
             self._scan_id = hashlib.sha256(
                 f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
             ).hexdigest()[:24]
+            # Every scan is a fresh result generation. All displayed result
+            # counters must start at zero and only increase from this run.
             self._files_scanned = 0
+            self._threats_blocked = 0
+            self._quarantined_count = 0
+            self._total_findings = 0
+            self._total_ransomware = 0
+            self._total_persistence = 0
+            self._total_yara = 0
+            self._total_ml = 0
             self._scan_progress_reported = 0
             all_findings = []
             scanned_roots = []
