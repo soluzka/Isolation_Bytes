@@ -32,6 +32,11 @@ def _monotonic_counter(device_id, key, report_value, live_value, generation=None
 
 
 def build_complete_agent_scan_results(legacy):
+    # Avoid overlapping expensive JSON construction when the browser polls.
+    # This is only a short-lived response cache; agent history is untouched.
+    now = time.monotonic()
+    if _RESULTS_CACHE['payload'] is not None and now - _RESULTS_CACHE['at'] < _RESULTS_CACHE_TTL:
+        return _RESULTS_CACHE['payload']
     agents = legacy._all_agents()
     results = []
     total_findings = 0
@@ -72,7 +77,7 @@ def build_complete_agent_scan_results(legacy):
             'files_scanned': files_scanned,
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan') or report.get('last_scan') or report.get('timestamp', ''),
-            'findings': findings,
+            'findings': findings[:50],
             'quarantined_count': quarantined_count,
             'scan_id': scan_id,
             'scan_dirs': ag.get('scan_dirs') or report.get('scan_dirs') or [],
@@ -81,7 +86,10 @@ def build_complete_agent_scan_results(legacy):
             'scan_started_at': ag.get('scan_started_at') or report.get('scan_started_at') or '',
         })
         total_findings += len(findings)
-    return {'agents': results, 'total_findings': total_findings}
+    payload = {'agents': results, 'total_findings': total_findings}
+    _RESULTS_CACHE['at'] = now
+    _RESULTS_CACHE['payload'] = payload
+    return payload
 
 
 def _json_payload(response):
@@ -202,7 +210,10 @@ def _fix_license_input_and_login_csrf(legacy):
 # cloud_server.py imports this helper immediately after importing the legacy
 # cloud app, so the legacy view functions are already registered here.
 try:
-    from cloud import cloud_server_original as _legacy_app
+    from cloud import cloud_server_original as _legacy
+
+_RESULTS_CACHE = {'at': 0.0, 'payload': None}
+_RESULTS_CACHE_TTL = 1.5_app
     _wrap_conditional_startup_routes(_legacy_app)
     _fix_license_input_and_login_csrf(_legacy_app)
 except Exception:
