@@ -410,7 +410,24 @@ def _conditional_startup_status_response():
                         'message': 'Authentication required',
                         'error': 'Authentication required'}), 401
 
-    state = _canonical_yara_agent_state()
+    # Merge live Conditional Startup state with connected-agent state.
+    # Never allow concurrent writers to make the dashboard counter regress.
+    agent_state = _canonical_yara_agent_state()
+    conditional_state = _conditional_startup_state() or {}
+    if conditional_state.get('run_id') and (conditional_state.get('running') or str(conditional_state.get('run_id')) == str(agent_state.get('scan_generation') or '')):
+        state = dict(agent_state)
+        for key in ('scanned_files', 'quarantined_files', 'errors', 'process_events', 'ml_detections', 'ransomware_indicators', 'persistence_indicators', 'yara_suspicious', 'blocked_threats'):
+            try:
+                state[key] = max(int(agent_state.get(key) or 0), int(conditional_state.get(key) or 0))
+            except (TypeError, ValueError):
+                pass
+        if conditional_state.get('running'):
+            state['running'] = True
+            state['scan_status'] = 'scanning'
+            state['scan_generation'] = conditional_state.get('run_id') or state.get('scan_generation')
+    else:
+        state = agent_state
+
     return jsonify({
         'ok': True,
         'success': True,
