@@ -41,7 +41,7 @@ def _load_environment_before_imports():
     if getattr(sys, 'frozen', False):
         executable_dir = os.path.dirname(sys.executable)
         appdata_dir = os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server'
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes'
         )
         candidates = [
             os.path.join(appdata_dir, '_internal', '.env'),
@@ -209,7 +209,7 @@ _request_admin_elevation()
 # from there so the user can edit it after install.
 if getattr(sys, 'frozen', False):
     bundled_dotenv = os.path.join(os.path.dirname(sys.executable), '.env')
-    app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'antivirus_server')
+    app_data_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
     os.makedirs(app_data_dir, exist_ok=True)
     dotenv_path = os.path.join(app_data_dir, '.env')
     if not os.path.exists(dotenv_path) and os.path.exists(bundled_dotenv):
