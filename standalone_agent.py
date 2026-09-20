@@ -58,7 +58,7 @@ except ImportError:
     ML_AVAILABLE = False
 
 from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_check_call, safe_list2cmdline
-from runtime_paths import runtime_path
+from runtime_paths import runtime_path, ensure_runtime_state_files
 
 DEFAULT_SERVER = "https://isolation-bytes.com"
 DEFAULT_API_KEY = os.environ.get('CLOUD_API_KEY', '')
@@ -282,6 +282,62 @@ class StandaloneAgent:
             print(f"[SCAN] Could not persist scan state: {exc}")
         return state
 
+    def _publish_all_runtime_json(self):
+        """Publish the current scan generation to every canonical runtime JSON."""
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        scan_state = self._get_yara_scan_state()
+        conditional = {
+            "running": self._scan_status not in ("idle", "complete"),
+            "run_id": self._scan_id,
+            "findings": int(self._total_findings),
+            "started_at": self._scan_started_at,
+            "last_updated": now,
+            "last_run": None if self._scan_status not in ("idle", "complete") else now,
+            "duration": None,
+            "scanned_files": int(self._files_scanned),
+            "quarantined_files": int(self._quarantined_count),
+            "errors": 0,
+            "process_events": 0,
+            "ml_detections": int(self._total_ml),
+            "ransomware_indicators": int(self._total_ransomware),
+            "persistence_indicators": int(self._total_persistence),
+            "yara_suspicious": int(self._total_yara),
+            "blocked_threats": int(self._threats_blocked),
+            "scan_phase": "scanning" if self._scan_status not in ("idle", "complete") else self._scan_status,
+            "scanner_counters": {
+                "scanned_files": int(self._files_scanned),
+                "quarantined_files": int(self._quarantined_count),
+                "errors": 0,
+                "process_events": 0,
+                "ml_detections": int(self._total_ml),
+                "ransomware_indicators": int(self._total_ransomware),
+                "persistence_indicators": int(self._total_persistence),
+                "yara_suspicious": int(self._total_yara),
+            },
+            "scanner_results": {
+                "errors": [],
+                "process_events": [],
+                "ml_detections": [],
+                "ransomware_indicators": [],
+                "persistence_indicators": {},
+                "yara_suspicious": [],
+                "quarantined_files": [],
+            },
+        }
+        targets = {
+            runtime_path("scan_state.json"): scan_state,
+            runtime_path("conditional_startup_state.json"): conditional,
+            runtime_path("scanner_results.json"): conditional,
+        }
+        for path, payload in targets.items():
+            tmp = path + ".tmp"
+            try:
+                with open(tmp, "w", encoding="utf-8") as handle:
+                    json.dump(payload, handle, ensure_ascii=False, indent=2, sort_keys=True)
+                os.replace(tmp, path)
+            except (OSError, TypeError, ValueError) as exc:
+                _startup_log(f"[ERROR] Could not publish runtime JSON {path}: {exc}")
+
     def _reset_scan_state(self):
         """Start a genuinely new scan generation from the first monitored root."""
         self._scan_id = hashlib.sha256(
@@ -296,7 +352,10 @@ class StandaloneAgent:
         self._total_yara = 0
         self._total_ml = 0
         self._scan_progress_reported = 0
+        # scan_state.json is written first; then publish the same generation
+        # to the other runtime JSON documents.
         self._get_yara_scan_state()
+        self._publish_all_runtime_json()
 
     def __init__(self, server_url, api_key='', device_id=None, pair_code=None,
                  credential_file=None):
@@ -328,8 +387,10 @@ class StandaloneAgent:
         # must create its JSON state before registration or the first scan so
         # a fresh install never appears to be running with no local state.
         try:
+            ensure_runtime_state_files()
             runtime_path()
             self._get_yara_scan_state()
+            self._publish_all_runtime_json()
         except Exception as exc:
             _startup_log(f'[ERROR] Could not initialize scan state: {exc}')
         self._continuous_scan_requested = False
