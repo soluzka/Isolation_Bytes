@@ -318,6 +318,38 @@ def _agent_trigger_scan_response():
     if not agents:
         return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'No connected agents to scan.', 'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
     now = time.time()
+
+    # /run_startup and /api/agent-trigger-scan may be issued together by
+    # different dashboard surfaces. Treat a just-created generation as
+    # idempotent so the second request cannot reset its counters or scan_id
+    # while the agent is already consuming the first command.
+    for device_id in agents:
+        existing = _agent_scan_state.get(device_id)
+        if existing:
+            try:
+                age = max(0.0, now - float(existing.get('started_at', 0) or 0))
+            except (TypeError, ValueError):
+                age = 999.0
+            pending = any(
+                isinstance(cmd, dict) and cmd.get('action') == 'scan_now'
+                for cmd in _legacy.commands.get(device_id, [])
+            )
+            current_id = str(
+                agents[device_id].get('scan_id')
+                or (agents[device_id].get('last_report') or {}).get('scan_id')
+                or ''
+            )
+            if age < 10 and pending and not current_id:
+                reset_agent_scan_results_cache()
+                return jsonify({
+                    'ok': True, 'success': True, 'status': 'started',
+                    'accepted': True, 'message_type': 'success',
+                    'message': 'The current scan generation is already queued.',
+                    'error': None, 'agents': len(agents),
+                    'agents_triggered': len(agents),
+                    'scan_generation': 'connected-agent',
+                }), 200
+
     sent = 0
     for device_id, agent in agents.items():
         pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
