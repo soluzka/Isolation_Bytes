@@ -3010,6 +3010,11 @@ def agent_heartbeat():
         'total_ml': data.get('total_ml', agent.get('total_ml', 0)),
         'last_report_ok': data.get('last_report_ok', agent.get('last_report_ok', False)),
         'last_report_error': data.get('last_report_error', agent.get('last_report_error', '')),
+        'quarantine_dir': data.get('quarantine_dir', agent.get('quarantine_dir', '')),
+        'quarantine_ready': data.get('quarantine_ready', agent.get('quarantine_ready', False)),
+        'last_quarantine_error': data.get('last_quarantine_error', agent.get('last_quarantine_error', '')),
+        'scan_status': data.get('scan_status', agent.get('scan_status', 'idle')),
+        'scan_current_path': data.get('scan_current_path', agent.get('scan_current_path', '')),
     }
     _update_agent(device_id, updates)
     # Auto-block: scan heartbeat connections for threats and queue block
