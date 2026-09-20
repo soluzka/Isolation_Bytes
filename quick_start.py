@@ -1304,9 +1304,10 @@ def run_conditional_startup_background():
     scan while continuous protection is enabled.
     """
     global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
-    from conditional_startup import run_conditional_startup_logic, STOP_EVENT
+    from conditional_startup import run_conditional_startup_logic
 
-    while not STOP_EVENT.is_set():
+    # Continuous protection has no application-level stop event.
+    while True:
         start_time = time.time()
         _last_progress_report = 0.0
 
@@ -1546,11 +1547,6 @@ def start_conditional_startup_scan():
         latest_yara_suspicious.clear()
         latest_quarantined_files.clear()
         latest_persistence_indicators.clear()
-        try:
-            from conditional_startup import STOP_EVENT
-            STOP_EVENT.clear()
-        except Exception:
-            pass
 
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         run_id = hashlib.sha256(f'{now}:{time.time_ns()}'.encode()).hexdigest()[:24]
