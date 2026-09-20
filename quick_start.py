@@ -419,7 +419,7 @@ from data_analysis import (
 )
 
 # Persistent scan cache and safe quarantine helper
-from security.scan_cache import FileScanCache, safe_quarantine
+from security.scan_cache import safe_quarantine
 from quarantine_utils import quarantine_file, list_quarantine_files, restore_quarantine_file, delete_quarantine_file
 from windows_admin_service import (
     AdminServiceUnavailable,
@@ -459,10 +459,6 @@ def _ensure_single_instance():
         logger.warning(f'Could not create single-instance mutex: {e}')
         return None
 
-
-# Persistent scan cache: avoid rescanning unchanged files on every background
-# pass and gives the operator a hash -> verdict record.
-scan_cache = FileScanCache('data/scan_cache.json')
 
 # Trust hashes are loaded once after the runtime directory is set.
 TRUSTED_HASHES = set()
@@ -1016,15 +1012,6 @@ def _perform_scan_all():
                             }
 
                         try:
-                            cached = scan_cache.get(file_path)
-                            if cached is not None:
-                                cached_matches = cached.get('yara_matches', [])
-                                if cached_matches:
-                                    total_yara_matches += len(cached_matches)
-                                    detected_threats += 1
-                                    results.append('YARA match: ' + file_path + ' - Rules: ' + ', '.join(cached_matches))
-                                continue
-
                             file_ext = os.path.splitext(file_path)[1].lower()
 
                             # Skip files whose SHA-256 is in the trusted hashes list.
@@ -1124,7 +1111,7 @@ def _perform_scan_all():
                                         else:
                                             results.append(f'QUARANTINED (ember): {file_path} - ML score {ml_score:.4f}')
                                         logger.warning(f'Quarantined high-risk file: {file_path}')
-                                        _append_malware_signature(file_path, cache_entry.get('quarantine_reason', 'quarantine'), sha256_hash)
+                                        _append_malware_signature(file_path, 'quarantine', sha256_hash)
                                     else:
                                         if yara_matches:
                                             results.append('YARA match (quarantine failed: ' + message + '): ' + file_path + ' - Rules: ' + ', '.join(rule_names))
@@ -1140,7 +1127,6 @@ def _perform_scan_all():
                                     if ml_score is not None:
                                         logger.info(f'  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}')
 
-                            scan_cache.set(file_path, cache_entry)
 
                         except Exception as file_error:
                             logger.warning(f'Error scanning file {file_path}: {file_error}')
@@ -1158,10 +1144,6 @@ def _perform_scan_all():
         conditional_startup_state['persistence_indicators'] = persistence_matches
         conditional_startup_state['ransomware_indicators'] = ransomware_matches
 
-        try:
-            scan_cache._save()
-        except Exception:
-            pass
 
         duration = time.time() - start_time
 
@@ -1317,10 +1299,6 @@ def run_conditional_startup_background():
                 latest_yara_suspicious = []
                 latest_ransomware_indicators = []
                 latest_persistence_indicators = {}
-        try:
-            scan_cache._save()
-        except Exception:
-            pass
         logger.info("Conditional startup scan completed")
     except BaseException as e:
         # BaseException so SystemExit raised by imported modules (e.g. missing
@@ -3841,7 +3819,6 @@ def run_scheduled_scans():
                                     if ml_score is not None:
                                         logger.info(f"  ML score {ml_score:.4f} did not reach quarantine threshold for {file_path}")
                             
-                            scan_cache.set(file_path, cache_entry)
                         
                         except Exception as e:
                             logger.error(f"Error scanning {file_path}: {str(e)}")
