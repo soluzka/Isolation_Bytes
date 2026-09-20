@@ -116,20 +116,18 @@ def _canonical_yara_agent_state():
             previous_scan_id = str(scan_state.get('previous_scan_id') or '')
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
             if generation_started:
-                # Agent counters can be cumulative across process restarts.  The
-                # server-owned scan generation must expose only work performed
-                # after this trigger, never the legacy counter that existed at
-                # trigger time.
-                current_files = max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
-                baseline_files = max(0, int(scan_state.get('baseline_files_scanned', 0) or 0))
-                scanned_files += max(0, current_files - baseline_files)
-                # Never derive the active scan counter from quarantine history.
-                # Only the current agent generation may contribute quarantined files.
+                # StandaloneAgent resets both counters at the start of every
+                # full scan. The values reported by the active generation are
+                # therefore already current-scan totals. Never subtract the
+                # previous scan's counters from the new generation.
+                current_files = max(0, int(
+                    agent.get('files_scanned', report.get('files_scanned', 0)) or 0
+                ))
+                scanned_files += current_files
                 current_quarantined = max(0, int(
                     agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
                 ))
-                baseline_quarantined = max(0, int(scan_state.get('baseline_quarantined', 0) or 0))
-                quarantined_files += max(0, current_quarantined - baseline_quarantined)
+                quarantined_files += current_quarantined
         else:
             scanned_files += _live_max(report, agent, 'files_scanned')
             quarantined_files += _live_max(report, agent, 'quarantined_count')
