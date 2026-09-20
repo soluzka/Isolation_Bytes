@@ -17,6 +17,24 @@ def _folders(quarantine_utils) -> Iterable[str]:
     )
 
 
+def _matching_artifacts(folder: str, basename: str) -> list[str]:
+    """Return quarantine artifacts for a source basename, or [] on I/O errors."""
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    return [
+        os.path.join(folder, name)
+        for name in names
+        if (
+            name == basename
+            or name == basename + ".enc"
+            or name.startswith(basename + "_")
+            or name.startswith(basename + ".")
+        )
+    ]
+
+
 def _artifacts(filepath: str) -> list[str]:
     try:
         import quarantine_utils
@@ -26,21 +44,18 @@ def _artifacts(filepath: str) -> list[str]:
     basename = os.path.basename(filepath)
     result: list[str] = []
     for folder in _folders(quarantine_utils):
-        try:
-            names = os.listdir(folder)
-        except OSError:
-            continue
-        result.extend(
-            os.path.join(folder, name)
-            for name in names
-            if (
-                name == basename
-                or name == basename + ".enc"
-                or name.startswith(basename + "_")
-                or name.startswith(basename + ".")
-            )
-        )
+        result.extend(_matching_artifacts(folder, basename))
     return list(dict.fromkeys(result))
+
+
+def _artifact_matches_hash(artifact: str, fernet, expected: str) -> bool:
+    """Decrypt one artifact and compare it with the expected source hash."""
+    try:
+        with open(artifact, "rb") as handle:
+            plaintext = fernet.decrypt(handle.read())
+    except (OSError, ValueError):
+        return False
+    return hashlib.sha256(plaintext).hexdigest().lower() == expected
 
 
 def verify(filepath: str, expected_sha256: str | None = None) -> bool:
@@ -60,19 +75,14 @@ def verify(filepath: str, expected_sha256: str | None = None) -> bool:
         if len(key) != 44:
             return False
         fernet = Fernet(key)
-    except Exception:
+    except (ImportError, OSError, ValueError, TypeError):
         return False
 
     expected = str(expected_sha256).lower()
-    for artifact in artifacts:
-        try:
-            with open(artifact, "rb") as handle:
-                plaintext = fernet.decrypt(handle.read())
-            if hashlib.sha256(plaintext).hexdigest().lower() == expected:
-                return True
-        except Exception:
-            continue
-    return False
+    return any(
+        _artifact_matches_hash(artifact, fernet, expected)
+        for artifact in artifacts
+    )
 
 
 def quarantine_and_verify(filepath: str, *, reason: str = "") -> bool:
