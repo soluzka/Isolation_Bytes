@@ -128,7 +128,8 @@ pyopenssl>=23.0.0
 upnpclient>=1.0.0
 
 # PyInstaller for building EXEs
-#pyinstaller>=6.0.0
+pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.6
 
 # SSH-based remote server management
 paramiko>=3.0.0
@@ -171,7 +172,8 @@ tifffile>=2023.0.0
 #torch>=2.0.0
 tornado>=6.2.0
 tqdm>=4.64.0
-#transformers>=4.30.0
+transformers==4.57.6
+huggingface-hub>=0.34.0,<1.0
 wsproto>=1.2.0
 zstandard>=0.21.0
 PyGithub==1.59.1
