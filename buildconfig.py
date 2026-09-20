@@ -2,7 +2,7 @@
 
 Builds both EXEs with the same configuration:
   - cloud_server.exe         (PyInstaller — Flask + Caddy + Cloudflare)
-  - IsolationBytesLogin.exe  (dotnet — launcher with embedded cloud_server.exe)
+  - IsolationBytesAgent.exe  (PyInstaller — desktop scanning agent)\n  - IsolationBytesLogin.exe  (dotnet — launcher)
 
 The launcher embeds cloud_server.exe inside itself, so the final
 IsolationBytesLogin.exe is fully self-contained — no external files needed.
@@ -10,7 +10,7 @@ IsolationBytesLogin.exe is fully self-contained — no external files needed.
 Usage:
     python buildconfig.py              # build everything (cloud first, then launcher)
     python buildconfig.py --cloud      # only cloud_server.exe
-    python buildconfig.py --launcher   # only IsolationBytesLogin.exe
+    python buildconfig.py --agent      # only IsolationBytesAgent.exe\n    python buildconfig.py --launcher   # only IsolationBytesLogin.exe
     python buildconfig.py --clean      # clean dist/ then build everything
 
 Everything is defined here: URLs, ports, paths, embedded files.
@@ -354,7 +354,7 @@ def build_launcher():
         print(f"  OK: IsolationBytesAgent.exe bundled alongside login EXE")
     else:
         print(f"  NOTE: IsolationBytesAgent.exe not found in dist/ yet —")
-        print(f"        the login EXE will download it from the server on first launch")
+        print(f"        place IsolationBytesAgent.exe alongside the installed login EXE")
 
     size = (DIST_DIR / "IsolationBytesLogin.exe").stat().st_size / 1048576
     print(f"  OK: IsolationBytesLogin.exe ({size:.1f} MB)")
