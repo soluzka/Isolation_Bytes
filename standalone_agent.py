@@ -2150,7 +2150,13 @@ X-GNOME-Autostart-enabled=true
                     # Publish live YARA progress frequently enough for the
                     # dashboard to track the current file/path without waiting
                     # hundreds of files.
-                    if self._files_scanned - self._scan_progress_reported >= 25:
+                    # Publish the first completed enumeration immediately, then
+                    # continue with small batches. This prevents the dashboard from
+                    # appearing stuck at 0 while a slow YARA/ML file is being processed.
+                    if (
+                        self._files_scanned == 1 or
+                        self._files_scanned - self._scan_progress_reported >= 10
+                    ):
                         self._report([], report_type='scan_progress')
                         self._scan_progress_reported = self._files_scanned
 
