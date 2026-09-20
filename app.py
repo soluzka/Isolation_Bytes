@@ -220,10 +220,6 @@ def conditional_startup_status_api():
 
     # Copy and add runtime flags to avoid mutating original
     resp = dict(state)
-    # Never expose a successful agent-trigger message as a conditional-startup error.
-    last_error = resp.get('last_error')
-    if isinstance(last_error, str) and last_error.lower().startswith('scan triggered for ') and ' agent(s).' in last_error.lower():
-        resp['last_error'] = None
     resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
     return jsonify(resp)
 
