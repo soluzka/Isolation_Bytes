@@ -1825,43 +1825,40 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
         _persist_conditional_startup_log(results["log"], basedir)
         return results
 
-    # Run the file/folder scan and the process scan in parallel so that
-    # Files Scanned and Process Events climb at the same time, then the
-    # slow process hardening step once both have finished.
-    if _load_scheduled_scan_state(state_file, output):
-        output.write('[conditional_startup] Running scheduled scans...\n')
-        monitored_folders = _get_monitored_folders(basedir, output)
+    # A user-triggered Conditional Startup run is a real file scan; it must
+    # not depend on the persistent scheduled-scan toggle. That toggle controls
+    # the scheduler, not whether an explicit /run_startup request scans files.
+    output.write('[conditional_startup] Running explicit Conditional Startup file scan...\n')
+    monitored_folders = _get_monitored_folders(basedir, output)
+    if STOP_EVENT.is_set():
+        results["log"] = output.getvalue()
+        return results
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        future_process = executor.submit(
+            _scan_running_processes_step,
+            modules['process_monitor'], modules['scan_utils'], results, output, progress_callback
+        )
+        future_file = executor.submit(
+            _scan_monitored_folders_step,
+            monitored_folders, modules, results, scanned_file_status, output, progress_callback
+        )
+        future_persistence = executor.submit(
+            _check_persistence_indicators_step,
+            results, output, progress_callback
+        )
+        future_hardening = executor.submit(
+            _scan_processes_hardening_step,
+            modules['process_security'], results, output, progress_callback
+        )
+        future_process.result()
+        future_file.result()
+        future_persistence.result()
+        future_hardening.result()
+
         if STOP_EVENT.is_set():
             results["log"] = output.getvalue()
+            output.write("[conditional_startup] Stop requested: skipping post-scan steps.\n")
             return results
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            future_process = executor.submit(
-                _scan_running_processes_step,
-                modules['process_monitor'], modules['scan_utils'], results, output, progress_callback
-            )
-            future_file = executor.submit(
-                _scan_monitored_folders_step,
-                monitored_folders, modules, results, scanned_file_status, output, progress_callback
-            )
-            future_persistence = executor.submit(
-                _check_persistence_indicators_step,
-                results, output, progress_callback
-            )
-            future_hardening = executor.submit(
-                _scan_processes_hardening_step,
-                modules['process_security'], results, output, progress_callback
-            )
-            future_process.result()
-            future_file.result()
-            future_persistence.result()
-            future_hardening.result()
-
-            if STOP_EVENT.is_set():
-                results["log"] = output.getvalue()
-                output.write("[conditional_startup] Stop requested: skipping post-scan steps.\n")
-                return results
-    else:
-        _scan_running_processes_step(modules['process_monitor'], modules['scan_utils'], results, output, progress_callback)
 
     if STOP_EVENT.is_set():
         results["log"] = output.getvalue()
