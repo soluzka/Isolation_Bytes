@@ -60,8 +60,15 @@ sed -i 's/^pyinstaller==/#pyinstaller==/' requirements.txt 2>/dev/null || true
 
 # Verify the exact source that will be started before touching the service.
 echo "  Deployed commit: $(git rev-parse --short HEAD)"
-/opt/antivirus-server/venv/bin/python -m py_compile cloud/cloud_server.py cloud/_agent_results_unlimited.py
-/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
+/opt/antivirus-server/venv/bin/python -m py_compile quick_start.py cloud/cloud_server.py cloud/_agent_results_unlimited.py
+/opt/antivirus-server/venv/bin/python -c "import quick_start; print('  quick_start import: OK')"
+ /opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
+
+# Conditional Startup counters are generation-scoped. Remove only the shared
+# runtime state from the previous deployment; this does not touch quarantine
+# data or scan history.
+rm -f /root/IsolationBytes/conditional_startup_state.json
+rm -f /opt/antivirus-server/conditional_startup_state.json
 
 # 5. Create .env and optionally collect Cloudflare API token
 echo "[5/8] Creating .env..."
