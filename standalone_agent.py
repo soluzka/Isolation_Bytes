@@ -50,6 +50,13 @@ except ImportError:
             creationflags=getattr(_sp, 'CREATE_NO_WINDOW', 0))
     import requests
 
+# Import ML analyzer for enhanced threat analysis
+try:
+    from security.ml_yara_analyzer import get_ml_analyzer
+    ML_AVAILABLE = True
+except ImportError:
+    ML_AVAILABLE = False
+
 from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_check_call, safe_list2cmdline
 
 DEFAULT_SERVER = "https://isolation-bytes.com"
@@ -1953,10 +1960,43 @@ X-GNOME-Autostart-enabled=true
                                     all_matches.extend(m)
                             except Exception:
                                 pass
+                        # Apply ML analysis if available
+                        if ML_AVAILABLE and all_matches:
+                            try:
+                                ml_analyzer = get_ml_analyzer()
+                                file_metadata = {
+                                    'size': file_size,
+                                    'type': ext,
+                                    'entropy': self._calculate_file_entropy(filepath) if file_size < 10 * 1024 * 1024 else 0,
+                                    'suspicious_patterns': self._count_suspicious_patterns(all_matches)
+                                }
+                                ml_analysis = ml_analyzer.analyze_threat_level(all_matches, file_metadata)
+                                # Attach ML analysis to matches
+                                for match in all_matches:
+                                    match._ml_analysis = ml_analysis
+                            except Exception:
+                                pass
                         return all_matches
                     else:
                         matches = rules.match(filepath, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
-                        return matches or []
+                        matches = matches or []
+                        # Apply ML analysis if available
+                        if ML_AVAILABLE and matches:
+                            try:
+                                ml_analyzer = get_ml_analyzer()
+                                file_metadata = {
+                                    'size': file_size,
+                                    'type': ext,
+                                    'entropy': self._calculate_file_entropy(filepath) if file_size < 10 * 1024 * 1024 else 0,
+                                    'suspicious_patterns': self._count_suspicious_patterns(matches)
+                                }
+                                ml_analysis = ml_analyzer.analyze_threat_level(matches, file_metadata)
+                                # Attach ML analysis to matches
+                                for match in matches:
+                                    match._ml_analysis = ml_analysis
+                            except Exception:
+                                pass
+                        return matches
                 else:
                     with open(filepath, 'rb') as fh:
                         data = fh.read()
@@ -1969,10 +2009,43 @@ X-GNOME-Autostart-enabled=true
                                     all_matches.extend(m)
                             except Exception:
                                 pass
+                        # Apply ML analysis if available
+                        if ML_AVAILABLE and all_matches:
+                            try:
+                                ml_analyzer = get_ml_analyzer()
+                                file_metadata = {
+                                    'size': len(data),
+                                    'type': ext,
+                                    'entropy': self._calculate_file_entropy_bytes(data),
+                                    'suspicious_patterns': self._count_suspicious_patterns(all_matches)
+                                }
+                                ml_analysis = ml_analyzer.analyze_threat_level(all_matches, file_metadata)
+                                # Attach ML analysis to matches
+                                for match in all_matches:
+                                    match._ml_analysis = ml_analysis
+                            except Exception:
+                                pass
                         return all_matches
                     else:
                         matches = rules.match(data=data, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
-                        return matches or []
+                        matches = matches or []
+                        # Apply ML analysis if available
+                        if ML_AVAILABLE and matches:
+                            try:
+                                ml_analyzer = get_ml_analyzer()
+                                file_metadata = {
+                                    'size': len(data),
+                                    'type': ext,
+                                    'entropy': self._calculate_file_entropy_bytes(data),
+                                    'suspicious_patterns': self._count_suspicious_patterns(matches)
+                                }
+                                ml_analysis = ml_analyzer.analyze_threat_level(matches, file_metadata)
+                                # Attach ML analysis to matches
+                                for match in matches:
+                                    match._ml_analysis = ml_analysis
+                            except Exception:
+                                pass
+                        return matches
             except Exception:
                 return []
         except Exception:
@@ -1987,6 +2060,45 @@ X-GNOME-Autostart-enabled=true
             return h.hexdigest()
         except Exception:
             return ''
+
+    def _calculate_file_entropy(self, filepath):
+        """Calculate Shannon entropy of file for ML analysis."""
+        try:
+            with open(filepath, 'rb') as f:
+                data = f.read()
+            return self._calculate_file_entropy_bytes(data)
+        except Exception:
+            return 0.0
+
+    def _calculate_file_entropy_bytes(self, data):
+        """Calculate Shannon entropy of byte data for ML analysis."""
+        if not data:
+            return 0.0
+        
+        # Calculate byte frequency
+        byte_counts = [0] * 256
+        for byte in data:
+            byte_counts[byte] += 1
+        
+        # Calculate entropy
+        entropy = 0.0
+        data_len = len(data)
+        for count in byte_counts:
+            if count > 0:
+                probability = count / data_len
+                entropy -= probability * (probability.bit_length() - 1)
+        
+        return entropy
+
+    def _count_suspicious_patterns(self, matches):
+        """Count suspicious patterns in YARA matches for ML analysis."""
+        suspicious_count = 0
+        for match in matches:
+            rule_name = getattr(match, 'rule', '').lower()
+            # Count rules with suspicious keywords
+            if any(keyword in rule_name for keyword in ['injection', 'hijack', 'obfuscation', 'evasion', 'steal']):
+                suspicious_count += 1
+        return suspicious_count
 
     def _scan_directory(self, dirpath, cycle_start=None):
         findings = []
