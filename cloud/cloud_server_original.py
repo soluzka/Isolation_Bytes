@@ -2661,7 +2661,7 @@ def cloud_checksums():
             checksums[f] = {'sha256': h.hexdigest(), 'size': size}
         except Exception:
             pass
-    result = {'version': '1.8.952.0', 'files': checksums}
+    result = {'version': '1.8.953.0', 'files': checksums}
     cloud_checksums._cache = {'key': cache_key, 'data': result}
     return jsonify(result)
 
