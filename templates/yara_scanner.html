@@ -950,7 +950,6 @@
                             scan_id: conditional.run_id || '',
                             scan_dirs: conditional.monitored_directories || conditional.scan_dirs || [],
                             scan_status: conditional.scan_phase === 'yara' ? 'scanning' : 'scanning',
-                            scan_current_path: conditional.scan_current_path || '',
                             scan_started_at: conditional.started_at || '',
                             last_scan: conditional.last_run || conditional.started_at || ''
                         }]
