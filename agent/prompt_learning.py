@@ -126,8 +126,17 @@ class PromptLearningStore:
             db.commit()
         self.prune()
 
+    @staticmethod
+    def _rank_lesson(query: set[str], row: tuple) -> tuple[float, tuple] | None:
+        tokens = PromptLearningStore._tokens(row[1])
+        if not tokens:
+            return None
+        overlap = len(query & tokens) / max(1, len(query | tokens))
+        score = overlap + (0.15 if row[4] > 0 else 0.0) - (0.15 if row[4] < 0 else 0.0)
+        return (score, row) if score >= 0.10 else None
+
     def retrieve(self, prompt: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Retrieve similar prior lessons using token overlap, not execution."""
+        """Retrieve similar prior lessons using token overlap, never execution."""
         query = self._tokens(self.sanitize(prompt))
         if not query:
             return []
@@ -139,16 +148,12 @@ class PromptLearningStore:
                    WHERE last_used >= ?""",
                 (time.time() - _RETENTION_SECONDS,),
             ).fetchall()
-        ranked = []
-        for row in rows:
-            tokens = self._tokens(row[1])
-            if not tokens:
-                continue
-            overlap = len(query & tokens) / max(1, len(query | tokens))
-            score = overlap + (0.15 if row[4] > 0 else 0.0) - (0.15 if row[4] < 0 else 0.0)
-            if score >= 0.10:
-                ranked.append((score, row))
-        ranked.sort(key=lambda item: item[0], reverse=True)
+        ranked = [self._rank_lesson(query, row) for row in rows]
+        ranked = sorted(
+            (item for item in ranked if item is not None),
+            key=lambda item: item[0],
+            reverse=True,
+        )
         return [
             {
                 "id": row[0],
