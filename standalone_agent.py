@@ -270,7 +270,7 @@ SCAN_INTERVAL = 600        # seconds between scans
 MAX_FILES_PER_SCAN = float('inf')  # no artificial file-count ceiling
 MAX_SCAN_CYCLE_SECONDS = float('inf')  # no artificial wall-clock ceiling
 MAX_FILE_SIZE = float('inf')
-AGENT_VERSION = "1.8.952.0"
+AGENT_VERSION = "1.8.953.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
     os.environ.get(
