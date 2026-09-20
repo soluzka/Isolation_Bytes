@@ -3273,14 +3273,30 @@ def agent_report():
             report_yara += 1
         if ttype == 'ml_suspicious' or 'ml' in reason or 'model' in reason or f.get('ml_score') or 'ml_heuristic' in rule:
             report_ml += 1
-    # Preserve last_report findings when the new report has no findings
-    # (clean scan shouldn't wipe the findings list the dashboard needs)
+    # Preserve historical findings, but ALWAYS refresh live scan metadata.
+    # Previously a progress report kept the entire old last_report intact,
+    # which froze files_scanned/current_path/status at the previous scan's
+    # values (for example 8,204) even while the agent was scanning.
     new_findings = data.get('findings') or []
+    previous_report = existing.get('last_report') or {}
     if new_findings:
         last_report = data
     else:
-        # Keep the previous last_report so findings stay visible
-        last_report = existing.get('last_report') or data
+        last_report = dict(previous_report) if previous_report else dict(data)
+        # Progress/heartbeat reports carry the authoritative live counters and
+        # scan generation. Merge those fields without replacing historical
+        # findings.
+        for field in (
+            'timestamp', 'last_scan', 'files_scanned', 'quarantined_count',
+            'scan_id', 'scan_started_at', 'scan_status', 'scan_current_path',
+            'scan_dirs', 'scan_dir_count', 'scan_complete', 'type',
+            'yara_scan_state'
+        ):
+            if field in data:
+                last_report[field] = data[field]
+        if 'findings' not in last_report:
+            last_report['findings'] = previous_report.get('findings') or []
+        last_report['finding_count'] = len(last_report.get('findings') or [])
     update_fields = {
         'last_report': last_report,
         'last_seen': datetime.now(timezone.utc).isoformat(),
