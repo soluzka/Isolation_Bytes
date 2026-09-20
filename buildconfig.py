@@ -271,10 +271,37 @@ def generate_csproj():
 
 
 # ============================================================
+# BUILD: IsolationBytesAgent.exe (PyInstaller)
+# ============================================================
+def build_agent():
+    print("\n[2/3] Building IsolationBytesAgent.exe (PyInstaller)...")
+    spec_path = PROJECT_ROOT / "standalone_agent.spec"
+    if not spec_path.exists():
+        print(f"ERROR: {spec_path} not found")
+        return False
+
+    result = safe_run(
+        [sys.executable, "-m", "PyInstaller", str(spec_path),
+         "--noconfirm", "--distpath", str(DIST_DIR)],
+        cwd=str(PROJECT_ROOT),
+    )
+    if result.returncode != 0:
+        print("FAILED: IsolationBytesAgent.exe build")
+        return False
+
+    exe = DIST_DIR / "IsolationBytesAgent.exe"
+    if not exe.exists():
+        print("ERROR: IsolationBytesAgent.exe not found in dist/")
+        return False
+    print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
+    return True
+
+
+# ============================================================
 # BUILD: AntivirusServerLogin.exe (dotnet)
 # ============================================================
 def build_launcher():
-    print("\n[2/2] Building IsolationBytesLogin.exe (dotnet)...")
+    print("\n[3/3] Building IsolationBytesLogin.exe (dotnet)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
     print(f"  Mode:          Thin client (no embedded server)")
 
