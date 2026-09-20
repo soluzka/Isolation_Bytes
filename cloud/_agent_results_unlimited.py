@@ -28,14 +28,20 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
 
     for device_id, agent in legacy._all_agents().items():
         report = agent.get("last_report") or {}
+        # The agent sends its LocalAppData scan_state.json as yara_scan_state.
+        # Use it as the authoritative current-generation state.
+        scan_state = report.get("yara_scan_state") or agent.get("yara_scan_state") or {}
+        if not isinstance(scan_state, dict):
+            scan_state = {}
         active = (active_scan_state or {}).get(device_id) or {}
         active_started = float(active.get("started_at", 0) or 0)
 
         current_scan_id = str(
-            agent.get("scan_id") or report.get("scan_id") or ""
+            scan_state.get("scan_id") or agent.get("scan_id") or report.get("scan_id") or ""
         )
         current_status = str(
-            agent.get("scan_status")
+            scan_state.get("status")
+            or agent.get("scan_status")
             or report.get("scan_status")
             or ""
         ).lower()
@@ -51,7 +57,8 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             and current_status in {"queued", "scanning"}
         ):
             recovered_started = (
-                agent.get("scan_started_at")
+                scan_state.get("started_at")
+                or agent.get("scan_started_at")
                 or report.get("scan_started_at")
                 or report.get("timestamp")
             )
@@ -103,17 +110,14 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             files_scanned = max(
                 0,
                 int(
-                    agent.get("files_scanned", report.get("files_scanned", 0))
+                    scan_state.get("files_scanned", agent.get("files_scanned", report.get("files_scanned", 0)))
                     or 0
                 ),
             )
             quarantined_count = max(
                 0,
                 int(
-                    agent.get(
-                        "quarantined_count",
-                        report.get("quarantined_count", 0),
-                    )
+                    scan_state.get("quarantined_count", agent.get("quarantined_count", report.get("quarantined_count", 0)))
                     or 0
                 ),
             )
@@ -129,7 +133,8 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 or report.get("timestamp", "")
             )
             scan_id = str(
-                agent.get("scan_id")
+                scan_state.get("scan_id")
+                or agent.get("scan_id")
                 or report.get("scan_id")
                 or ""
             )
@@ -149,7 +154,8 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 "findings": findings[:50],
                 "quarantined_count": quarantined_count,
                 "scan_id": scan_id,
-                "scan_dirs": agent.get("scan_dirs")
+                "scan_dirs": scan_state.get("scan_dirs")
+                or agent.get("scan_dirs")
                 or report.get("scan_dirs")
                 or [],
                 "scan_status": status,
