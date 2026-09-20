@@ -1463,23 +1463,39 @@ def _sync_scan_state_from_results(results, status=None):
         except (OSError, ValueError, TypeError):
             state = {}
         scan_id = str(state.get("scan_id") or uuid.uuid4())
+        # Multiple scanner workers can publish this same state file.  Never
+        # let a lower per-worker counter overwrite a higher cumulative count
+        # from another worker; the live scan state must be monotonic.
+        current_files = int(results.get("scanned_files_count") or 0)
+        current_quarantined = len(results.get("quarantined_files") or [])
+        current_blocked = int(results.get("blocked_threats") or 0)
+        current_findings = len(results.get("results") or [])
+        current_ransomware = len(results.get("ransomware_indicators") or [])
+        current_persistence = sum(
+            len(v) if isinstance(v, (list, tuple, dict, set)) else 1
+            for v in (results.get("persistence_indicators") or {}).values()
+        )
+        current_yara = len(results.get("yara_suspicious") or [])
+        current_ml = len(results.get("ml_detections") or [])
+        current_errors = len(results.get("errors") or [])
+        current_process_events = len(results.get("process_events") or [])
         state.update({
             "scan_id": scan_id,
             "status": status or ("complete" if results.get("_scan_complete") else "scanning"),
             "started_at": state.get("started_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "complete": bool(status == "complete" or results.get("_scan_complete")),
-            "files_scanned": int(results.get("scanned_files_count") or 0),
-            "quarantined_count": len(results.get("quarantined_files") or []),
-            "threats_blocked": int(results.get("blocked_threats") or 0),
-            "findings": len(results.get("results") or []),
-            "ransomware_indicators": len(results.get("ransomware_indicators") or []),
-            "persistence_indicators": sum(len(v) if isinstance(v, (list, tuple, dict, set)) else 1 for v in (results.get("persistence_indicators") or {}).values()),
-            "yara_suspicious": len(results.get("yara_suspicious") or []),
-            "ml_suspicious": len(results.get("ml_detections") or []),
-            "errors": len(results.get("errors") or []),
-            "process_events": len(results.get("process_events") or []),
-            "last_error": (results.get("errors") or [])[-1] if results.get("errors") else None,
+            "files_scanned": max(int(state.get("files_scanned") or 0), current_files),
+            "quarantined_count": max(int(state.get("quarantined_count") or 0), current_quarantined),
+            "threats_blocked": max(int(state.get("threats_blocked") or 0), current_blocked),
+            "findings": max(int(state.get("findings") or 0), current_findings),
+            "ransomware_indicators": max(int(state.get("ransomware_indicators") or 0), current_ransomware),
+            "persistence_indicators": max(int(state.get("persistence_indicators") or 0), current_persistence),
+            "yara_suspicious": max(int(state.get("yara_suspicious") or 0), current_yara),
+            "ml_suspicious": max(int(state.get("ml_suspicious") or 0), current_ml),
+            "errors": max(int(state.get("errors") or 0), current_errors),
+            "process_events": max(int(state.get("process_events") or 0), current_process_events),
+            "last_error": (results.get("errors") or [])[-1] if results.get("errors") else state.get("last_error"),
         })
         tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
