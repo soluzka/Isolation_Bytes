@@ -64,9 +64,19 @@ class SecurityMLModel:
         ])
 
     def train_model(self, X_train):
+        """Train only on an explicitly supplied baseline dataset.
+
+        The scanner never trains on files it is currently deciding about.
+        This prevents an attacker-controlled file from poisoning the model.
+        """
+        X_train = np.asarray(X_train, dtype=np.float64)
+        if X_train.ndim != 2 or X_train.shape[0] < 10:
+            raise ValueError("At least 10 baseline samples are required for ML training")
+        if not np.isfinite(X_train).all():
+            raise ValueError("Training data contains non-finite values")
         self.pipeline.fit(X_train)
         self.model = self.pipeline.named_steps['model']
-        logging.info("Security ML model trained successfully")
+        logging.info("Security ML model trained successfully on %d baseline samples", X_train.shape[0])
 
     def save_model(self):
         os.makedirs(os.path.dirname(self.model_path) or '.', exist_ok=True)
@@ -199,15 +209,30 @@ class SecurityMLModel:
             min(text.count('cmd.exe'), 20) / 20.0,
         ]], dtype=np.float64)
 
+    def ml_status(self):
+        """Expose whether ML is actually usable for a scan decision."""
+        return {
+            'available': bool(self.pipeline is not None and self.is_fitted()),
+            'model_type': type(self.model).__name__ if self.model is not None else None,
+        }
+
     def file_anomaly_confidence(self, filepath, yara_matches=None):
+        """Map IsolationForest's anomaly margin to a bounded confidence.
+
+        This is a monotonic anomaly-confidence transform, not a calibrated
+        probability. It is only returned when a genuinely fitted model exists.
+        """
         if not os.path.isfile(filepath) or not self.is_fitted():
             return 0.0
         features = self.get_file_features(filepath, yara_matches=yara_matches)
         _, scores = self.predict(features)
         if scores is None or len(scores) == 0:
             return 0.0
-        score = self._safe_number(scores[0])
-        return max(0.0, min(1.0, 0.5 - score))
+        margin = self._safe_number(scores[0])
+        if not math.isfinite(margin):
+            return 0.0
+        confidence = 1.0 / (1.0 + math.exp(max(-60.0, min(60.0, 8.0 * margin))))
+        return max(0.0, min(1.0, confidence))
 
     def get_features(self, connection_data):
         features = {
