@@ -2832,9 +2832,23 @@ def github_webhook():
             [python_bin, '-m', 'py_compile',
              'cloud/cloud_server.py',
              'cloud/cloud_server_original.py',
-             'cloud/_agent_results_unlimited.py'],
+             'cloud/_agent_results_unlimited.py',
+             'quick_start.py'],
             cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
         )
+        if validation.returncode == 0:
+            # Syntax validation alone can miss import-time failures that would
+            # kill gunicorn and produce a Cloudflare 502. Load the exact WSGI
+            # application and the Conditional Startup module before restarting.
+            import_check = _sp.run(
+                [python_bin, '-c',
+                 'import cloud.cloud_server; import quick_start; '
+                 'print("production import check: OK")'],
+                cwd=str(BASE_DIR), capture_output=True, text=True, timeout=120
+            )
+            if import_check.returncode != 0:
+                validation = import_check
+
         if validation.returncode != 0:
             if previous_revision:
                 _sp.run(
