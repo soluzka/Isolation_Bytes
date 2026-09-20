@@ -2419,23 +2419,16 @@ def run_startup():
 
     now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     run_id = hashlib.sha256(f'{now_str}:{time.time_ns()}'.encode()).hexdigest()[:24]
+    # Starting another Conditional Startup pass must never erase the
+    # accumulated scan history shown by the dashboard.  Only run metadata
+    # changes here; counters/findings are carried forward by _progress().
     conditional_startup_state.update({
         'run_id': run_id,
-        'findings': [],
         'running': True,
         'started_at': now_str,
         'last_updated': now_str,
-        'last_run': None,
+        'last_run': conditional_startup_state.get('last_run'),
         'duration': None,
-        'scanned_files': 0,
-        'quarantined_files': 0,
-        'errors': 0,
-        'process_events': 0,
-        'ml_detections': 0,
-        'ransomware_indicators': 0,
-        'persistence_indicators': 0,
-        'yara_suspicious': 0,
-        'blocked_threats': 0,
         'last_error': None,
     })
     _persist_conditional_startup_state()
