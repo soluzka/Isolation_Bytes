@@ -110,26 +110,43 @@ if ! grep -qE '^ANTIVIRUS_RUNTIME_DIR=' /opt/antivirus-server/.env; then
 fi
 
 # Restore all application-owned JSON state files used by the cloud/dashboard.
-# Create missing files only; never overwrite existing scan history, quarantine
-# records, agent registrations, or block state.
-printf '{}\\n' > /tmp/empty-object.json
-printf '[]\\n' > /tmp/empty-array.json
+# Create missing files and repair malformed/truncated JSON. Valid state is kept;
+# invalid state is preserved as a timestamped backup before replacement.
+ensure_json_state() {
+    local path="$1"
+    local default_json="$2"
+    if [ ! -f "$path" ]; then
+        printf '%s\n' "$default_json" > "$path"
+        echo "  created: $path"
+        return 0
+    fi
+    if ! /opt/antivirus-server/venv/bin/python - "$path" <<'PY'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    json.load(f)
+PY
+    then
+        backup="${path}.corrupt-$(date +%Y%m%d-%H%M%S)"
+        mv "$path" "$backup"
+        printf '%s\n' "$default_json" > "$path"
+        echo "  repaired: $path (backup: $backup)"
+    fi
+}
 
-# Shared cloud state (must exist before gunicorn starts).
-if [ ! -f /opt/antivirus-server/agents.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/agents.json; fi
-if [ ! -f /opt/antivirus-server/agent_commands.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/agent_commands.json; fi
-if [ ! -f /opt/antivirus-server/blocked_ips.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/blocked_ips.json; fi
-if [ ! -f /opt/antivirus-server/blocked_files.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/blocked_files.json; fi
-if [ ! -f /opt/antivirus-server/scan_results.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/scan_results.json; fi
-if [ ! -f /opt/antivirus-server/scan_history.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/scan_history.json; fi
-if [ ! -f /opt/antivirus-server/phishing_alerts.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/phishing_alerts.json; fi
-if [ ! -f /opt/antivirus-server/iocs.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/iocs.json; fi
-if [ ! -f /opt/antivirus-server/trusted_hashes.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/trusted_hashes.json; fi
-if [ ! -f /opt/antivirus-server/yara_rule_reputation.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/yara_rule_reputation.json; fi
-if [ ! -f /opt/antivirus-server/voice_scan_status.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/voice_scan_status.json; fi
-if [ ! -f /opt/antivirus-server/scheduled_scan_state.json ]; then printf '{"enabled": false}\\n' > /opt/antivirus-server/scheduled_scan_state.json; fi
-if [ ! -f /opt/antivirus-server/conditional_startup_state.json ]; then printf '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0}\\n' > /opt/antivirus-server/conditional_startup_state.json; fi
-
+ensure_json_state "$QUARANTINE_DIR/quarantine_log.json" '[]'
+ensure_json_state "/opt/antivirus-server/agents.json" '{}'
+ensure_json_state "/opt/antivirus-server/agent_commands.json" '{}'
+ensure_json_state "/opt/antivirus-server/blocked_ips.json" '{}'
+ensure_json_state "/opt/antivirus-server/blocked_files.json" '{}'
+ensure_json_state "/opt/antivirus-server/scan_results.json" '{}'
+ensure_json_state "/opt/antivirus-server/scan_history.json" '[]'
+ensure_json_state "/opt/antivirus-server/phishing_alerts.json" '[]'
+ensure_json_state "/opt/antivirus-server/iocs.json" '[]'
+ensure_json_state "/opt/antivirus-server/trusted_hashes.json" '{}'
+ensure_json_state "/opt/antivirus-server/yara_rule_reputation.json" '{}'
+ensure_json_state "/opt/antivirus-server/voice_scan_status.json" '{}'
+ensure_json_state "/opt/antivirus-server/scheduled_scan_state.json" '{"enabled": false}'
+ensure_json_state "/opt/antivirus-server/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0}'
 # Scan cache is intentionally empty on a fresh/repaired deployment.
 mkdir -p /opt/antivirus-server/data
 if [ ! -f /opt/antivirus-server/data/scan_cache.json ]; then printf '{}\\n' > /opt/antivirus-server/data/scan_cache.json; fi
