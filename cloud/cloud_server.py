@@ -111,8 +111,15 @@ def _canonical_yara_agent_state():
 
     for device_id, agent in agents.items():
         report = agent.get('last_report') or {}
-        scanned_files += _live_max(report, agent, 'files_scanned')
-        quarantined_files += _live_max(report, agent, 'quarantined_count')
+        scan_state = _agent_scan_state.get(device_id)
+        if scan_state:
+            scanned_files += max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
+            baseline_quarantined = int(scan_state.get('baseline_quarantined', 0) or 0)
+            raw_quarantined = int(agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0)
+            quarantined_files += max(0, raw_quarantined - baseline_quarantined)
+        else:
+            scanned_files += _live_max(report, agent, 'files_scanned')
+            quarantined_files += _live_max(report, agent, 'quarantined_count')
         marker = _agent_report_marker(agent)
         agent_path = agent.get('scan_current_path') or report.get('scan_current_path') or ''
         agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
@@ -124,7 +131,6 @@ def _canonical_yara_agent_state():
         if agent_started:
             current_started_at = agent_started
         last_scan = max(last_scan, marker)
-        scan_state = _agent_scan_state.get(device_id)
         pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
         if scan_state:
             started = float(scan_state.get('started_at', 0) or 0)
