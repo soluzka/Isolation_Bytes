@@ -29,6 +29,7 @@ import time
 from urllib.parse import urlparse, unquote
 import threading
 import json
+import queue
 
 # EARLIEST WINDOWS AGENT BOOTSTRAP:
 # Create the LocalAppData runtime JSON state before importing optional scanner
@@ -2455,6 +2456,57 @@ X-GNOME-Autostart-enabled=true
         except Exception:
             return []
 
+    def _scan_file_yara_guarded(self, filepath):
+        """Run per-file YARA behind a daemon watchdog.
+
+        The YARA engine has rule-level timeouts, but the complete scanner can
+        still spend time loading rules or running optional analysis. A bad
+        file must never hold the directory traversal forever. When the
+        watchdog expires we record the timeout and immediately continue with
+        the next file; the worker is daemonized so it cannot keep the agent
+        alive.
+        """
+        try:
+            timeout = max(
+                1.0,
+                float(os.environ.get("AGENT_FILE_SCAN_TIMEOUT_SECONDS", "30")),
+            )
+        except (TypeError, ValueError):
+            timeout = 30.0
+
+        result_queue = queue.Queue(maxsize=1)
+
+        def _worker():
+            try:
+                result_queue.put(("ok", self._scan_file_yara(filepath)), block=False)
+            except Exception as exc:
+                try:
+                    result_queue.put(("error", exc), block=False)
+                except Exception:
+                    pass
+
+        worker = threading.Thread(
+            target=_worker,
+            name="IsolationBytesFileScan",
+            daemon=True,
+        )
+        worker.start()
+        worker.join(timeout=timeout)
+
+        if worker.is_alive():
+            message = f"Per-file YARA watchdog timed out after {timeout:.1f}s: {filepath}"
+            logging.warning("[SCAN] %s", message)
+            return [], message
+
+        try:
+            status, value = result_queue.get_nowait()
+        except queue.Empty:
+            return [], f"Per-file YARA worker returned no result: {filepath}"
+
+        if status == "ok":
+            return value or [], None
+        return [], str(value)
+
     def _hash_file(self, filepath):
         try:
             h = hashlib.sha256()
@@ -2600,7 +2652,16 @@ X-GNOME-Autostart-enabled=true
                             })
                             continue
                         continue
-                    matches = self._scan_file_yara(filepath)
+                    matches, scan_error = self._scan_file_yara_guarded(filepath)
+                    if scan_error:
+                        record_error(
+                            self._scanner_results,
+                            "yara_scan_watchdog",
+                            scan_error,
+                            filepath=filepath,
+                        )
+                        self._publish_all_runtime_json()
+                        self._report([], report_type="scan_progress")
                     if matches:
                         h = self._hash_file(filepath)
                         # Use the scanner's severity metadata (which includes
