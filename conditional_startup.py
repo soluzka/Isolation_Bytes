@@ -1826,7 +1826,15 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     _run_routine_maintenance_step(output, results)
 
     basedir = os.path.dirname(os.path.abspath(__file__))
-    state_file = os.path.abspath(os.path.join(basedir, 'scheduled_scan_state.json'))
+    runtime_dir = os.path.abspath(os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(
+            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+            'IsolationBytes'
+        )
+    ))
+    os.makedirs(runtime_dir, exist_ok=True)
+    state_file = os.path.join(runtime_dir, 'scheduled_scan_state.json')
 
     modules, load_error = _load_scan_utilities(basedir, output)
     if modules is None:
