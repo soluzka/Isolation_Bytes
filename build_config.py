@@ -244,6 +244,8 @@ if not args.skip_exe:
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
         run([sys.executable, '-m', 'PyInstaller', launcher_spec,
              '--noconfirm',
+             '--exclude-module', 'pydantic',
+             '--exclude-module', 'pydantic_core',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
         launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
@@ -259,6 +261,8 @@ if not args.skip_exe:
         _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent.exe'))
         run([sys.executable, '-m', 'PyInstaller', agent_spec,
              '--noconfirm',
+             '--exclude-module', 'pydantic',
+             '--exclude-module', 'pydantic_core',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
         agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
