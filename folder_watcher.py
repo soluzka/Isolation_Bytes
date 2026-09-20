@@ -56,7 +56,9 @@ def load_scan_directories(config_path: str = "scan_directories.txt", auto_discov
     if auto_discover:
         directories.extend(discover_all_drives_and_important_folders())
 
-    config = get_resource_path(config_path)
+    runtime_dir = os.environ.get("ANTIVIRUS_RUNTIME_DIR")
+    runtime_config = os.path.join(runtime_dir, os.path.basename(config_path)) if runtime_dir else None
+    config = runtime_config if runtime_config and os.path.isfile(runtime_config) else get_resource_path(config_path)
     try:
         with open(config, "r", encoding="utf-8") as fh:
             for line in fh:
