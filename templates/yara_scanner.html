@@ -966,7 +966,7 @@
                 if (counter) counter.textContent = String(totalYaraFiles);
                 const scanStatus = document.getElementById('yaraScanStatus');
                 const active = (data.agents || []).find(
-                    ag => ag.scan_status === 'scanning' || ag.scan_current_path
+                    ag => ag.scan_status === 'scanning'
                 );
                 if (scanStatus) scanStatus.textContent =
                     active ? (active.scan_status || 'scanning') : 'idle';
