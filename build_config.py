@@ -113,22 +113,29 @@ def _ensure_spec_excludes(spec_path, modules):
         )
         print(f'Added PyInstaller spec exclusions: {exclusions}')
 
-    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\', '\\\\')
+    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\\\', '\\\\')
     hook_entry = f"r'{hook_dir}'"
-    if 'pyinstaller_hooks' not in content:
-        if 'hookspath=' in content:
-            content = re.sub(
-                r'hookspath=\[([^\]]*)\]',
-                lambda m: f"hookspath=[{m.group(1).strip()}, {hook_entry}]",
-                content,
-                count=1,
-            )
+    # Normalize hookspath instead of blindly prepending a comma. Generated
+    # specs may contain hookspath=[]; producing hookspath=[, r'...'] is a
+    # Python syntax error and prevents PyInstaller from even loading the spec.
+    hook_match = re.search(r'hookspath\\s*=\\s*\\[([^\\]]*)\\]', content)
+    if hook_match:
+        existing = hook_match.group(1).strip().strip(',').strip()
+        if existing:
+            entries = [item.strip() for item in existing.split(',') if item.strip()]
+            if hook_entry not in entries:
+                entries.append(hook_entry)
+            replacement = 'hookspath=[' + ', '.join(entries) + ']'
         else:
-            content = content.replace(
-                marker,
-                marker + f'    hookspath=[{hook_entry}],\n',
-                1,
-            )
+            replacement = f'hookspath=[{hook_entry}]'
+        content = content[:hook_match.start()] + replacement + content[hook_match.end():]
+        print(f'Normalized project PyInstaller hook path: {hook_dir}')
+    else:
+        content = content.replace(
+            marker,
+            marker + f'    hookspath=[{hook_entry}],\\n',
+            1,
+        )
         print(f'Added project PyInstaller hook path: {hook_dir}')
 
     with open(spec_path, 'w', encoding='utf-8') as f:
