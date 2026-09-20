@@ -122,13 +122,15 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 ),
             )
             status = str(
-                agent.get("scan_status")
+                scan_state.get("status")
+                or agent.get("scan_status")
                 or report.get("scan_status")
                 or "idle"
             ).lower()
 
             last_scan = (
-                agent.get("last_scan")
+                scan_state.get("updated_at")
+                or agent.get("last_scan")
                 or report.get("last_scan")
                 or report.get("timestamp", "")
             )
@@ -139,7 +141,8 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 or ""
             )
             started_at = (
-                agent.get("scan_started_at")
+                scan_state.get("started_at")
+                or agent.get("scan_started_at")
                 or report.get("scan_started_at")
                 or ""
             )
