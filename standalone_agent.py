@@ -518,6 +518,24 @@ class StandaloneAgent:
             "quarantined_files": [],
         }
 
+        # Restore accumulated scan counters and evidence before publishing
+        # any new runtime state. Restarting the agent must never turn prior
+        # scan totals back into zero.
+        try:
+            persisted_scan = {}
+            scan_state_path = runtime_path("scan_state.json")
+            if os.path.isfile(scan_state_path):
+                with open(scan_state_path, "r", encoding="utf-8") as handle:
+                    persisted_scan = json.load(handle) or {}
+            if isinstance(persisted_scan, dict):
+                self._files_scanned = int(persisted_scan.get("files_scanned") or 0)
+                self._quarantined_count = int(persisted_scan.get("quarantined_count") or 0)
+                self._threats_blocked = int(persisted_scan.get("threats_blocked") or 0)
+                self._scan_id = str(persisted_scan.get("scan_id") or "")
+                self._scan_started_at = str(persisted_scan.get("started_at") or "")
+        except (OSError, ValueError, TypeError):
+            pass
+
         # Restore accumulated indicator evidence before publishing any new
         # runtime state. A process restart must never turn historical evidence
         # back into an empty collection.
