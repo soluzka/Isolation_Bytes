@@ -689,11 +689,16 @@ public class LoginForm : Form
             // second hidden install. The agent is run exactly where the user
             // installed/placed it. Prefer the bundled EXE next to this launcher.
             var localDir = Path.GetDirectoryName(Application.ExecutablePath);
-            if (string.IsNullOrEmpty(localDir)) return;
+            if (string.IsNullOrEmpty(localDir))
+            {
+                return;
+            }
 
             var agentExe = Path.Combine(localDir, "IsolationBytesAgent.exe");
             if (!File.Exists(agentExe))
+            {
                 return;
+            }
 
             SafeProcess.StartExe(
                 agentExe,
