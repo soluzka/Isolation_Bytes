@@ -77,6 +77,66 @@ _patch_public_auth_security()
 _patch_license_input_length()
 
 
+
+
+@app.route('/api/scan-directories', methods=['GET', 'PUT', 'POST'])
+def api_scan_directories_cloud():
+    """Read or save the application-owned scan_directories.txt on the cloud dashboard."""
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'success': False, 'error': 'Authentication required'}), 401
+
+    runtime_dir = os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.path.expanduser('~'), 'IsolationBytes')
+    )
+    os.makedirs(runtime_dir, exist_ok=True)
+    runtime_file = os.path.join(runtime_dir, 'scan_directories.txt')
+
+    if request.method == 'GET':
+        try:
+            if os.path.isfile(runtime_file):
+                with open(runtime_file, 'r', encoding='utf-8') as handle:
+                    content = handle.read()
+            else:
+                content = ''
+            return jsonify({
+                'success': True,
+                'content': content,
+                'path': runtime_file,
+                'message': 'Scan directories loaded.'
+            }), 200
+        except OSError as exc:
+            logger.exception('Failed to load scan directories: %s', exc)
+            return jsonify({'success': False, 'error': str(exc)}), 500
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or not isinstance(payload.get('content'), str):
+        return jsonify({
+            'success': False,
+            'error': 'Request must contain JSON with a string "content" field.'
+        }), 400
+
+    content = payload['content'].replace('\r\n', '\n').replace('\r', '\n')
+    try:
+        tmp_file = runtime_file + '.tmp'
+        with open(tmp_file, 'w', encoding='utf-8', newline='\n') as handle:
+            handle.write(content)
+        os.replace(tmp_file, runtime_file)
+        return jsonify({
+            'success': True,
+            'content': content,
+            'path': runtime_file,
+            'message': 'Scan directories saved to the writable Isolation Bytes runtime directory.'
+        }), 200
+    except OSError as exc:
+        try:
+            if os.path.exists(tmp_file):
+                os.remove(tmp_file)
+        except OSError:
+            pass
+        logger.exception('Failed to save scan directories: %s', exc)
+        return jsonify({'success': False, 'error': str(exc)}), 500
+
 def _canonical_path(path):
     if not isinstance(path, str) or not path.strip():
         return ''
