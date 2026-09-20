@@ -93,6 +93,21 @@ if [ -f /opt/antivirus-server/.env ]; then
     sed -i 's/\r$//' /opt/antivirus-server/.env
 fi
 
+# Use one application-owned quarantine root on the VPS.  Keep the log
+# available even before the first quarantine event so the dashboard never
+# fails because the JSON file is missing.
+RUNTIME_DIR=/root/IsolationBytes
+QUARANTINE_DIR="$RUNTIME_DIR/Quarantine"
+mkdir -p "$QUARANTINE_DIR"
+chmod 700 "$RUNTIME_DIR" "$QUARANTINE_DIR"
+if [ ! -f "$QUARANTINE_DIR/quarantine_log.json" ]; then
+    printf '[]\n' > "$QUARANTINE_DIR/quarantine_log.json"
+    chmod 600 "$QUARANTINE_DIR/quarantine_log.json"
+fi
+if ! grep -qE '^ANTIVIRUS_RUNTIME_DIR=' /opt/antivirus-server/.env; then
+    printf '\nANTIVIRUS_RUNTIME_DIR=%s\n' "$RUNTIME_DIR" >> /opt/antivirus-server/.env
+fi
+
 # If running interactively, ask for the Cloudflare API token so we can obtain
 # a Let's Encrypt origin certificate. The token is not echoed.
 if [ -t 0 ]; then
@@ -198,6 +213,7 @@ ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 --timeout 120 --graceful-
 Restart=always
 RestartSec=5
 Environment=PYTHONPATH=/opt/antivirus-server
+EnvironmentFile=-/opt/antivirus-server/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -209,8 +225,17 @@ systemctl enable antivirus-cloud
 echo "[8/8] Starting services..."
 systemctl restart antivirus-cloud
 sleep 2
-systemctl is-active antivirus-cloud
-systemctl is-active nginx
+if ! systemctl is-active --quiet antivirus-cloud; then
+    echo "ERROR: antivirus-cloud failed to start"
+    systemctl --no-pager --full status antivirus-cloud || true
+    journalctl -u antivirus-cloud -n 120 --no-pager || true
+    exit 1
+fi
+if ! systemctl is-active --quiet nginx; then
+    echo "ERROR: nginx failed to start"
+    systemctl --no-pager --full status nginx || true
+    exit 1
+fi
 systemctl is-enabled antivirus-cloud
 
 # Verify the origin directly before declaring the deployment healthy.
@@ -219,6 +244,13 @@ echo "=== Verification ==="
 for attempt in $(seq 1 20); do
     if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/; then
         echo "Origin: HTTP 200"
+        if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/api/config; then
+            echo "API: HTTP 200"
+        else
+            echo "WARNING: root is healthy but /api/config failed"
+        fi
+        test -f "$QUARANTINE_DIR/quarantine_log.json"
+        echo "Quarantine log: present at $QUARANTINE_DIR/quarantine_log.json"
         break
     fi
     if [ "$attempt" -eq 20 ]; then
