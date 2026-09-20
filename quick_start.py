@@ -915,9 +915,12 @@ conditional_startup_thread = None  # Background scan thread, used to detect dead
 # serve /run_startup and /api/conditional_startup/status from different
 # worker processes. Keeping this state only in Python memory lets one worker
 # reset counters while another worker continues returning the previous run.
-_CONDITIONAL_STATE_DIR = os.environ.get(
-    'ANTIVIRUS_RUNTIME_DIR',
-    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+_LOCAL_RUNTIME_DIR = os.path.abspath(os.path.join(
+    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes'
+))
+_CONDITIONAL_STATE_DIR = (
+    _LOCAL_RUNTIME_DIR if os.name == 'nt'
+    else os.environ.get('ANTIVIRUS_RUNTIME_DIR', _LOCAL_RUNTIME_DIR)
 )
 _CONDITIONAL_STATE_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'conditional_startup_state.json')
 _SCANNER_RESULTS_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'scanner_results.json')
@@ -1511,7 +1514,13 @@ def start_conditional_startup_scan():
 
     with conditional_startup_lock:
         _refresh_conditional_startup_state()
-        if conditional_startup_state.get('running'):
+        live_thread = bool(
+            conditional_startup_thread is not None
+            and conditional_startup_thread.is_alive()
+        )
+        # A persisted "running" flag from a previous process is stale unless
+        # this process still owns a live scan thread.
+        if conditional_startup_state.get('running') and live_thread:
             return {
                 "status": "already_running",
                 "success": True,
@@ -1519,6 +1528,21 @@ def start_conditional_startup_scan():
                 "message": "Conditional startup scan already in progress",
                 "run_id": conditional_startup_state.get("run_id", ""),
             }
+
+        # Every explicit start creates a clean generation. Do not carry the
+        # previous worker's counters/findings into the new JSON files.
+        latest_errors.clear()
+        latest_process_events.clear()
+        latest_ml_detections.clear()
+        latest_ransomware_indicators.clear()
+        latest_yara_suspicious.clear()
+        latest_quarantined_files.clear()
+        latest_persistence_indicators.clear()
+        try:
+            from conditional_startup import STOP_EVENT
+            STOP_EVENT.clear()
+        except Exception:
+            pass
 
         now = time.strftime('%Y-%m-%d %H:%M:%S')
         run_id = hashlib.sha256(f'{now}:{time.time_ns()}'.encode()).hexdigest()[:24]
