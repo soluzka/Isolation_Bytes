@@ -97,6 +97,35 @@ PY
 "$APP/venv/bin/python" -m py_compile quick_start.py conditional_startup.py runtime_paths.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py security/web_auth.py phishing_alerts.py
 "$APP/venv/bin/python" -c "import cloud.cloud_server; print('cloud WSGI import: OK')"
 "$APP/venv/bin/python" -c "import wsgi; assert wsgi.application is not None; print('WSGI application import: OK')"
+# Keep one Gunicorn worker so the existing in-memory agent state remains shared,
+# but use gthread so a slow request cannot block login/dashboard requests.
+cat > /etc/systemd/system/antivirus-cloud.service << 'EOF'
+[Unit]
+Description=Antivirus Cloud Server (Flask + gunicorn WSGI)
+After=network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/antivirus-server
+ExecStart=/opt/antivirus-server/venv/bin/gunicorn --workers 1 --worker-class gthread --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 wsgi:application
+Restart=always
+RestartSec=5
+Environment=PYTHONPATH=/opt/antivirus-server
+EnvironmentFile=-/opt/antivirus-server/.env
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable antivirus-cloud
+
+NGINX_CONF=/etc/nginx/sites-enabled/antivirus-cloud
+if [ -f "$NGINX_CONF" ]; then
+  sed -i '/proxy_http_version 1.1;/d;/proxy_set_header Connection "";/d;/proxy_connect_timeout /d;/proxy_send_timeout /d;/proxy_read_timeout /d' "$NGINX_CONF"
+  sed -i '/proxy_pass http:\/\/127.0.0.1:5002;/a\        proxy_http_version 1.1;\n        proxy_set_header Connection "";\n        proxy_connect_timeout 10s;\n        proxy_send_timeout 120s;\n        proxy_read_timeout 120s;' "$NGINX_CONF"
+  nginx -t
+fi
+
 systemctl restart antivirus-cloud
 systemctl restart nginx
 sleep 3
