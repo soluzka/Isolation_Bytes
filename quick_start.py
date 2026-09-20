@@ -1306,10 +1306,7 @@ def run_conditional_startup_background():
     global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
     from conditional_startup import run_conditional_startup_logic, STOP_EVENT
 
-    while True:
-        if STOP_EVENT.is_set():
-            STOP_EVENT.clear()
-
+    while not STOP_EVENT.is_set():
         start_time = time.time()
         _last_progress_report = 0.0
 
@@ -1388,7 +1385,8 @@ def run_conditional_startup_background():
                 scan_data = run_conditional_startup_logic(
                     open_browser=False,
                     progress_callback=report_progress,
-                    critical_dirs=critical_dirs
+                    critical_dirs=critical_dirs,
+                    continuous=True,
                 )
 
             # Keep the continuous generation alive instead of recording a
@@ -1430,6 +1428,16 @@ def run_conditional_startup_background():
             if STOP_EVENT.is_set():
                 break
             time.sleep(1)
+
+    # Explicit stop is the only normal exit from the continuous worker.
+    with conditional_startup_lock:
+        conditional_startup_state.update({
+            'running': False,
+            'stop_requested': False,
+            'scan_phase': 'stopped',
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+        })
+    _persist_conditional_startup_state()
 
 def _find_models_dir():
     """Find the models directory — works both in dev mode and when running
