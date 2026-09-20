@@ -225,29 +225,26 @@ def _canonical_yara_agent_state():
                 }
                 _agent_scan_state[device_id] = scan_state
         if scan_state:
-            previous_scan_id = str(scan_state.get('previous_scan_id') or '')
-            generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
-            if generation_started:
-                # StandaloneAgent resets both counters at the start of every
-                # full scan. The values reported by the active generation are
-                # therefore already current-scan totals. Never subtract the
-                # previous scan's counters from the new generation.
-                current_files = max(0, int(
-                    agent.get('files_scanned', report.get('files_scanned', 0)) or 0
-                ))
-                scanned_files += current_files
-                current_quarantined = max(0, int(
-                    agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
-                ))
-                quarantined_files += current_quarantined
-                blocked_threats += max(0, int(
-                    agent.get('threats_blocked', report.get('threats_blocked', 0)) or 0
-                ))
+            # The server creates a fresh generation by zeroing the agent's
+            # per-run counters before queueing scan_now. Therefore the values
+            # on the agent are already authoritative current-generation totals.
+            # Do not wait for a scan_id transition: a fast agent can publish
+            # progress before that transition is observed by another worker,
+            # which previously left the dashboard at 0/0.
+            current_files = max(0, int(
+                agent.get('files_scanned', report.get('files_scanned', 0)) or 0
+            ))
+            scanned_files += current_files
+            current_quarantined = max(0, int(
+                agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0
+            ))
+            quarantined_files += current_quarantined
+            blocked_threats += max(0, int(
+                agent.get('threats_blocked', report.get('threats_blocked', 0)) or 0
+            ))
         else:
             # No server-owned scan generation exists for this agent. Do not
             # display its lifetime heartbeat counters as a new scan.
-            # Those counters are exactly what caused old totals such as
-            # 8,204 scanned / 1,614 quarantined to reappear on a fresh run.
             pass
         marker = _agent_report_marker(agent)
         agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
