@@ -1920,6 +1920,9 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
 
 def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None, continuous=False):
     """Run Conditional Startup once or continuously for the lifetime of the process."""
+    # Seed this invocation from the persisted Conditional Startup history.
+    # Clicking Run again must continue the existing counters/evidence instead
+    # of creating a fresh zero-based view.
     cumulative_scanned = 0
     cumulative_quarantined = []
     cumulative_errors = []
@@ -1929,6 +1932,30 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
     cumulative_yara = []
     cumulative_persistence = {}
     last_result = None
+
+    runtime_dir = os.path.abspath(os.environ.get(
+        "ANTIVIRUS_RUNTIME_DIR",
+        os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "IsolationBytes")
+    ))
+    persisted_path = os.path.join(runtime_dir, "scanner_results.json")
+    try:
+        with open(persisted_path, "r", encoding="utf-8") as handle:
+            persisted = json.load(handle)
+        if isinstance(persisted, dict) and isinstance(persisted.get("scanner_results"), dict):
+            persisted = persisted["scanner_results"]
+        if isinstance(persisted, dict):
+            counts = persisted.get("counts") or persisted.get("scanner_counters") or {}
+            cumulative_scanned = int(counts.get("scanned_files") or counts.get("files_scanned") or persisted.get("scanned_files") or 0)
+            cumulative_quarantined = list(persisted.get("quarantined_files") or [])
+            cumulative_errors = list(persisted.get("errors") or [])
+            cumulative_process_events = list(persisted.get("process_events") or [])
+            cumulative_ml = list(persisted.get("ml_detections") or [])
+            cumulative_ransomware = list(persisted.get("ransomware_indicators") or [])
+            cumulative_yara = list(persisted.get("yara_suspicious") or [])
+            persisted_persistence = persisted.get("persistence_indicators") or {}
+            cumulative_persistence = dict(persisted_persistence) if isinstance(persisted_persistence, dict) else {}
+    except (OSError, ValueError, TypeError):
+        pass
 
     # In continuous mode, the very first filesystem traversal is itself the
     # live protection session. There is no finite "first scan" to complete.
