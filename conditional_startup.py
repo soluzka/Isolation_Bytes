@@ -1117,11 +1117,9 @@ def routine_maintenance_and_system_recovery():
                         except Exception as e:
                             output.write(f"[CLEANUP ERROR] Error cleaning {temp_dir}: {e}\n")
             
-            # Quarantine cleanup
-            quarantine_folder = os.path.join(
-                os.environ.get('USERPROFILE', os.path.expanduser('~')),
-                'AppData', 'Local', 'Temp', 'Defender_Quarantine'
-            )
+            # Quarantine cleanup uses the application's own quarantine root.
+            from quarantine_utils import QUARANTINE_FOLDER
+            quarantine_folder = QUARANTINE_FOLDER
             if os.path.exists(quarantine_folder):
                 try:
                     for filename in os.listdir(quarantine_folder):
