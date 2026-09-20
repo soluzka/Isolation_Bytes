@@ -685,47 +685,24 @@ public class LoginForm : Form
     {
         try
         {
-            var agentDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "IsolationBytes");
-            Directory.CreateDirectory(agentDir);
+            // Do not copy the agent into %LOCALAPPDATA% and do not create a
+            // second hidden install. The agent is run exactly where the user
+            // installed/placed it. Prefer the bundled EXE next to this launcher.
+            var localDir = Path.GetDirectoryName(Application.ExecutablePath);
+            if (string.IsNullOrEmpty(localDir)) return;
 
-            // Look for IsolationBytesAgent.exe in the agent directory
-            var agentExe = Path.Combine(agentDir, "IsolationBytesAgent.exe");
+            var agentExe = Path.Combine(localDir, "IsolationBytesAgent.exe");
             if (!File.Exists(agentExe))
-            {
-                // Also check next to the login EXE (bundled in MSIX)
-                var localDir = Path.GetDirectoryName(Application.ExecutablePath);
-                if (!string.IsNullOrEmpty(localDir))
-                {
-                    var bundled = Path.Combine(localDir, "IsolationBytesAgent.exe");
-                    if (File.Exists(bundled))
-                        agentExe = bundled;
-                }
-            }
-            if (!File.Exists(agentExe))
-            {
-                // Download it from the server
-                try
-                {
-                    var agentUrl = Global.SERVER_URL + "/download/IsolationBytesAgent.exe";
-                    var agentBytes = _http.GetByteArrayAsync(agentUrl).Result;
-                    File.WriteAllBytes(agentExe, agentBytes);
-                }
-                catch { return; }
-            }
-            if (!File.Exists(agentExe)) return;
+                return;
 
-            // Start the agent EXE directly — no Python needed
-            // --auto-start creates a scheduled task so it runs on every boot
             SafeProcess.StartExe(
                 agentExe,
                 $"--server {Global.SERVER_URL} --key=__CLOUD_API_KEY__ --auto-start",
-                Path.GetDirectoryName(agentExe) ?? agentDir);
+                localDir);
         }
         catch
         {
-            // Agent start failed — the app still launches without it
+            // Agent start failed — the app still launches without it.
         }
     }
 
