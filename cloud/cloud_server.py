@@ -273,7 +273,7 @@ def _yara_only_quarantine_response():
 def _complete_agent_scan_results_response():
     if not (session.get('logged_in') or session.get('user_logged_in')):
         return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
-    return jsonify(build_complete_agent_scan_results(_legacy)), 200
+    return jsonify(build_complete_agent_scan_results(_legacy, _agent_scan_state)), 200
 
 
 @app.before_request
