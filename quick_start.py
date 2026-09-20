@@ -1231,13 +1231,6 @@ def run_conditional_startup_background():
     STOP_EVENT.clear()
     start_time = time.time()
     _last_progress_report = 0.0
-    last_counts = {k: 0 for k in ['scanned_files', 'quarantined_files', 'errors', 'process_events', 'ml_detections', 'ransomware_indicators', 'persistence_indicators', 'yara_suspicious']}
-
-    def _add_delta(key, current):
-        delta = current - last_counts[key]
-        if delta:
-            conditional_startup_state[key] = conditional_startup_state.get(key, 0) + delta
-            last_counts[key] = current
 
     def report_progress(partial_results):
         """Update shared state with in-progress counts so the status API
@@ -1264,11 +1257,21 @@ def run_conditional_startup_background():
             'yara_suspicious': len(partial_results.get('yara_suspicious') or []),
         }
         with conditional_startup_lock:
-            for key, current in new_counts.items():
-                _add_delta(key, current)
+            # Publish the scanner's current-run counters directly. These values
+            # are already cumulative for this run; applying deltas here caused
+            # stale/lifetime totals to survive into a new generation.
             conditional_startup_state.update({
                 'running': True,
-                'last_updated': time.strftime('%Y-%m:%d %H:%M:%S'),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+                'scanned_files': new_counts['scanned_files'],
+                'quarantined_files': new_counts['quarantined_files'],
+                'errors': new_counts['errors'],
+                'process_events': new_counts['process_events'],
+                'ml_detections': new_counts['ml_detections'],
+                'ransomware_indicators': new_counts['ransomware_indicators'],
+                'persistence_indicators': new_counts['persistence_indicators'],
+                'yara_suspicious': new_counts['yara_suspicious'],
+                'blocked_threats': 0,
                 'last_error': str(errors[-1]) if errors else None,
                 'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
             })
@@ -1434,6 +1437,7 @@ def run_startup():
                 'ransomware_indicators': 0,
                 'persistence_indicators': 0,
                 'yara_suspicious': 0,
+                'blocked_threats': 0,
                 'duration': None,
                 'last_error': None,
             })
