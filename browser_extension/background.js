@@ -108,7 +108,7 @@ async function registerWithCloud() {
                 hostname: 'Browser Extension',
                 os: navigator.platform || 'browser',
                 os_version: navigator.userAgent,
-                agent_version: '1.8.894.0',
+                agent_version: '1.8.952.0',
                 api_key: API_KEY
             })
         });
