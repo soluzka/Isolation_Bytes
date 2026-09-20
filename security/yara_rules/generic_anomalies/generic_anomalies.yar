@@ -28,10 +28,12 @@ rule SuspiciousExecutable_Strict {
 
 rule FileSizeAnomaly {
     meta:
-        description = "Detects unusually large or small executable files"
+        description = "Detects unusually large or small Windows PE executable files"
         author = "CascadeAI"
     condition:
-        filesize > 10MB or filesize < 1KB
+        // File-size anomalies are meaningful for PE files, not arbitrary
+        // system marker/configuration files such as C:\\.GamingRoot.
+        uint16(0) == 0x5A4D and (filesize > 10MB or filesize < 1KB)
 }
 
 rule EntropyAnomaly {
