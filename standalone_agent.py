@@ -3230,6 +3230,35 @@ X-GNOME-Autostart-enabled=true
             print(f"[SCAN] Single file scan error: {e}")
             self._report([], report_type='single_file_scan')
 
+    def _command_poll_loop(self):
+        """Poll scan/control commands independently every second."""
+        while self._running:
+            try:
+                r = requests.post(
+                    f'{self.server_url}/agent/commands/poll',
+                    json={'device_id': self.device_id},
+                    headers=self._headers,
+                    verify=True,
+                    timeout=5,
+                )
+                if r.status_code == 200:
+                    commands = r.json().get('commands', [])
+                    for cmd in commands:
+                        try:
+                            self._handle_command(cmd)
+                        except Exception as exc:
+                            print(f'[CMD] Command failed: {exc!r}')
+                elif r.status_code not in (404,):
+                    print(f'[CMD] Command poll HTTP {r.status_code}')
+            except Exception as exc:
+                # Keep polling; transient network failures must not terminate
+                # the command receiver or the continuous scanner.
+                print(f'[CMD] Command poll failed: {exc!r}')
+            for _ in range(10):
+                if not self._running:
+                    break
+                time.sleep(0.1)
+
     def _heartbeat_loop(self):
         while self._running:
             try:
@@ -3463,6 +3492,12 @@ del "{bat_path}" 2>nul
         # Start heartbeat thread
         hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name='Heartbeat')
         hb_thread.start()
+
+        # Poll scan/control commands independently of heartbeat statistics.
+        # Heartbeat collection can be expensive on Windows; scan commands must
+        # never wait behind process/network enumeration.
+        command_thread = threading.Thread(target=self._command_poll_loop, daemon=True, name='AgentCommands')
+        command_thread.start()
 
         # Start voice command polling thread
         voice_thread = threading.Thread(target=self._voice_command_loop, daemon=True, name='VoiceCommands')
