@@ -2130,6 +2130,19 @@ X-GNOME-Autostart-enabled=true
                 try:
                     if os.path.getsize(filepath) > MAX_FILE_SIZE:
                         continue
+
+                    # Count the file as soon as it has been enumerated and its
+                    # metadata can be read.  Containment (block/quarantine),
+                    # YARA, ML, and permission checks happen after this point.
+                    # This guarantees a blocked/locked threat still advances
+                    # the live scan counter instead of falling through to the
+                    # outer exception handler before the old increment.
+                    self._files_scanned += 1
+                    self._scan_current_path = filepath
+                    if self._files_scanned - self._scan_progress_reported >= 250:
+                        self._report([], report_type='scan_progress')
+                        self._scan_progress_reported = self._files_scanned
+
                     # Skip files we can't read (locked, permission denied)
                     # BUT don't skip files we blocked ourselves — they're
                     # still threats and need to stay in the findings list
@@ -2364,14 +2377,6 @@ X-GNOME-Autostart-enabled=true
                         except Exception as e:
                             print(f"[AUTO-QUARANTINE] Failed {filepath}: {e}")
                     self._scan_cycle_remaining -= 1
-                    self._files_scanned += 1
-                    self._scan_current_path = filepath
-                    # Keep the desktop/cloud view alive during very large scans.
-                    # This is progress-only; it does not replace the final
-                    # finding report and therefore cannot discard detections.
-                    if self._files_scanned - self._scan_progress_reported >= 250:
-                        self._report([], report_type='scan_progress')
-                        self._scan_progress_reported = self._files_scanned
                 except Exception:
                     continue
             if getattr(self, '_scan_cycle_remaining', 0) <= 0:
