@@ -214,8 +214,12 @@ def _agent_trigger_scan_response():
         _legacy.commands[device_id] = pending
         _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
         sent += 1
-    message = f'Scan triggered for {sent} agent(s). Results will appear shortly.'
-    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': message, 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
+    # Do not expose the legacy "Scan triggered for ..." text.  The frontend
+    # historically treated that successful status message as an error.
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True,
+                    'message_type': 'success',
+                    'message': 'Scan request accepted. Live results will update as agents report progress.',
+                    'error': None, 'agents': sent, 'agents_triggered': sent}), 200
 
 
 def _yara_only_quarantine_response():
