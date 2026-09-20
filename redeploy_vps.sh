@@ -307,6 +307,17 @@ for attempt in $(seq 1 20); do
     if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/; then
         echo "Origin: HTTP 200"
         if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/api/config; then
+        # The cloud dashboard uses /api/scan-directories. An unauthenticated
+        # probe should return JSON 401, not an HTML 404/502 page.
+        SCAN_DIR_STATUS=$(curl -sS --max-time 5 -o /tmp/isolation-bytes-scan-directories.json -w '%{http_code}' http://127.0.0.1:5002/api/scan-directories || true)
+        if [ "$SCAN_DIR_STATUS" != "401" ]; then
+            echo "ERROR: /api/scan-directories returned HTTP $SCAN_DIR_STATUS (expected JSON 401 when unauthenticated)"
+            cat /tmp/isolation-bytes-scan-directories.json 2>/dev/null || true
+            journalctl -u antivirus-cloud -n 80 --no-pager || true
+            exit 1
+        fi
+        echo "Scan directories API: route present (HTTP 401 unauthenticated)"
+
         # /run_startup must be handled by the cloud app without importing the Windows-only quick_start module.
         STARTUP_STATUS=$(curl -sS --max-time 5 -o /tmp/isolation-bytes-run-startup.json -w '%{http_code}' -X POST http://127.0.0.1:5002/run_startup || true)
         if [ "$STARTUP_STATUS" = "202" ] || [ "$STARTUP_STATUS" = "200" ]; then
