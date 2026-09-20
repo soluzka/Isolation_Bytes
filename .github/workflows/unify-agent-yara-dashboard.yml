@@ -22,20 +22,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -F "def _complete_agent_scan_results_response" cloud/cloud_server.py >/dev/null
-          grep -F "return jsonify({" cloud/cloud_server.py >/dev/null
-          grep -F "Conditional Startup is the current dashboard scan generation." cloud/cloud_server.py >/dev/null
-          grep -F "def _agent_trigger_scan_response" cloud/cloud_server.py >/dev/null
-          grep -F "'status': 'started'" cloud/cloud_server.py >/dev/null
-          grep -F "Promise.allSettled" templates/index.html >/dev/null
-          grep -F "fetch('/api/agent-trigger-scan'" templates/index.html >/dev/null
-          grep -F "fetch('/run_startup'" templates/index.html >/dev/null
-          grep -F "Promise.allSettled" templates/yara_scanner.html >/dev/null
-          grep -F "fetch('/run_startup'" templates/yara_scanner.html >/dev/null
-          test -f cloud/_agent_results_unlimited.py
-          grep -F "'scanned_files': 0" quick_start.py >/dev/null
-          grep -F "'quarantined_files': 0" quick_start.py >/dev/null
-          grep -F "'blocked_threats': 0" quick_start.py >/dev/null
-          grep -F "Publish the scanner's current-run counters directly" quick_start.py >/dev/null
+          python - <<'PY'
+          from pathlib import Path
+
+          def require(path, *needles):
+              text = Path(path).read_text(encoding="utf-8")
+              missing = [needle for needle in needles if needle not in text]
+              if missing:
+                  raise SystemExit(f"{path}: missing required implementation markers: {missing}")
+
+          require(
+              "cloud/cloud_server.py",
+              "def _complete_agent_scan_results_response",
+              "Conditional Startup is the current dashboard scan generation.",
+              "def _agent_trigger_scan_response",
+              "'status': 'started'",
+              "return jsonify({",
+          )
+          require(
+              "templates/index.html",
+              "Promise.allSettled",
+              "fetch('/api/agent-trigger-scan'",
+              "fetch('/run_startup'",
+          )
+          require(
+              "templates/yara_scanner.html",
+              "Promise.allSettled",
+              "fetch('/api/agent-trigger-scan'",
+              "fetch('/run_startup'",
+          )
+          require(
+              "quick_start.py",
+              "'scanned_files': 0",
+              "'quarantined_files': 0",
+              "'blocked_threats': 0",
+              "Publish the scanner's current-run counters directly",
+          )
+          require("cloud/_agent_results_unlimited.py")
+          require("conditional_startup.py")
+
+          print("Required Agent/YARA synchronization markers are present.")
+          PY
           python -m py_compile quick_start.py cloud/cloud_server.py cloud/_agent_results_unlimited.py conditional_startup.py
           echo "Agent/YARA synchronization and current-generation counter isolation are present."
