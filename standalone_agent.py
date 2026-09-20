@@ -870,16 +870,20 @@ class StandaloneAgent:
                 pass
             return
         if action == 'scan_now':
-            print("[CMD] Scan triggered from cloud dashboard — running immediate scan")
+            print("[CMD] Scan triggered from cloud dashboard — starting continuous scan")
             if self._scan_lock.locked():
                 print("[CMD] Scan request ignored because a scan is already running")
                 return
             try:
                 import threading
-                t = threading.Thread(target=self._scan_cycle, daemon=True)
+                t = threading.Thread(target=self._scan_cycle, kwargs={'continuous': True}, name='agent-continuous-scan', daemon=True)
                 t.start()
             except Exception as e:
                 print(f"[CMD] Scan trigger failed: {e}")
+            return
+        if action == 'stop_scan':
+            print("[CMD] Continuous scan stop requested")
+            self._scan_status = 'stopping'
             return
         if action == 'scan_file':
             filepath = cmd.get('file_path', '')
@@ -2697,7 +2701,7 @@ X-GNOME-Autostart-enabled=true
             self._last_report_error = str(e)
             return False
 
-    def _scan_cycle(self):
+    def _scan_cycle_once(self, continuous=False):
         # Only one cloud-triggered full scan may run at a time. Without this
         # guard, repeated scan_now commands can create concurrent os.walk/YARA
         # threads that share the same counters and make progress appear stuck.
@@ -2763,7 +2767,7 @@ X-GNOME-Autostart-enabled=true
                 except Exception as exc:
                     print(f"[SCAN] Directory scan error for {dirpath}: {exc}")
                     continue
-            self._scan_status = 'complete' if self._running else 'stopped'
+            self._scan_status = 'scanning' if (continuous and self._running) else ('complete' if self._running else 'stopped')
             if all_findings:
                 print(
                     f"[ALERT] Found {len(all_findings)} threat(s)! "
@@ -2774,6 +2778,14 @@ X-GNOME-Autostart-enabled=true
                 self._report([], report_type='heartbeat_scan')
         finally:
             self._scan_lock.release()
+
+    def _scan_cycle(self, continuous=False):
+        """Run full scans continuously when requested by the cloud dashboard."""
+        while self._running:
+            self._scan_cycle_once(continuous=continuous)
+            if not continuous or not self._running:
+                break
+            time.sleep(1)
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
