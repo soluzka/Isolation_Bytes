@@ -1042,7 +1042,7 @@ if (stopAutoUpdatesBtn) {
                         runBtn.textContent = 'Continuous Scanning';
                         messageDiv.innerHTML = failed
                             ? '<p style="color:#b36200;">Continuous protection is active; one scan reported an error and will continue retrying.</p>'
-                            : '<p style="color:#27a745;">Continuous protection is active. Both scan engines will keep running until explicitly stopped.</p>';
+                            : '<p style="color:#27a745;">Continuous protection is active. The agent scan will keep running until explicitly stopped.</p>';
                     }).catch(error => {
                         messageDiv.innerHTML = `<div class="alert alert-danger">Error starting scans: ${htmlEscape(error.message || error)}</div>`;
                         runBtn.disabled = false;
