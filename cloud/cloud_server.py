@@ -156,11 +156,19 @@ def _canonical_yara_agent_state():
             if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_') or threat == 'ml':
                 ml_detections += 1
 
+    active_started = max(
+        (str(v.get('started_at') or '') for v in _agent_scan_state.values()
+         if v.get('started_at')),
+        default=''
+    )
+    scan_generation = active_started or last_scan
+
     return {
         'running': running,
         'last_run': last_scan,
         'last_updated': last_scan,
-        'started_at': min((v.get('started_at') for v in _agent_scan_state.values() if v.get('started_at')), default=None),
+        'started_at': active_started or None,
+        'scan_generation': scan_generation,
         'duration': None,
         'scanned_files': scanned_files,
         'quarantined_files': quarantined_files,
