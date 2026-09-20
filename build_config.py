@@ -90,12 +90,7 @@ def run(cmd, **kw):
 
 
 def _ensure_spec_excludes(spec_path, modules):
-    """Repair PyInstaller Analysis() options in an existing spec file.
-
-    PyInstaller does not accept --exclude-module when a .spec file is supplied.
-    Older generated specs may also contain malformed hookspath entries, so
-    normalize both options directly in the spec before invoking PyInstaller.
-    """
+    """Repair PyInstaller Analysis() options in an existing spec file."""
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -104,45 +99,49 @@ def _ensure_spec_excludes(spec_path, modules):
 
     wanted = list(dict.fromkeys(modules))
     exclusions = ', '.join(repr(m) for m in wanted)
-
-    # Replace the complete hookspath list. This repairs malformed entries such
-    # as hookspath=[, r'...'] without trying to parse the invalid Python first.
     hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks')
     hook_entry = repr(hook_dir)
-    hook_pattern = r'(?ms)^([ \\t]*hookspath\\s*=\\s*)\\[[^\\]]*\\]'
-    content, hook_count = re.subn(
-        hook_pattern,
-        lambda m: m.group(1) + '[' + hook_entry + ']',
-        content,
-        count=1,
-    )
-    if hook_count:
-        print(f'Normalized project PyInstaller hook path: {hook_dir}')
-    else:
+
+    # Normalize option lines without parsing the spec as Python. This also
+    # repairs older malformed lines such as "hookspath=[, r'...']".
+    lines = content.splitlines()
+    hook_found = False
+    excludes_found = False
+    normalized = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith('hookspath=') or stripped.startswith('hookspath ='):
+            indent = line[:len(line) - len(line.lstrip())]
+            normalized.append(indent + 'hookspath=[' + hook_entry + '],')
+            hook_found = True
+        elif stripped.startswith('excludes=') or stripped.startswith('excludes ='):
+            indent = line[:len(line) - len(line.lstrip())]
+            normalized.append(indent + 'excludes=[' + exclusions + '],')
+            excludes_found = True
+        else:
+            normalized.append(line)
+
+    content = '\\n'.join(normalized) + '\\n'
+
+    if not hook_found:
         content = content.replace(
-            'Analysis(\\n',
-            'Analysis(\\n    hookspath=[' + hook_entry + '],\\n',
+            'Analysis(' + chr(10),
+            'Analysis(' + chr(10) + '    hookspath=[' + hook_entry + '],' + chr(10),
             1,
         )
         print(f'Added project PyInstaller hook path: {hook_dir}')
-
-    # Replace or add the Analysis() excludes list.
-    excludes_pattern = r'(?ms)^([ \\t]*excludes\\s*=\\s*)\\[[^\\]]*\\]'
-    content, exclude_count = re.subn(
-        excludes_pattern,
-        lambda m: m.group(1) + '[' + exclusions + ']',
-        content,
-        count=1,
-    )
-    if exclude_count:
-        print(f'Normalized PyInstaller spec exclusions: {", ".join(wanted)}')
     else:
+        print(f'Normalized project PyInstaller hook path: {hook_dir}')
+
+    if not excludes_found:
         content = content.replace(
-            'Analysis(\\n',
-            'Analysis(\\n    excludes=[' + exclusions + '],\\n',
+            'Analysis(' + chr(10),
+            'Analysis(' + chr(10) + '    excludes=[' + exclusions + '],' + chr(10),
             1,
         )
         print(f'Added PyInstaller spec exclusions: {exclusions}')
+    else:
+        print(f'Normalized PyInstaller spec exclusions: {exclusions}')
 
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(content)
