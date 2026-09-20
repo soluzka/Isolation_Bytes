@@ -1420,25 +1420,45 @@ def run_conditional_startup_background():
                 conditional_startup_state.update({
                     'running': True,
                     'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-                    'scanned_files': new_counts['scanned_files'],
-                    'quarantined_files': new_counts['quarantined_files'],
-                    'errors': new_counts['errors'],
-                    'process_events': new_counts['process_events'],
-                    'ml_detections': new_counts['ml_detections'],
-                    'ransomware_indicators': new_counts['ransomware_indicators'],
-                    'persistence_indicators': new_counts['persistence_indicators'],
-                    'yara_suspicious': new_counts['yara_suspicious'],
-                    'blocked_threats': 0,
-                    'last_error': str(errors[-1]) if errors else None,
+                    'scanned_files': max(int(conditional_startup_state.get('scanned_files') or 0), new_counts['scanned_files']),
+                    'quarantined_files': max(int(conditional_startup_state.get('quarantined_files') or 0), new_counts['quarantined_files']),
+                    'errors': max(int(conditional_startup_state.get('errors') or 0), new_counts['errors']),
+                    'process_events': max(int(conditional_startup_state.get('process_events') or 0), new_counts['process_events']),
+                    'ml_detections': max(int(conditional_startup_state.get('ml_detections') or 0), new_counts['ml_detections']),
+                    'ransomware_indicators': max(int(conditional_startup_state.get('ransomware_indicators') or 0), new_counts['ransomware_indicators']),
+                    'persistence_indicators': max(int(conditional_startup_state.get('persistence_indicators') or 0), new_counts['persistence_indicators']),
+                    'yara_suspicious': max(int(conditional_startup_state.get('yara_suspicious') or 0), new_counts['yara_suspicious']),
+                    'blocked_threats': int(conditional_startup_state.get('blocked_threats') or 0),
+                    'last_error': str(errors[-1]) if errors else conditional_startup_state.get('last_error'),
                     'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
                 })
-                latest_yara_suspicious = list(partial_results.get('yara_suspicious') or [])
-                latest_ransomware_indicators = list(partial_results.get('ransomware_indicators') or [])
-                latest_persistence_indicators = partial_results.get('persistence_indicators', {}) or {}
-                latest_errors = list(partial_results.get('errors') or [])
-                latest_ml_detections = list(partial_results.get('ml_detections') or [])
-                latest_process_events = list(partial_results.get('process_events') or [])
-                latest_quarantined_files = list(partial_results.get('quarantined_files') or [])
+                def _append_unique(existing, incoming):
+                    merged = list(existing or [])
+                    seen = {repr(item) for item in merged}
+                    for item in list(incoming or []):
+                        marker = repr(item)
+                        if marker not in seen:
+                            merged.append(item)
+                            seen.add(marker)
+                    return merged
+
+                latest_yara_suspicious = _append_unique(latest_yara_suspicious, partial_results.get('yara_suspicious'))
+                latest_ransomware_indicators = _append_unique(latest_ransomware_indicators, partial_results.get('ransomware_indicators'))
+                latest_errors = _append_unique(latest_errors, partial_results.get('errors'))
+                latest_ml_detections = _append_unique(latest_ml_detections, partial_results.get('ml_detections'))
+                latest_process_events = _append_unique(latest_process_events, partial_results.get('process_events'))
+                latest_quarantined_files = _append_unique(latest_quarantined_files, partial_results.get('quarantined_files'))
+                incoming_persistence = partial_results.get('persistence_indicators') or {}
+                merged_persistence = dict(latest_persistence_indicators or {})
+                if isinstance(incoming_persistence, dict):
+                    for key, value in incoming_persistence.items():
+                        candidate = str(key)
+                        suffix = 2
+                        while candidate in merged_persistence and merged_persistence[candidate] != value:
+                            candidate = f'{key}#{suffix}'
+                            suffix += 1
+                        merged_persistence[candidate] = value
+                latest_persistence_indicators = merged_persistence
                 try:
                     conditional_startup_state['findings'] = _findings_for_review()
                 except Exception:
@@ -1480,9 +1500,19 @@ def run_conditional_startup_background():
             # The inner scan pass returns only so the next pass can begin;
             # externally the worker remains RUNNING for its entire lifetime.
             if isinstance(scan_data, dict):
-                latest_yara_suspicious = scan_data.get('yara_suspicious', [])
-                latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
-                latest_persistence_indicators = scan_data.get('persistence_indicators', {})
+                latest_yara_suspicious = list(latest_yara_suspicious or []) + [x for x in (scan_data.get('yara_suspicious') or []) if x not in latest_yara_suspicious]
+                latest_ransomware_indicators = list(latest_ransomware_indicators or []) + [x for x in (scan_data.get('ransomware_indicators') or []) if x not in latest_ransomware_indicators]
+                incoming_persistence = scan_data.get('persistence_indicators') or {}
+                if isinstance(incoming_persistence, dict):
+                    merged_persistence = dict(latest_persistence_indicators or {})
+                    for key, value in incoming_persistence.items():
+                        candidate = str(key)
+                        suffix = 2
+                        while candidate in merged_persistence and merged_persistence[candidate] != value:
+                            candidate = f'{key}#{suffix}'
+                            suffix += 1
+                        merged_persistence[candidate] = value
+                    latest_persistence_indicators = merged_persistence
                 with conditional_startup_lock:
                     conditional_startup_state.update({
                         'running': True,
