@@ -111,14 +111,8 @@ public partial class MainWindow : Window
             // Look for IsolationBytesAgent.exe bundled in the MSIX
             var agentExe = Path.Combine(installDir, "IsolationBytesAgent.exe");
             if (!File.Exists(agentExe))
-            {
-                // Fallback: check LocalAppData\IsolationBytes (downloaded by launcher)
-                agentExe = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "IsolationBytes", "IsolationBytesAgent.exe");
-            }
-            if (!File.Exists(agentExe))
                 return;
+
 
             // Start the agent EXE directly — no Python needed
             SafeProcess.StartExe(
