@@ -750,7 +750,6 @@ if (stopAutoUpdatesBtn) {
                 let html = `<p>State: ${state} &middot; ${timeInfo}${duration}</p>
                     <div style="display:flex;flex-wrap:wrap;gap:8px;">
                         ${tile(data.scanned_files || 0, 'Files Scanned')}
-                        ${tile(data.scan_current_path || 'idle', 'Current File')}
                         ${tile(data.quarantined_files || 0, 'Quarantined', true)}
                         ${tile(data.blocked_threats || 0, 'Blocked', true)}
                         ${tile(data.errors || 0, 'Errors', true)}
