@@ -367,20 +367,42 @@ def _yara_only_quarantine_response():
 
 
 def _conditional_startup_state():
-    """Return only the app-owned Conditional Startup state.
+    """Return the current app-owned Conditional Startup generation.
 
-    This state is the source of truth for the Conditional Startup panel.
-    Never replace it with the agent heartbeat/YARA aggregate, because that
-    aggregate can contain results from an older scan generation.
+    Refresh the persisted state before every read so a request handled by a
+    different worker sees the live counters written by the scan worker.
     """
     try:
         import quick_start
+        refresh = getattr(quick_start, '_refresh_conditional_startup_state', None)
+        if callable(refresh):
+            refresh()
         state = getattr(quick_start, 'conditional_startup_state', None)
         if isinstance(state, dict):
             return dict(state)
     except Exception:
         pass
     return None
+
+
+def _start_conditional_startup_response():
+    """Start the real Conditional Startup worker, not just an agent reset."""
+    try:
+        import quick_start
+        starter = getattr(quick_start, 'start_conditional_startup_scan', None)
+        if not callable(starter):
+            return jsonify({
+                'ok': False, 'success': False, 'status': 'error',
+                'message': 'Conditional Startup starter is unavailable',
+                'error': 'Conditional Startup starter is unavailable',
+            }), 503
+        return jsonify(starter()), 200
+    except Exception as exc:
+        logger.exception('Failed to start Conditional Startup: %s', exc)
+        return jsonify({
+            'ok': False, 'success': False, 'status': 'error',
+            'message': str(exc), 'error': str(exc),
+        }), 500
 
 
 def _active_conditional_startup_state():
@@ -440,10 +462,11 @@ def _complete_agent_scan_results_response():
 
 @app.before_request
 def _intercept_agent_scan_and_yara_quarantine():
-    # /run_startup is also a cloud scan-generation trigger. Route it through
-    # the same reset path so direct startup requests cannot revive old totals.
+    # /run_startup starts the actual Conditional Startup worker. The agent
+    # trigger remains separate because the dashboard intentionally starts both
+    # paths together.
     if request.method == 'POST' and request.path == '/run_startup':
-        return _agent_trigger_scan_response()
+        return _start_conditional_startup_response()
     if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
         return _agent_trigger_scan_response()
     if request.method == 'GET' and request.path == '/api/agent-scan-results':
