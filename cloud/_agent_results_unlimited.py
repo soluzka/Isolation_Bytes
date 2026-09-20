@@ -1,4 +1,4 @@
-"""Current-generation agent/YARA scan results.
+""""Current-generation agent/YARA scan results.
 
 The dashboard intentionally shows the active/current scan generation rather than
 replaying a previous completed scan. Historical findings are not used as the
@@ -30,17 +30,11 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
         report = agent.get("last_report") or {}
         active = (active_scan_state or {}).get(device_id) or {}
         active_started = float(active.get("started_at", 0) or 0)
-        # Quarantine history is never part of the active scan counters.
-        # The agent must report only counters produced by the current scan.
-        baseline_quarantined = 0
 
         current_scan_id = str(
             agent.get("scan_id") or report.get("scan_id") or ""
         )
         previous_scan_id = str(active.get("previous_scan_id") or "")
-        # A new scan generation begins only when the agent publishes its new
-        # scan_id. Timestamps cannot be used here because the cloud writes a
-        # synthetic scan-start report before the agent consumes scan_now.
         generation_started = bool(
             active_started
             and current_scan_id
@@ -48,40 +42,47 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
         )
 
         if not active_started:
-            # No active server-owned scan: never replay persisted agent history.
             files_scanned = 0
             quarantined_count = 0
             findings = []
             status = "idle"
-            current_path = ""
             last_scan = ""
             scan_id = ""
             started_at = ""
         elif not generation_started:
-            # Scan requested, but the agent has not published its new scan_id.
             files_scanned = 0
             quarantined_count = 0
             findings = []
             status = "queued"
-            current_path = ""
-            last_scan = datetime.fromtimestamp(active_started, timezone.utc).isoformat()
+            last_scan = datetime.fromtimestamp(
+                active_started, timezone.utc
+            ).isoformat()
             scan_id = ""
             started_at = last_scan
         else:
             findings = report.get("findings") or report.get("results") or []
             if not isinstance(findings, list):
                 findings = []
+
             files_scanned = int(
                 agent.get("files_scanned", report.get("files_scanned", 0)) or 0
             )
-            quarantined_count = max(0, int(
-                agent.get("quarantined_count", report.get("quarantined_count", 0)) or 0
-            ))
-            status = str(
-                agent.get("scan_status") or report.get("scan_status") or "idle"
-            ).lower()
-                or ""
+            quarantined_count = max(
+                0,
+                int(
+                    agent.get(
+                        "quarantined_count",
+                        report.get("quarantined_count", 0),
+                    )
+                    or 0
+                ),
             )
+            status = str(
+                agent.get("scan_status")
+                or report.get("scan_status")
+                or "idle"
+            ).lower()
+
             last_scan = (
                 agent.get("last_scan")
                 or report.get("last_scan")
@@ -98,20 +99,23 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
                 or ""
             )
 
-        results.append({
-            "hostname": agent.get("hostname", device_id),
-            "device_id": device_id,
-            "files_scanned": files_scanned,
-            "finding_count": len(findings),
-            "last_scan": last_scan,
-            "findings": findings[:50],
-            "quarantined_count": quarantined_count,
-            "scan_id": scan_id,
-            "scan_dirs": agent.get("scan_dirs") or report.get("scan_dirs") or [],
-            "scan_status": status,
-            "scan_current_path": current_path,
-            "scan_started_at": started_at,
-        })
+        results.append(
+            {
+                "hostname": agent.get("hostname", device_id),
+                "device_id": device_id,
+                "files_scanned": files_scanned,
+                "finding_count": len(findings),
+                "last_scan": last_scan,
+                "findings": findings[:50],
+                "quarantined_count": quarantined_count,
+                "scan_id": scan_id,
+                "scan_dirs": agent.get("scan_dirs")
+                or report.get("scan_dirs")
+                or [],
+                "scan_status": status,
+                "scan_started_at": started_at,
+            }
+        )
         total_findings += len(findings)
 
     payload = {"agents": results, "total_findings": total_findings}
