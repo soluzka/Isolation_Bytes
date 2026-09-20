@@ -91,8 +91,82 @@ def discover_all_drives_and_important_folders() -> List[str]:
     if system == "Windows":
         for drive in string.ascii_uppercase:
             root = f"{drive}:\\"
-            if os.path.exists(root):
-                add(root)
+            if not os.path.exists(root):
+                continue
+
+            # Scan each mounted Windows volume plus the high-value system trees.
+            add(root)
+            windows_root = os.path.join(root, "Windows")
+            program_data = os.path.join(root, "ProgramData")
+            program_files = os.path.join(root, "Program Files")
+            program_files_x86 = os.path.join(root, "Program Files (x86)")
+            for path in (
+                windows_root,
+                os.path.join(windows_root, "Temp"),
+                os.path.join(windows_root, "System32"),
+                os.path.join(windows_root, "Tasks"),
+                program_data,
+                os.path.join(program_data, "Microsoft", "Windows", "Start Menu", "Programs", "Startup"),
+                program_files,
+                program_files_x86,
+            ):
+                add(path)
+
+        # Per-user AppData and Startup locations are especially important for
+        # persistence and are not guaranteed to be present on every profile.
+        users_root = os.path.join(os.environ.get("SystemDrive", "C:"), "Users")
+        if os.path.isdir(users_root):
+            try:
+                for profile in os.scandir(users_root):
+                    if not profile.is_dir(follow_symlinks=False):
+                        continue
+                    profile_root = profile.path
+                    for path in (
+                        os.path.join(profile_root, "AppData"),
+                        os.path.join(profile_root, "AppData", "Local"),
+                        os.path.join(profile_root, "AppData", "Roaming"),
+                        os.path.join(profile_root, "AppData", "Local", "Temp"),
+                        os.path.join(profile_root, "AppData", "Roaming", "Microsoft", "Windows", "Start Menu", "Programs", "Startup"),
+                    ):
+                        add(path)
+            except OSError as exc:
+                logging.warning("Unable to enumerate user profiles: %s", exc)
+
+        # Add parent directories referenced by common Run/RunOnce persistence
+        # values. Registry values are treated only as additional scan roots.
+        try:
+            import re
+            import winreg
+
+            registry_keys = (
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run"),
+                (winreg.HKEY_CURRENT_USER, r"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\RunOnce"),
+            )
+            for hive, key_path in registry_keys:
+                try:
+                    with winreg.OpenKey(hive, key_path) as key:
+                        index = 0
+                        while True:
+                            try:
+                                _, value, _ = winreg.EnumValue(key, index)
+                                index += 1
+                            except OSError:
+                                break
+                            if not isinstance(value, str):
+                                continue
+                            expanded = os.path.expandvars(value.strip())
+                            match = re.match(r'^\s*"([^"]+)"', expanded)
+                            candidate = match.group(1) if match else expanded.split()[0] if expanded else ""
+                            candidate = candidate.strip()
+                            if candidate and os.path.isfile(candidate):
+                                add(os.path.dirname(candidate))
+                except (OSError, PermissionError):
+                    continue
+        except Exception as exc:
+            logging.debug("Registry persistence-root discovery unavailable: %s", exc)
+
     elif system in {"Linux", "Darwin"}:
         add("/")
         for mount_root in ("/mnt", "/media", "/run/media", "/Volumes"):
