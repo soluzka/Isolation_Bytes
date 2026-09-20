@@ -2,9 +2,12 @@
 
 import os
 import time
+import logging
 from datetime import datetime, timezone
 
 from flask import jsonify, request, session
+
+logger = logging.getLogger("cloud_server")
 
 from cloud import cloud_server_original as _legacy
 from cloud._agent_results_unlimited import build_complete_agent_scan_results, reset_agent_scan_results_cache
