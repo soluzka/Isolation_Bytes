@@ -465,7 +465,7 @@ def load_yara_rules():
             return [fallback_rule]
         return []
 
-def scan_file_with_yara(filepath, timeout=2):
+def scan_file_with_yara(filepath, timeout=None):
     """
     Scan a file using all available YARA rules. 
     Returns a list of match objects if suspicious, or an empty list if not suspicious.
@@ -487,21 +487,29 @@ def scan_file_with_yara(filepath, timeout=2):
         logging.error(f"Error checking file size: {str(e)}")
     
     ext = os.path.splitext(filepath)[1].lower()
-    if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv', '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico'}:
+
+    # Do not silently discard file classes merely because they are uncommon
+    # malware containers.  Media, logs, dumps, documents, and archives can all
+    # carry embedded or script-based indicators.  Optional exclusions remain
+    # available for operators who need a performance policy.
+    excluded_exts = {
+        item.strip().lower()
+        for item in os.environ.get("YARA_EXCLUDED_EXTENSIONS", "").split(",")
+        if item.strip()
+    }
+    if ext in excluded_exts:
+        logging.debug("YARA extension exclusion: %s", filepath)
         return []
 
-    # Skip log, event, and crash files that are not useful for YARA malware matching
-    if ext in {'.log', '.evtx', '.evt', '.etl', '.dmp', '.mdmp', '.wer', '.cab'}:
-        logging.debug(f"Skipping non-malware log/crash file: {filepath}")
-        return []
-
-    # Skip common Windows log/crash directories (Panther, Logs, Minidump, etc.)
+    excluded_path_tokens = {
+        item.strip().lower()
+        for item in os.environ.get("YARA_EXCLUDED_PATH_TOKENS", "").split(",")
+        if item.strip()
+    }
     lower_path = filepath.lower()
-    if any(skip in lower_path for skip in {'\\logs\\', '\\panther\\', '\\minidump', '\\crashdumps', '\\diagtrack'}):
-        logging.debug(f"Skipping log/crash directory file: {filepath}")
+    if excluded_path_tokens and any(token in lower_path for token in excluded_path_tokens):
+        logging.debug("YARA path exclusion: %s", filepath)
         return []
-
-
 
     # Load the YARA rules
     try:
@@ -510,6 +518,10 @@ def scan_file_with_yara(filepath, timeout=2):
             logging.warning(f"No YARA rules available to scan {filepath}")
             return []
         
+        if timeout is None:
+            timeout = max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10')))
+        else:
+            timeout = max(1, int(timeout))
         logging.info(f"Scanning file with {len(rules)} YARA rule sets: {filepath}")
         
         # Track scanning metrics
@@ -574,8 +586,8 @@ def scan_file_with_yara(filepath, timeout=2):
                         logging.warning(f"{rule_highest.upper() if rule_highest else 'YARA'} match in {filepath}: {', '.join(rule_names)}")
             except YaraTimeoutError:
                 timeouts += 1
-                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}), stopping this file")
-                break
+                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}); continuing with remaining rules")
+                continue
             except YaraError as ye:
                 errors += 1
                 logging.error(f"YARA error scanning {filepath}: {str(ye)}")
