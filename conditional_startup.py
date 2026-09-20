@@ -1528,7 +1528,6 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     try:
         # Publish the file before entering the YARA engine so the live dashboard
         # proves that the actual per-file loop has started.
-        with results_lock:
         if callable(progress_callback):
             try:
                 progress_callback(results)
