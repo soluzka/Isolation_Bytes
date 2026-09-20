@@ -1416,7 +1416,7 @@ def run_conditional_startup_background():
                 'run_id': run_id,
                 'running': True,
                 'started_at': run_started,
-                'last_run': run_started,
+                'last_run': None,
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'duration': None,
                 'last_error': None,
