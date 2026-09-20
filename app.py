@@ -2444,23 +2444,41 @@ def run_startup():
         global latest_errors, latest_process_events, latest_ml_detections
         global latest_ransomware_indicators, latest_persistence_indicators
         global latest_yara_suspicious, latest_quarantined_files
-        latest_errors = list(results.get('errors') or [])
-        latest_process_events = list(results.get('process_events') or [])
-        latest_ml_detections = list(results.get('ml_detections') or [])
-        latest_ransomware_indicators = list(results.get('ransomware_indicators') or [])
-        latest_persistence_indicators = dict(persistence) if isinstance(persistence, dict) else {}
-        latest_yara_suspicious = list(results.get('yara_suspicious') or [])
-        latest_quarantined_files = list(results.get('quarantined_files') or [])
+        def _append_unique(existing, incoming):
+            merged = list(existing or [])
+            seen = {repr(item) for item in merged}
+            for item in list(incoming or []):
+                marker = repr(item)
+                if marker not in seen:
+                    merged.append(item)
+                    seen.add(marker)
+            return merged
+
+        latest_errors = _append_unique(latest_errors, results.get('errors'))
+        latest_process_events = _append_unique(latest_process_events, results.get('process_events'))
+        latest_ml_detections = _append_unique(latest_ml_detections, results.get('ml_detections'))
+        latest_ransomware_indicators = _append_unique(latest_ransomware_indicators, results.get('ransomware_indicators'))
+        latest_yara_suspicious = _append_unique(latest_yara_suspicious, results.get('yara_suspicious'))
+        latest_quarantined_files = _append_unique(latest_quarantined_files, results.get('quarantined_files'))
+        merged_persistence = dict(latest_persistence_indicators or {})
+        for key, value in (persistence.items() if isinstance(persistence, dict) else []):
+            candidate = str(key)
+            suffix = 2
+            while candidate in merged_persistence and merged_persistence[candidate] != value:
+                candidate = f'{key}#{suffix}'
+                suffix += 1
+            merged_persistence[candidate] = value
+        latest_persistence_indicators = merged_persistence
         conditional_startup_state.update({
             'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'scanned_files': int(results.get('scanned_files_count') or 0),
-            'quarantined_files': len(results.get('quarantined_files') or []),
-            'errors': len(results.get('errors') or []),
-            'process_events': len(results.get('process_events') or []),
-            'ml_detections': len(results.get('ml_detections') or []),
-            'ransomware_indicators': len(results.get('ransomware_indicators') or []),
-            'persistence_indicators': persistence_count,
-            'yara_suspicious': len(results.get('yara_suspicious') or []),
+            'scanned_files': max(int(conditional_startup_state.get('scanned_files') or 0), int(results.get('scanned_files_count') or 0)),
+            'quarantined_files': max(int(conditional_startup_state.get('quarantined_files') or 0), len(latest_quarantined_files)),
+            'errors': max(int(conditional_startup_state.get('errors') or 0), len(latest_errors)),
+            'process_events': max(int(conditional_startup_state.get('process_events') or 0), len(latest_process_events)),
+            'ml_detections': max(int(conditional_startup_state.get('ml_detections') or 0), len(latest_ml_detections)),
+            'ransomware_indicators': max(int(conditional_startup_state.get('ransomware_indicators') or 0), len(latest_ransomware_indicators)),
+            'persistence_indicators': max(int(conditional_startup_state.get('persistence_indicators') or 0), len(latest_persistence_indicators)),
+            'yara_suspicious': max(int(conditional_startup_state.get('yara_suspicious') or 0), len(latest_yara_suspicious)),
         })
         _persist_conditional_startup_state()
 
