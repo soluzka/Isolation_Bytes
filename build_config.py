@@ -221,8 +221,13 @@ if not args.skip_exe:
         sys.exit(1)
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
+    # The application does not import Pydantic directly. The installed
+    # PyInstaller contrib hook probes the removed V1 pydantic.compiled
+    # attribute and aborts against Pydantic 2.x.
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
+         '--exclude-module', 'pydantic',
+         '--exclude-module', 'pydantic_core',
          '--distpath', DIST_DIR,
          '--workpath', BUILD_DIR])
     print('antivirus_server.exe build complete.')
