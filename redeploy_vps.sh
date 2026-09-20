@@ -34,9 +34,10 @@ echo "  Swap: $(swapon --show | wc -l) swap devices active"
 echo "[3/8] Cloning repository..."
 if [ -d /opt/antivirus-server ]; then
     cd /opt/antivirus-server
-    git fetch origin
+    git fetch --prune origin
     git checkout security-v2
     git reset --hard origin/security-v2
+    git clean -fd
 else
     cd /opt
     git clone https://github.com/soluzka/Isolation_Bytes.git antivirus-server
@@ -56,6 +57,11 @@ sed -i 's/^spacy==/#spacy==/' requirements.txt 2>/dev/null || true
 sed -i 's/^llama-cpp-python==/#llama-cpp-python==/' requirements.txt 2>/dev/null || true
 sed -i 's/^pyinstaller==/#pyinstaller==/' requirements.txt 2>/dev/null || true
 /opt/antivirus-server/venv/bin/pip install --no-cache-dir -r requirements.txt gunicorn 2>&1 | tail -5
+
+# Verify the exact source that will be started before touching the service.
+echo "  Deployed commit: $(git rev-parse --short HEAD)"
+/opt/antivirus-server/venv/bin/python -m py_compile cloud/cloud_server.py cloud/_agent_results_unlimited.py
+/opt/antivirus-server/venv/bin/python -c "import cloud.cloud_server; print('  cloud.cloud_server import: OK')"
 
 # 5. Create .env and optionally collect Cloudflare API token
 echo "[5/8] Creating .env..."
@@ -195,14 +201,26 @@ systemctl enable antivirus-cloud
 # 8. Start everything
 echo "[8/8] Starting services..."
 systemctl restart antivirus-cloud
-sleep 3
+sleep 2
 systemctl is-active antivirus-cloud
 systemctl is-active nginx
 
-# Verify
+# Verify the origin directly before declaring the deployment healthy.
 echo ""
 echo "=== Verification ==="
-curl -s -o /dev/null -w "HTTP %{http_code}" http://127.0.0.1:5002/ 2>/dev/null || echo "Flask not responding yet"
+for attempt in $(seq 1 20); do
+    if curl -fsS --max-time 5 -o /dev/null http://127.0.0.1:5002/; then
+        echo "Origin: HTTP 200"
+        break
+    fi
+    if [ "$attempt" -eq 20 ]; then
+        echo "ERROR: origin 127.0.0.1:5002 did not become healthy"
+        systemctl --no-pager --full status antivirus-cloud || true
+        journalctl -u antivirus-cloud -n 80 --no-pager || true
+        exit 1
+    fi
+    sleep 2
+done
 echo ""
 free -h
 echo ""
