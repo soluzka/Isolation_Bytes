@@ -58,6 +58,7 @@ except ImportError:
     ML_AVAILABLE = False
 
 from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_check_call, safe_list2cmdline
+from runtime_paths import runtime_path
 
 DEFAULT_SERVER = "https://isolation-bytes.com"
 DEFAULT_API_KEY = os.environ.get('CLOUD_API_KEY', '')
@@ -244,6 +245,59 @@ def _startup_log(message):
 
 
 class StandaloneAgent:
+    _SCAN_STATE_PATH = runtime_path("scan_state.json")
+
+    def _get_yara_scan_state(self):
+        """Return and persist the authoritative current-scan state.
+
+        This state is deliberately reset at the beginning of every explicit
+        full scan. It lives in LocalAppData so it survives EXE replacement
+        without becoming a stale source of scan verdicts.
+        """
+        state = {
+            "scan_id": self._scan_id,
+            "status": self._scan_status,
+            "started_at": self._scan_started_at,
+            "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "complete": self._scan_status == "complete",
+            "files_scanned": int(self._files_scanned),
+            "quarantined_count": int(self._quarantined_count),
+            "threats_blocked": int(self._threats_blocked),
+            "findings": int(self._total_findings),
+            "ransomware_indicators": int(self._total_ransomware),
+            "persistence_indicators": int(self._total_persistence),
+            "yara_suspicious": int(self._total_yara),
+            "ml_suspicious": int(self._total_ml),
+            "scan_dirs": list(self._scan_dirs),
+            "next_scan_starts_at_beginning": True,
+        }
+        try:
+            path = self._SCAN_STATE_PATH
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as handle:
+                json.dump(state, handle, indent=2, sort_keys=True)
+            os.replace(tmp, path)
+        except (OSError, TypeError, ValueError) as exc:
+            print(f"[SCAN] Could not persist scan state: {exc}")
+        return state
+
+    def _reset_scan_state(self):
+        """Start a genuinely new scan generation from the first monitored root."""
+        self._scan_id = hashlib.sha256(
+            f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
+        ).hexdigest()[:24]
+        self._files_scanned = 0
+        self._threats_blocked = 0
+        self._quarantined_count = 0
+        self._total_findings = 0
+        self._total_ransomware = 0
+        self._total_persistence = 0
+        self._total_yara = 0
+        self._total_ml = 0
+        self._scan_progress_reported = 0
+        self._get_yara_scan_state()
+
     def __init__(self, server_url, api_key='', device_id=None, pair_code=None,
                  credential_file=None):
         self.server_url = _validate_server_url(server_url).rstrip('/')
@@ -2724,22 +2778,9 @@ X-GNOME-Autostart-enabled=true
             self._scan_started_at = datetime.datetime.now(
                 datetime.timezone.utc
             ).isoformat()
-            # Every full scan is a new counter generation.  files_scanned is
-            # deliberately a per-run counter, not a lifetime accumulator.
-            self._scan_id = hashlib.sha256(
-                f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
-            ).hexdigest()[:24]
-            # Every scan is a fresh result generation. All displayed result
-            # counters must start at zero and only increase from this run.
-            self._files_scanned = 0
-            self._threats_blocked = 0
-            self._quarantined_count = 0
-            self._total_findings = 0
-            self._total_ransomware = 0
-            self._total_persistence = 0
-            self._total_yara = 0
-            self._total_ml = 0
-            self._scan_progress_reported = 0
+            # Every explicit scan starts a brand-new generation at the
+            # beginning. The JSON state is never used as a skip list.
+            self._reset_scan_state()
             all_findings = []
             scanned_roots = []
 
