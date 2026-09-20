@@ -966,6 +966,16 @@ def _refresh_conditional_startup_state():
         if not isinstance(persisted, dict):
             return
         with conditional_startup_lock:
+            # A live in-process scanner is authoritative. Do not let a stale
+            # state file overwrite its RUNNING state between progress updates.
+            thread_alive = bool(
+                conditional_startup_thread is not None
+                and conditional_startup_thread.is_alive()
+            )
+            if thread_alive:
+                persisted['running'] = True
+                if persisted.get('scan_phase') in (None, '', 'idle', 'completed'):
+                    persisted['scan_phase'] = conditional_startup_state.get('scan_phase') or 'continuous'
             conditional_startup_state.update(persisted)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         return
