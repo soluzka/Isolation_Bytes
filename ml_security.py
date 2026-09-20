@@ -98,12 +98,11 @@ class SecurityMLModel:
             return False
 
     def retrain_model(self, X, y=None):
+        """Retrain from an explicitly supplied baseline dataset only."""
         try:
-            self.pipeline.fit(X)
-            self.model = self.pipeline.named_steps['model']
-            self.save_model()
-            return True
-        except Exception as exc:
+            self.train_model(X)
+            return bool(self.save_model())
+        except (TypeError, ValueError, OSError) as exc:
             logging.error("Error training model: %s", exc)
             return False
 
