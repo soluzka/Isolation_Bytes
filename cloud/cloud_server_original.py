@@ -2904,12 +2904,19 @@ def github_webhook():
         )
         if validation.returncode == 0:
             # Syntax validation alone can miss import-time failures that would
-            # kill gunicorn and produce a Cloudflare 502. Load the exact WSGI
-            # application and the Conditional Startup module before restarting.
+            # kill gunicorn and produce a Cloudflare 502. Validate the actual
+            # cloud WSGI application. quick_start.py is Windows-only and must
+            # never be imported on the Linux cloud deployment.
+            import_check_code = (
+                'import cloud.cloud_server; print("cloud WSGI import check: OK")'
+            )
+            if os.name == 'nt':
+                import_check_code = (
+                    'import cloud.cloud_server; import quick_start; '
+                    'print("cloud + Windows scanner import check: OK")'
+                )
             import_check = _sp.run(
-                [python_bin, '-c',
-                 'import cloud.cloud_server; import quick_start; '
-                 'print("production import check: OK")'],
+                [python_bin, '-c', import_check_code],
                 cwd=str(BASE_DIR), capture_output=True, text=True, timeout=120
             )
             if import_check.returncode != 0:
