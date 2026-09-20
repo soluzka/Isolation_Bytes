@@ -54,9 +54,20 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             or ""
         ).strip()
 
-        # A newly active scan owns its own live counter. Never carry the
-        # previous completed scan's count into the current scan display.
-        if (str(agent.get("scan_status") or report.get("scan_status") or "").lower() == "scanning"):
+        # A newly requested cloud scan owns a fresh counter. Until the
+        # agent publishes a report from that new generation, do not expose
+        # the previous completed scan's count as the current scan's count.
+        active_state = (active_scan_state or {}).get(device_id) or {}
+        active_started = float(active_state.get("started_at", 0) or 0)
+        previous_marker = str(active_state.get("report_marker") or "")
+        report_marker = str(agent.get("last_scan") or report.get("timestamp") or "")
+        new_generation_reported = bool(
+            active_started and previous_marker and report_marker
+            and report_marker != previous_marker
+        )
+        if active_started and not new_generation_reported:
+            files_scanned = 0
+        elif str(agent.get("scan_status") or report.get("scan_status") or "").lower() == "scanning":
             files_scanned = int(agent.get("files_scanned", report.get("files_scanned", 0)) or 0)
         else:
             files_scanned = _monotonic_counter(
