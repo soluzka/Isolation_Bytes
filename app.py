@@ -227,7 +227,6 @@ def conditional_startup_status_api():
     # Copy and add runtime flags to avoid mutating original
     resp = dict(state)
     resp.setdefault('status', 'RUNNING' if resp.get('running') else 'IDLE')
-    resp.setdefault('scan_current_path', '')
     resp.setdefault('scan_phase', 'scanning' if resp.get('running') else 'idle')
     resp.setdefault('ml_models', {})
     resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
