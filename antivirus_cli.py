@@ -254,7 +254,7 @@ def show_logs():
         logging.error(f"Error reading log file: {e}")
 
 # --- Update Mechanisms ---
-__version__ = "1.0.0"
+__version__ = "1.8.952.0"
 
 def update_defender_signatures():
     """
