@@ -913,7 +913,7 @@ conditional_startup_state = {
     'yara_suspicious': 0,  # High/critical YARA matches for review (not auto-quarantined)
     'last_error': None
 }
-conditional_startup_lock = threading.Lock()
+conditional_startup_lock = threading.RLock()
 scanning_lock = threading.Lock()
 conditional_startup_thread = None  # Background scan thread, used to detect dead scans
 
