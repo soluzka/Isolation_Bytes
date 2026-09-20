@@ -2,7 +2,7 @@
     "name": "Isolation Bytes Antivirus",
     "short_name": "Isolation Bytes",
     "description": "AI-powered antivirus with YARA rules, ML detection, and cloud dashboard",
-    "version": "1.8.952.0",
+    "version": "1.8.953.0",
     "id": "/",
     "start_url": "https://isolation-bytes.com/",
     "scope": "https://isolation-bytes.com/",
@@ -65,7 +65,7 @@
         },
         {
             "platform": "play",
-            "url": "https://isolation-bytes.com/download/IsolationBytes-v1.8.952.0.apk",
+            "url": "https://isolation-bytes.com/download/IsolationBytes-v1.8.953.0.apk",
             "id": "com.soluzka.antivirus"
         }
     ]
