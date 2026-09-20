@@ -55,14 +55,15 @@ if getattr(sys, 'frozen', False):
 else:
     basedir = os.path.dirname(os.path.abspath(__file__))
 
-# Quarantine files live in the Defender quarantine folder under the user's
-# temp directory.  We use USERPROFILE rather than tempfile.gettempdir() so
-# the path is consistent whether the server runs as a normal user or elevated
-# (tempfile.gettempdir() returns a different path under admin/SYSTEM).
-_userprofile = os.environ.get('USERPROFILE', os.path.expanduser('~'))
-QUARANTINE_FOLDER = os.path.join(
-    _userprofile, 'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+# Keep application quarantine data separate from Microsoft Defender.
+# Never use Defender's private quarantine directory or its logs.
+# Prefer the configured application runtime directory so source and frozen
+# builds use the same writable location.
+_runtime_dir = os.environ.get(
+    'ANTIVIRUS_RUNTIME_DIR',
+    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
 )
+QUARANTINE_FOLDER = os.path.join(_runtime_dir, 'Quarantine')
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
 # Set strict permissions on the quarantine folder
 import platform
