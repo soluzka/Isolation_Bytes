@@ -2139,7 +2139,10 @@ X-GNOME-Autostart-enabled=true
                     # outer exception handler before the old increment.
                     self._files_scanned += 1
                     self._scan_current_path = filepath
-                    if self._files_scanned - self._scan_progress_reported >= 250:
+                    # Publish live YARA progress frequently enough for the
+                    # dashboard to track the current file/path without waiting
+                    # hundreds of files.
+                    if self._files_scanned - self._scan_progress_reported >= 25:
                         self._report([], report_type='scan_progress')
                         self._scan_progress_reported = self._files_scanned
 
