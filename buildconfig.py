@@ -4,8 +4,7 @@ Builds both EXEs with the same configuration:
   - cloud_server.exe         (PyInstaller — Flask + Caddy + Cloudflare)
   - IsolationBytesAgent.exe  (PyInstaller — desktop scanning agent)\n  - IsolationBytesLogin.exe  (dotnet — launcher)
 
-The launcher embeds cloud_server.exe inside itself, so the final
-IsolationBytesLogin.exe is fully self-contained — no external files needed.
+The launcher is a thin client and expects IsolationBytesAgent.exe alongside it at runtime.
 
 Usage:
     python buildconfig.py              # build everything (cloud first, then launcher)
@@ -109,7 +108,7 @@ EXCLUDED_IMPORTS = [
 # BUILD: cloud_server.exe (PyInstaller)
 # ============================================================
 def build_cloud_server():
-    print("\n[1/2] Building cloud_server.exe (PyInstaller)...")
+    print("\n[1/3] Building cloud_server.exe (PyInstaller)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
     print(f"  PROXY_PORT:    {PROXY_PORT}")
     print(f"  HTTPS_PORT:    {HTTPS_PORT}")
@@ -426,7 +425,7 @@ def main():
         build_agent_flag = True
         build_launcher_flag = True
 
-    print(f"\\n{'='*60}")
+    print(f"\n{'='*60}")
     print(f"  BUILD CONFIGURATION")
     print(f"{'='*60}")
     print(f"  Project:        {PROJECT_ROOT}")
@@ -456,7 +455,7 @@ def main():
         print(f"{'='*60}")
         for f in sorted(DIST_DIR.glob("*.exe")):
             print(f"  {f.name:40s} {f.stat().st_size / 1048576:>8.1f} MB")
-        print(f"\\n  IsolationBytesLogin.exe is a thin client:")
+        print(f"\n  IsolationBytesLogin.exe is a thin client:")
         print(f"    - Loads login page from {PUBLIC_URL}")
         print(f"    - Validates license via POST /api/license/validate")
         print(f"    - Authenticates via POST /api/user/login")
@@ -468,3 +467,6 @@ def main():
         print(f"{'='*60}")
         sys.exit(1)
 
+
+if __name__ == "__main__":
+    main()
