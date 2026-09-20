@@ -1425,9 +1425,12 @@ def run_startup():
         conditional_startup_thread.start()
 
         return jsonify({
-            "status": "success",
+            "status": "started",
+            "success": True,
+            "accepted": True,
             "message": "Conditional startup scan started in background",
             "scan_time": "running in background (see status panel)",
+            "run_id": conditional_startup_state.get("run_id", ""),
             "scanned_directories": network_state['monitored_directories'] + folder_watcher_state['monitored_paths'],
             "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
         })
