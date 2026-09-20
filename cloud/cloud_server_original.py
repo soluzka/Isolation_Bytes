@@ -3350,31 +3350,23 @@ def dashboard():
 @cloud_bp.route('/yara-scanner', methods=['GET'], endpoint='yara_scanner')
 @cloud_bp.route('/yara_scanner.html', methods=['GET'])
 def cloud_yara_scanner():
+    """Render the YARA UI without blocking on the agent registry.
+    
+    Live agent state is loaded asynchronously by /api/agent-scan-results and
+    the monitored-directory endpoints. Keeping the initial HTML lightweight
+    prevents a slow/large agents.json from causing a Cloudflare 504.
+    """
     rules_info = {'available': True, 'count': 42, 'last_updated': '2026-08-19', 'sources': ['cloud', 'custom']}
-    # Show only directories from connected agents — the VPS itself
-    # has no user files to scan, so only agent PCs are relevant.
-    agents = _all_agents()
-    monitored_folders = []
-    agent_scan_results = []
-    for device_id, ag in agents.items():
-        host = ag.get('hostname', device_id)
-        for d in (ag.get('scan_dirs') or []):
-            monitored_folders.append(f"[{host}] {d}")
-        # Collect agent scan findings
-        last_report = ag.get('last_report') or {}
-        findings = last_report.get('findings') or []
-        agent_scan_results.append({
-            'hostname': host,
-            'device_id': device_id,
-            'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
-            'finding_count': len(findings),
-            'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:50],  # browser view only; stored history is untouched
-            'scan_dirs': ag.get('scan_dirs') or [],
-            'scan_status': ag.get('scan_status', 'idle'),
-            'scan_current_path': ag.get('scan_current_path', ''),
-        })
-    return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
+    return render_template(
+        'yara_scanner.html',
+        rules_info=rules_info,
+        monitored_folders=[],
+        monitored_directories=[],
+        agent_count=0,
+        agents={},
+        agent_scan_results=[],
+        session=session,
+    )
 
 
 @cloud_bp.route('/api/agent-scan-results', methods=['GET'])
