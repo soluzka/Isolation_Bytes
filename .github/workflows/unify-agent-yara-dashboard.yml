@@ -74,8 +74,20 @@ jobs:
           )
           require("cloud/_agent_results_unlimited.py")
           require("conditional_startup.py")
+          require(
+              "runtime_paths.py",
+              "def ensure_runtime_state_files():",
+              '"conditional_startup_state.json"',
+              '"scanner_results.json"',
+              '"scan_state.json"',
+          )
+          require(
+              "standalone_agent.py",
+              "from runtime_paths import runtime_path",
+              "self._SCAN_STATE_PATH = runtime_path(\"scan_state.json\")",
+          )
 
-          print("Required Agent/YARA synchronization markers are present.")
+          print("Required Agent/YARA synchronization and LocalAppData state markers are present.")
           PY
-          python -m py_compile quick_start.py cloud/cloud_server.py cloud/_agent_results_unlimited.py conditional_startup.py
+          python -m py_compile quick_start.py standalone_agent.py runtime_paths.py cloud/cloud_server.py cloud/_agent_results_unlimited.py conditional_startup.py
           echo "Agent/YARA synchronization and current-generation counter isolation are present."
