@@ -16,13 +16,25 @@ fi
 mkdir -p "$QDIR" "$APP/data"
 chmod 700 "$RUNTIME" "$QDIR"
 
-# Create only missing JSON state. Existing data is preserved.
+# Create missing JSON state and repair malformed/truncated JSON. Valid data is preserved.
 create_json() {
   local path="$1"
   local value="$2"
   if [ ! -f "$path" ]; then
     printf '%s\n' "$value" > "$path"
     echo "created: $path"
+    return 0
+  fi
+  if ! "$APP/venv/bin/python" - "$path" <<'PY'
+import json, sys
+with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    json.load(f)
+PY
+  then
+    backup="${path}.corrupt-$(date +%Y%m%d-%H%M%S)"
+    mv "$path" "$backup"
+    printf '%s\n' "$value" > "$path"
+    echo "repaired: $path (backup: $backup)"
   else
     echo "kept:    $path"
   fi
@@ -44,12 +56,16 @@ create_json "$APP/scheduled_scan_state.json" '{"enabled": false}'
 create_json "$APP/conditional_startup_state.json" '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}'
 create_json "$APP/scanner_results.json" '{"scanner_counters": {"scanned_files": 0, "quarantined_files": 0, "errors": 0, "process_events": 0, "ml_detections": 0, "ransomware_indicators": 0, "persistence_indicators": 0, "yara_suspicious": 0}, "scanner_results": {"errors": [], "process_events": [], "ml_detections": [], "ransomware_indicators": [], "persistence_indicators": {}, "yara_suspicious": [], "quarantined_files": []}}'
 create_json "$APP/data/scan_cache.json" '{}'
-
 # Ensure the deployed runtime points at the application-owned state directory.
 if [ -f "$APP/.env" ]; then
   sed -i '/^ANTIVIRUS_RUNTIME_DIR=/d' "$APP/.env"
   printf 'ANTIVIRUS_RUNTIME_DIR=%s\n' "$RUNTIME" >> "$APP/.env"
 fi
+
+cd "$APP"
+git fetch --prune origin
+git checkout security-v2
+git reset --hard origin/security-v2
 
 # Validate every state file before restarting the service.
 "$APP/venv/bin/python" - <<'PY'
@@ -70,6 +86,7 @@ files = [
     Path("/opt/antivirus-server/voice_scan_status.json"),
     Path("/opt/antivirus-server/scheduled_scan_state.json"),
     Path("/opt/antivirus-server/conditional_startup_state.json"),
+    Path("/opt/antivirus-server/scanner_results.json"),
     Path("/opt/antivirus-server/data/scan_cache.json"),
 ]
 for p in files:
@@ -77,11 +94,6 @@ for p in files:
         json.load(f)
 print(f"Validated {len(files)} JSON state files")
 PY
-
-cd "$APP"
-git fetch --prune origin
-git checkout security-v2
-git reset --hard origin/security-v2
 "$APP/venv/bin/python" -m py_compile quick_start.py conditional_startup.py runtime_paths.py cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py security/web_auth.py phishing_alerts.py
 "$APP/venv/bin/python" -c "import cloud.cloud_server; print('cloud WSGI import: OK')"
 "$APP/venv/bin/python" -c "import quick_start; print('quick_start import: OK')"
