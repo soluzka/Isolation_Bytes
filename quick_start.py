@@ -949,13 +949,13 @@ def _persist_conditional_startup_state():
                 'yara_suspicious': int(payload.get('yara_suspicious') or 0),
             }
             payload['scanner_results'] = {
-                'errors': list(globals().get('latest_errors', []) or [])[-500:],
-                'process_events': list(globals().get('latest_process_events', []) or [])[-500:],
-                'ml_detections': list(globals().get('latest_ml_detections', []) or [])[-500:],
-                'ransomware_indicators': list(globals().get('latest_ransomware_indicators', []) or [])[-500:],
+                'errors': list(globals().get('latest_errors', []) or []),
+                'process_events': list(globals().get('latest_process_events', []) or []),
+                'ml_detections': list(globals().get('latest_ml_detections', []) or []),
+                'ransomware_indicators': list(globals().get('latest_ransomware_indicators', []) or []),
                 'persistence_indicators': globals().get('latest_persistence_indicators', {}) or {},
-                'yara_suspicious': list(globals().get('latest_yara_suspicious', []) or [])[-500:],
-                'quarantined_files': list(globals().get('latest_quarantined_files', []) or [])[-500:],
+                'yara_suspicious': list(globals().get('latest_yara_suspicious', []) or []),
+                'quarantined_files': list(globals().get('latest_quarantined_files', []) or []),
             }
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
@@ -990,13 +990,13 @@ def _ensure_conditional_startup_state_files():
                 'yara_suspicious': int(payload.get('yara_suspicious') or 0),
             }
             payload['scanner_results'] = {
-                'errors': list(latest_errors)[-500:],
-                'process_events': list(latest_process_events)[-500:],
-                'ml_detections': list(latest_ml_detections)[-500:],
-                'ransomware_indicators': list(latest_ransomware_indicators)[-500:],
+                'errors': list(latest_errors),
+                'process_events': list(latest_process_events),
+                'ml_detections': list(latest_ml_detections),
+                'ransomware_indicators': list(latest_ransomware_indicators),
                 'persistence_indicators': dict(latest_persistence_indicators),
-                'yara_suspicious': list(latest_yara_suspicious)[-500:],
-                'quarantined_files': list(latest_quarantined_files)[-500:],
+                'yara_suspicious': list(latest_yara_suspicious),
+                'quarantined_files': list(latest_quarantined_files),
             }
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
