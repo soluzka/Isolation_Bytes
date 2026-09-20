@@ -224,8 +224,8 @@ QUARANTINE_DIR = os.path.join(
     'Quarantine'
 )
 BLOCKED_FILES_REGISTRY = os.path.join(
-    os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', r'C:\Users\Default')),
-    'IsolationBytes', 'blocked_files.json'
+    os.path.dirname(QUARANTINE_DIR),
+    'blocked_files.json'
 )
 
 
@@ -2285,7 +2285,7 @@ X-GNOME-Autostart-enabled=true
                                 # Contain first, then automatically quarantine confirmed
                                 # high/critical malware. _quarantine_file() delegates to
                                 # quarantine_utils, whose canonical destination is
-                                # %USERPROFILE%\AppData\Local\Temp\Defender_Quarantine.
+                                # %USERPROFILE%\AppData\Local\Temp\IsolationBytes\\Quarantine.
                                 bok = self._block_file_in_place(filepath)
                                 if bok:
                                     for f in findings:
