@@ -180,10 +180,14 @@ def _canonical_yara_agent_state():
         current_status = 'queued'
     scan_generation = active_started or last_scan
 
+    # During an active run, "last scan" means this newly-started run.
+    # Historical completion timestamps remain available in the agent report,
+    # but must not replace the active scan's start time in the live dashboard.
+    live_last_scan = active_started or last_scan
     return {
         'running': running,
-        'last_run': last_scan,
-        'last_updated': last_scan,
+        'last_run': live_last_scan,
+        'last_updated': live_last_scan,
         'started_at': active_started or None,
         'scan_generation': scan_generation,
         'duration': None,
