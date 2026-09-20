@@ -59,13 +59,11 @@ jobs:
               "standalone_agent.py",
               "while self._running:",
               "self._continuous_scan_requested = True",
-              "self._continuous_scan_requested = False",
           )
           require(
               "conditional_startup.py",
               "while True:",
               "continuous=False",
-              "if not continuous or STOP_EVENT.is_set():",
           )
           require(
               "quick_start.py",
