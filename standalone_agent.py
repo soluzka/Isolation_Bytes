@@ -383,6 +383,16 @@ class StandaloneAgent:
             if isinstance(conditional_live, dict) and conditional_live.get("running"):
                 conditional_scanned = int(conditional_live.get("scanned_files") or 0)
                 self._files_scanned = max(int(self._files_scanned), conditional_scanned)
+                # _get_yara_scan_state() ran before the merge above, so refresh
+                # the shared scan_state.json after adopting Conditional Startup's
+                # higher count.  This keeps scan_state.json at the same value
+                # instead of leaving it at the standalone agent's older count.
+                scan_state["files_scanned"] = int(self._files_scanned)
+                scan_state["updated_at"] = now
+                tmp = self._SCAN_STATE_PATH + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as handle:
+                    json.dump(scan_state, handle, indent=2, sort_keys=True)
+                os.replace(tmp, self._SCAN_STATE_PATH)
         except (OSError, ValueError, TypeError):
             pass
 
