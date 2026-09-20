@@ -30,7 +30,9 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
         report = agent.get("last_report") or {}
         active = (active_scan_state or {}).get(device_id) or {}
         active_started = float(active.get("started_at", 0) or 0)
-        baseline_quarantined = int(active.get("baseline_quarantined", 0) or 0)
+        # Quarantine history is never part of the active scan counters.
+        # The agent must report only counters produced by the current scan.
+        baseline_quarantined = 0
 
         current_scan_id = str(
             agent.get("scan_id") or report.get("scan_id") or ""
@@ -63,10 +65,9 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             files_scanned = int(
                 agent.get("files_scanned", report.get("files_scanned", 0)) or 0
             )
-            raw_quarantined = int(
+            quarantined_count = max(0, int(
                 agent.get("quarantined_count", report.get("quarantined_count", 0)) or 0
-            )
-            quarantined_count = max(0, raw_quarantined - baseline_quarantined)
+            ))
             status = str(
                 agent.get("scan_status") or report.get("scan_status") or "idle"
             ).lower()
