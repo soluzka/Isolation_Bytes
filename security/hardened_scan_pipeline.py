@@ -104,6 +104,14 @@ def _ml_confidence(path: str, yara_matches=None) -> float:
     return _ml_assessment(path, yara_matches=yara_matches)[0]
 
 
+def _ml_available() -> bool:
+    try:
+        from ml_security import security_ml
+        return bool(security_ml.ml_status().get("available"))
+    except Exception:
+        return False
+
+
 def _contain(path: str, reason: str) -> tuple[bool, str]:
     try:
         from security.verified_quarantine import quarantine_and_verify
@@ -125,7 +133,8 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     evidence = analyze_file(path)
     static = analyze_static_file(path)
     all_matches = _yara(path) or []
-    ml_confidence, ml_available = _ml_assessment(path, yara_matches=all_matches)
+    ml_confidence = _ml_confidence(path, yara_matches=all_matches)
+    ml_available = _ml_available()
 
     # Correlate independent static-analysis helpers with the behavioral
     # detector. Entropy/import evidence is never proof by itself.
