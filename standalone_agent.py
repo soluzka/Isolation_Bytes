@@ -30,6 +30,61 @@ from urllib.parse import urlparse, unquote
 import threading
 import json
 
+# EARLIEST WINDOWS AGENT BOOTSTRAP:
+# Create the LocalAppData runtime JSON state before importing optional scanner
+# dependencies. This is intentionally self-contained so a packaged EXE cannot
+# skip state creation because psutil, requests, ML, YARA, or another scanner
+# module failed to import.
+def _bootstrap_runtime_json_files():
+    base = os.environ.get('LOCALAPPDATA') or os.path.join(
+        os.path.expanduser('~'), 'AppData', 'Local'
+    )
+    runtime_dir = os.path.abspath(os.path.join(base, 'IsolationBytes'))
+    os.makedirs(runtime_dir, exist_ok=True)
+    defaults = {
+        'scan_state.json': {
+            'scan_id': '', 'status': 'idle', 'started_at': '',
+            'updated_at': None, 'complete': False, 'files_scanned': 0,
+            'quarantined_count': 0, 'threats_blocked': 0, 'findings': 0,
+        },
+        'conditional_startup_state.json': {
+            'running': False, 'run_id': '', 'findings': [],
+            'started_at': None, 'last_updated': None, 'scanned_files': 0,
+            'quarantined_files': 0, 'errors': 0, 'process_events': 0,
+            'ml_detections': 0, 'ransomware_indicators': 0,
+            'persistence_indicators': 0, 'yara_suspicious': 0,
+        },
+        'scanner_results.json': {
+            'scanner_counters': {'scanned_files': 0, 'quarantined_files': 0,
+                                 'errors': 0, 'process_events': 0,
+                                 'ml_detections': 0, 'ransomware_indicators': 0,
+                                 'persistence_indicators': 0, 'yara_suspicious': 0},
+            'scanner_results': {'errors': [], 'process_events': [],
+                                'ml_detections': [], 'ransomware_indicators': [],
+                                'persistence_indicators': {},
+                                'yara_suspicious': [], 'quarantined_files': []},
+        },
+        'blocked_files.json': {},
+        'scheduled_scan_state.json': {'status': 'idle', 'scanned_files': 0},
+        'quarantine_log.json': [],
+        'scan_cache.json': {},
+    }
+    for filename, payload in defaults.items():
+        path = os.path.join(runtime_dir, filename)
+        if not os.path.isfile(path):
+            tmp = path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(payload, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+    missing = [name for name in defaults if not os.path.isfile(os.path.join(runtime_dir, name))]
+    if missing:
+        raise RuntimeError(
+            f'Isolation Bytes runtime JSON bootstrap failed in {runtime_dir}: {missing}'
+        )
+    return runtime_dir
+
+_RUNTIME_BOOTSTRAP_DIR = _bootstrap_runtime_json_files()
+
 try:
     import psutil
 except ImportError:
