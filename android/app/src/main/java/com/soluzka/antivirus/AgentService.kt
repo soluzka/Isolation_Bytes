@@ -33,7 +33,7 @@ class AgentService : Service() {
         private const val HEARTBEAT_INTERVAL = 30000L // 30 seconds
         private const val SCAN_INTERVAL = 60000L // 60 seconds
         private const val MAX_FILE_SIZE = 50L * 1024 * 1024 // 50 MB
-        private const val AGENT_VERSION = "1.8.952.0"
+        private const val AGENT_VERSION = "1.8.953.0"
     }
 
     private lateinit var handler: Handler
