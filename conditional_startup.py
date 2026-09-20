@@ -1242,7 +1242,8 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
 
     def on_process_event(event):
         with results_lock:
-            from security.indicator_scans import record_process_event\n            record_process_event(results, event)
+            from security.indicator_scans import record_process_event
+            record_process_event(results, event)
 
             exe = event.get('exe')
             if exe and event['type'] == 'process_scanned':
@@ -1270,7 +1271,8 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
         output.write(f"[conditional_startup] Process scan reported {len(results['process_events'])} event(s).\n")
     except Exception as e:
         output.write(f"[ERROR] Process scan failed: {e}\n")
-        from security.indicator_scans import record_error\n        record_error(results, "process_scan", e)
+        from security.indicator_scans import record_error
+        record_error(results, "process_scan", e)
 
 
 def _scan_processes_hardening_step(process_security, results, output, progress_callback):
@@ -1311,7 +1313,8 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
     except Exception as e:
         with results_lock:
             output.write(f"[ERROR] Process hardening scan failed: {e}\n")
-            from security.indicator_scans import record_error\n            record_error(results, "process_hardening", e)
+            from security.indicator_scans import record_error
+            record_error(results, "process_hardening", e)
 
 
 def _check_persistence_indicators_step(results, output, progress_callback=None):
@@ -1340,7 +1343,8 @@ def _check_persistence_indicators_step(results, output, progress_callback=None):
                 output.write(f"[WARNING] progress_callback raised during persistence checks: {e}\n")
     except Exception as e:
         output.write(f"[ERROR] Persistence checks failed: {e}\n")
-        from security.indicator_scans import record_error\n        record_error(results, "persistence_checks", e)
+        from security.indicator_scans import record_error
+        record_error(results, "persistence_checks", e)
 
 
 def _update_phishing_blocklists_step(basedir, output):
@@ -1491,13 +1495,15 @@ def _run_ml_and_ransomware_checks(filepath, results, output):
                 if ml_hit:
                     model, score = ml_hit
                     output.write(f"[ML/{model.upper()}] Malicious file detected: {filepath} (score: {score})\n")
-                    from security.indicator_scans import record_ml_suspicious\n                    record_ml_suspicious(results, filepath, score, model)
+                    from security.indicator_scans import record_ml_suspicious
+                    record_ml_suspicious(results, filepath, score, model)
 
             with scanner_lock:
                 is_suspicious, reason = check_ransomware_indicators(filepath)
             if is_suspicious:
                 output.write(f"[RANSOMWARE HEURISTIC] {filepath}: {reason}\n")
-                from security.indicator_scans import record_ransomware_indicator\n                record_ransomware_indicator(results, filepath, reason)
+                from security.indicator_scans import record_ransomware_indicator
+                record_ransomware_indicator(results, filepath, reason)
         except Exception as ml_exc:
             output.write(f"[INFO] ML/ransomware check skipped for {filepath}: {ml_exc}\n")
 
@@ -1649,7 +1655,8 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                     # happened when malware had actually been found and left in place.
                     output.write(f"[WARNING] Could not quarantine {filepath}: {quarantine_exc}\n")
                     scanned_file_status[filepath]["error"] = str(quarantine_exc)
-                    from security.indicator_scans import record_error\n                    record_error(results, "quarantine", quarantine_exc, filepath)
+                    from security.indicator_scans import record_error
+                    record_error(results, "quarantine", quarantine_exc, filepath)
 
         # ── Adaptive YARA rule reputation ─────────────────────────────────────
         # Feed back into rule_reputation so rules auto-suppress on clean files
@@ -1692,7 +1699,8 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     except Exception as scan_exc:
         with results_lock:
             output.write(f"[ERROR] Scan error for {filepath}: {scan_exc}\n")
-            from security.indicator_scans import record_error\n            record_error(results, "file_scan", scan_exc, filepath)
+            from security.indicator_scans import record_error
+            record_error(results, "file_scan", scan_exc, filepath)
             scanned_file_status[filepath] = {
                 "malware_found": None,
                 "quarantined": False,
