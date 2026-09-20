@@ -2367,7 +2367,7 @@ X-GNOME-Autostart-enabled=true
                     except Exception:
                         pass
                     # Auto-quarantine fallback: if BOTH YARA and ML flagged
-                    # the file, move it to Defender_Quarantine instead of
+                    # the file, move it to the application quarantine directory instead of
                     # leaving it blocked in place.
                     if matches and ml_suspicious:
                         try:
@@ -2377,7 +2377,7 @@ X-GNOME-Autostart-enabled=true
                                     if f.get('path') == filepath:
                                         f['quarantined'] = True
                                         f['blocked'] = False
-                                print(f"[AUTO-QUARANTINE] {filepath} moved to Defender_Quarantine (YARA+ML)")
+                                print(f"[AUTO-QUARANTINE] {filepath} moved to the application quarantine directory (YARA+ML)")
                         except Exception as e:
                             print(f"[AUTO-QUARANTINE] Failed {filepath}: {e}")
                     self._scan_cycle_remaining -= 1
