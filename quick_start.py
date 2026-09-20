@@ -125,6 +125,10 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from werkzeug.utils import secure_filename
 from flask import Flask, render_template, request, jsonify, redirect, url_for, send_from_directory, send_file, Blueprint, session, make_response, flash
 from data_analysis import load_trusted_hashes
+from runtime_paths import ensure_runtime_state_files
+
+# Create the canonical LocalAppData JSON state files before any route or scanner starts.
+ensure_runtime_state_files()
 
 # Load environment variables from .env (e.g. FERNET_KEY) -- needed because this
 # module is normally run directly with `python quick_start.py`, which (unlike
