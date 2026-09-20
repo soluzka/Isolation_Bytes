@@ -113,17 +113,14 @@ def _ml_available() -> bool:
 
 
 def _contain(path: str, reason: str) -> tuple[bool, str]:
+    """Contain only through the verified quarantine boundary; fail closed."""
     try:
         from security.verified_quarantine import quarantine_and_verify
         ok = bool(quarantine_and_verify(path, reason=reason))
-        return ok, "verified_quarantine"
-    except Exception:
-        try:
-            from quarantine_utils import quarantine_file
-            quarantine_file(path, reason=reason)
-            return not os.path.exists(path), "quarantine_utils"
-        except Exception as exc:
-            return False, str(exc)
+        return ok, "verified_quarantine" if ok else "verification_failed"
+    except Exception as exc:
+        logging.warning("Verified containment unavailable for %s: %s", path, exc)
+        return False, "verified_quarantine_unavailable"
 
 
 def _static_score(static_signals) -> float:
