@@ -909,6 +909,7 @@ conditional_startup_state = {
     'ransomware_indicators': 0,  # Files flagged by the static ransomware heuristic (report-only, not quarantined)
     'persistence_indicators': 0,  # Processes/autostart entries in unusual locations (report-only, not quarantined)
     'yara_suspicious': 0,  # High/critical YARA matches for review (not auto-quarantined)
+    'blocked_threats': 0,  # Initial default only; never reset during a subsequent run
     'last_error': None
 }
 conditional_startup_lock = threading.RLock()
