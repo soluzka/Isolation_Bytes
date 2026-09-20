@@ -251,10 +251,11 @@ def _agent_trigger_scan_response():
         _legacy.commands[device_id] = pending
         # Start every server-side scan generation with its own counters.
         # Do not seed counters from previous quarantine history.
+        # StandaloneAgent resets files_scanned at the beginning of every
+        # full scan, so the live value is already a per-scan counter.
+        # Do not subtract the lifetime total from the current generation.
         baseline_quarantined = 0
-        baseline_files_scanned = max(0, int(
-            agent.get('files_scanned', (agent.get('last_report') or {}).get('files_scanned', 0)) or 0
-        ))
+        baseline_files_scanned = 0
         previous_scan_id = str(agent.get('scan_id') or (agent.get('last_report') or {}).get('scan_id') or '')
         _agent_scan_state[device_id] = {
             'started_at': now,
