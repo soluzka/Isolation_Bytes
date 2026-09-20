@@ -1,0 +1,11 @@
+{
+  "webshell": ["<?php","eval(","base64_decode(","shell_exec(","proc_open(","popen(","cmd.exe","powershell -enc","downloadstring","invoke-expression","child_process.exec","runtime.getruntime().exec"],
+  "credential_theft": ["lsass","sekurlsa","logonpasswords","sam\\","ntds.dit","credential manager","credman","dpapi","login data","cookies.sqlite","logins.json","passwords.sqlite","keychain","mimikatz","browserpassword"],
+  "audio_capture": ["waveinopen","waveinstart","directsoundcapture","iaudioclient","wasapicapture","audiocapturer","captureengine","winmm.dll","avfoundation","pulseaudio","pipewire","portaudio","sounddevice","pyaudio"],
+  "network_control": ["socket(","connect(","ws2_32","wininet","winhttp","urlmon","httpclient","requests.get","requests.post","websocket","dnsquery","getaddrinfo","reverse shell","bindshell","command and control","c2","beacon"],
+  "persistence": ["runonce","currentversion\\run","scheduled task","schtasks","create service","new-service","systemd","launchagents","launchdaemons","cron","startup folder"],
+  "process_injection": ["createremotethread","writeprocessmemory","virtualallocex","ntmapviewofsection","queueuserapc","setthreadcontext","process hollowing","dll injection","reflective loader"],
+  "ransomware": ["your files have been encrypted","decrypt your files","ransom","bitcoin","monero","shadowcopy","vssadmin delete shadows","wbadmin delete catalog","cipher /w","encrypted files"],
+  "exfiltration": ["uploadfile","multipart/form-data","ftp://","sftp://","webhook","pastebin","telegram","discord.com/api/webhooks","sendfile","uploadstring","exfiltration"],
+  "system_acl_tampering": ["icacls.exe","icacls ","/grant administrators:(f)","\\windows\\system32\\advapi32.dll","\\windows\\system32\\kernel32.dll","\\windows\\system32\\ntdll.dll","advapi32.dll /grant administrators","kernel32.dll /grant administrators","ntdll.dll /grant administrators"]
+}
