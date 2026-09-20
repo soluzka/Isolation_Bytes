@@ -199,7 +199,8 @@ def conditional_startup_status_api():
     if not state:
         # Minimal default response expected by the frontend — all counters
         # must be present so the UI never renders NaN or undefined tiles.
-        return jsonify({
+        response = jsonify({
+            'status': 'IDLE',
             'running': False,
             'last_run': None,
             'started_at': None,
@@ -214,9 +215,14 @@ def conditional_startup_status_api():
             'persistence_indicators': 0,
             'yara_suspicious': 0,
             'blocked_threats': 0,
+            'scan_current_path': '',
+            'scan_phase': 'idle',
             'last_error': None,
             'network_monitor_running': bool(globals().get('network_monitor_running'))
         })
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['X-Conditional-Startup-Source'] = 'app'
+        return response
 
     # Copy and add runtime flags to avoid mutating original
     resp = dict(state)
@@ -227,6 +233,7 @@ def conditional_startup_status_api():
     resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
     response = jsonify(resp)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['X-Conditional-Startup-Source'] = 'app'
     return response
 
 # Temporary runtime routes dump for debugging (remove after use)
