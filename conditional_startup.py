@@ -1950,9 +1950,13 @@ def run_conditional_startup_logic(open_browser=True, progress_callback=None, cri
             else:
                 cumulative_persistence[key] = value
 
-        if not continuous or STOP_EVENT.is_set():
+        # Continuous mode is deliberately unbounded. A dashboard stop signal
+        # may interrupt the current file operation, but it must never terminate
+        # the lifetime of the continuous worker. The next pass always starts.
+        if not continuous:
             break
 
+        STOP_EVENT.clear()
         time.sleep(0.25)
 
     if last_result is None:
