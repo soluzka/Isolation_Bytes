@@ -103,7 +103,6 @@ def _canonical_yara_agent_state():
     ransomware_indicators = 0
     persistence_indicators = 0
     last_scan = ''
-    current_path = ''
     current_status = 'idle'
     current_started_at = ''
     running = False
@@ -129,7 +128,6 @@ def _canonical_yara_agent_state():
         marker = _agent_report_marker(agent)
         agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
         agent_started = agent.get('scan_started_at') or report.get('scan_started_at') or ''
-            current_path = agent_path
         if agent_status:
             current_status = agent_status
         if agent_started:
@@ -145,7 +143,7 @@ def _canonical_yara_agent_state():
             # so its timestamp changes before the agent actually begins.
             generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
             if generation_started:
-                running = agent_status in {'scanning', 'queued'} or bool(agent_path)
+                running = agent_status in {'scanning', 'queued'}
                 if agent_status in {'complete', 'stopped'}:
                     _agent_scan_state.pop(device_id, None)
             elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
@@ -221,7 +219,6 @@ def _canonical_yara_agent_state():
         'findings': findings,
         'ml_models': {},
         'last_error': '',
-        'scan_current_path': current_path,
         'scan_status': current_status,
         'scan_started_at': current_started_at,
     }
@@ -249,10 +246,9 @@ def _agent_trigger_scan_response():
             'previous_scan_id': previous_scan_id,
             'baseline_quarantined': baseline_quarantined,
         }
-        agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_current_path': '', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
+        agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
         agent['files_scanned'] = 0
         agent['scan_status'] = 'queued'
-        agent['scan_current_path'] = ''
         agent['scan_started_at'] = agent['last_report']['scan_started_at']
         agent['scan_id'] = ''
         sent += 1
