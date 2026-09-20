@@ -1443,60 +1443,85 @@ def conditional_startup_status():
 
 
 # -- Route for the conditional startup functionality --
-@app.route('/run_startup', methods=['POST'])
-def run_startup():
-    """Start conditional startup scans in the background and return immediately."""
-    try:
-        with conditional_startup_lock:
-            if conditional_startup_state['running']:
-                return jsonify({
-                    "status": "success",
-                    "message": "Conditional startup scan already in progress",
-                    "scan_time": "in progress",
-                    "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-                })
-            now = time.strftime('%Y-%m-%d %H:%M:%S')
-            conditional_startup_state.update({
-                'running': True,
-                'run_id': '',
-                'findings': [],
-                'started_at': now,
-                'last_updated': now,
-                'scanned_files': 0,
-                'quarantined_files': 0,
-                'errors': 0,
-                'process_events': 0,
-                'ml_detections': 0,
-                'ransomware_indicators': 0,
-                'persistence_indicators': 0,
-                'yara_suspicious': 0,
-                'blocked_threats': 0,
-                'duration': None,
-                'last_error': None,
-                'scan_phase': 'starting',
-            })
-            _persist_conditional_startup_state()
+def start_conditional_startup_scan():
+    """Start exactly one live Conditional Startup generation.
+
+    This helper is callable by both the local route and the cloud wrapper, so
+    the cloud's /run_startup endpoint cannot reset counters without starting
+    the actual scanner.
+    """
+    global conditional_startup_thread
+
+    with conditional_startup_lock:
+        _refresh_conditional_startup_state()
+        if conditional_startup_state.get('running'):
+            return {
+                "status": "already_running",
+                "success": True,
+                "accepted": True,
+                "message": "Conditional startup scan already in progress",
+                "run_id": conditional_startup_state.get("run_id", ""),
+            }
+
+        now = time.strftime('%Y-%m-%d %H:%M:%S')
+        run_id = hashlib.sha256(f'{now}:{time.time_ns()}'.encode()).hexdigest()[:24]
+        conditional_startup_state.update({
+            'running': True,
+            'run_id': run_id,
+            'findings': [],
+            'started_at': now,
+            'last_updated': now,
+            'last_run': None,
+            'scanned_files': 0,
+            'quarantined_files': 0,
+            'errors': 0,
+            'process_events': 0,
+            'ml_detections': 0,
+            'ransomware_indicators': 0,
+            'persistence_indicators': 0,
+            'yara_suspicious': 0,
+            'blocked_threats': 0,
+            'duration': None,
+            'last_error': None,
+            'scan_phase': 'starting',
+        })
+        _persist_conditional_startup_state()
 
         logger.info("Starting conditional startup scan in background")
-        global conditional_startup_thread
-        conditional_startup_thread = threading.Thread(target=run_conditional_startup_background, daemon=True)
+        conditional_startup_thread = threading.Thread(
+            target=run_conditional_startup_background,
+            name='conditional-startup-scan',
+            daemon=True,
+        )
         conditional_startup_thread.start()
 
-        return jsonify({
+        return {
             "status": "started",
             "success": True,
             "accepted": True,
             "message": "Conditional startup scan started in background",
-            "scan_time": "running in background (see status panel)",
-            "run_id": conditional_startup_state.get("run_id", ""),
-            "scanned_directories": network_state['monitored_directories'] + folder_watcher_state['monitored_paths'],
-            "timestamp": time.strftime('%Y-%m-%d %H:%M:%S')
-        })
-    except Exception as e:
-        conditional_startup_state['running'] = False
-        logger.error(f"Error running conditional startup: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+            "run_id": run_id,
+            "scanned_directories": (
+                network_state['monitored_directories'] +
+                folder_watcher_state['monitored_paths']
+            ),
+            "timestamp": now,
+        }
 
+
+@app.route('/run_startup', methods=['POST'])
+def run_startup():
+    """Start Conditional Startup and return immediately."""
+    try:
+        return jsonify(start_conditional_startup_scan())
+    except Exception as e:
+        with conditional_startup_lock:
+            conditional_startup_state['running'] = False
+            conditional_startup_state['last_error'] = str(e)
+            conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            _persist_conditional_startup_state()
+        logger.error(f"Error running conditional startup: {e}")
+        return jsonify({"status": "error", "success": False, "message": str(e)}), 500
 
 @app.route('/api/conditional_startup/stop', methods=['POST'])
 def stop_conditional_startup():
