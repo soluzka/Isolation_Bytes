@@ -10,18 +10,24 @@ one monotonic snapshot so the UI cannot jump backward between polls.
 _LAST_COUNTERS = {}
 
 
-def _monotonic_counter(device_id, key, report_value, live_value):
+def _monotonic_counter(device_id, key, report_value, live_value, generation=None):
     try:
         current = max(int(report_value or 0), int(live_value or 0))
     except (TypeError, ValueError):
         current = 0
+
     state = _LAST_COUNTERS.setdefault(device_id, {})
+    if generation and state.get('generation') != generation:
+        # A new scan must start from zero.  The old implementation kept the
+        # previous run's 8,204-style value and then added the new run on top.
+        state.clear()
+        state['generation'] = generation
+
     previous = int(state.get(key, 0) or 0)
-    # A new agent registration may legitimately reset its counters. Without a
-    # reliable restart marker, keep the active dashboard monotonic and let the
-    # agent's cumulative counters remain authoritative for normal operation.
     value = max(previous, current)
     state[key] = value
+    if generation:
+        state['generation'] = generation
     return value
 
 
@@ -35,13 +41,19 @@ def build_complete_agent_scan_results(legacy):
         if not isinstance(findings, list):
             findings = []
 
+        scan_id = str(
+            report.get('scan_id') or ag.get('scan_id') or ''
+        ).strip()
+
         files_scanned = _monotonic_counter(
             device_id, 'files_scanned',
-            report.get('files_scanned', 0), ag.get('files_scanned', 0)
+            report.get('files_scanned', 0), ag.get('files_scanned', 0),
+            scan_id or None
         )
         quarantined_count = _monotonic_counter(
             device_id, 'quarantined_count',
-            report.get('quarantined_count', 0), ag.get('quarantined_count', 0)
+            report.get('quarantined_count', 0), ag.get('quarantined_count', 0),
+            scan_id or None
         )
 
         # Publish the normalized counters back into the shared in-memory agent
@@ -61,6 +73,7 @@ def build_complete_agent_scan_results(legacy):
             'last_scan': ag.get('last_scan') or report.get('last_scan') or report.get('timestamp', ''),
             'findings': findings,
             'quarantined_count': quarantined_count,
+            'scan_id': scan_id,
             'scan_dirs': ag.get('scan_dirs') or report.get('scan_dirs') or [],
         })
         total_findings += len(findings)
