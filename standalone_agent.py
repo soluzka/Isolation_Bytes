@@ -204,9 +204,9 @@ def _is_protected_path(filepath):
             return True
     return False
 SCAN_INTERVAL = 600        # seconds between scans
-MAX_FILES_PER_SCAN = 5000    # full-system scan budget; keeps the agent aligned with dashboard scans
-MAX_SCAN_CYCLE_SECONDS = 600 # allow a full-system scan to run for the dashboard scan window
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_FILES_PER_SCAN = float('inf')  # no artificial file-count ceiling
+MAX_SCAN_CYCLE_SECONDS = float('inf')  # no artificial wall-clock ceiling
+MAX_FILE_SIZE = float('inf')  # no artificial file-size ceiling
 AGENT_VERSION = "1.8.950.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
@@ -1837,14 +1837,9 @@ X-GNOME-Autostart-enabled=true
             '.so', '.dylib',
         }
         # Files to always skip (media, logs, crash dumps)
-        SKIP_EXTENSIONS = {
-            '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp',
-            '.mp3', '.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv',
-            '.wav', '.flac', '.m4a', '.wma', '.aac', '.ogg', '.ico',
-            '.log', '.evtx', '.evt', '.etl', '.dmp', '.mdmp', '.wer', '.cab',
-            '.txt', '.css', '.map', '.svg', '.woff', '.woff2', '.ttf', '.otf',
-            '.eot', '.pdf' if False else '.pdf',  # keep pdf scannable
-        }
+        # No hard-coded extension exclusions in the fallback path.
+        # YARA is content based, so renamed/uncommon files remain eligible.
+        SKIP_EXTENSIONS = set()
         # Try the full scanner first
         try:
             base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -1918,7 +1913,7 @@ X-GNOME-Autostart-enabled=true
                         all_matches = []
                         for r in rules:
                             try:
-                                m = r.match(filepath, timeout=2, fast=True)
+                                m = r.match(filepath, timeout=max(1, int(os.environ.get('YARA_TIMEOUT_SECONDS', '10'))), fast=True)
                                 if m:
                                     all_matches.extend(m)
                             except Exception:
