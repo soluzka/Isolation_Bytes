@@ -219,6 +219,11 @@ server {
     ssl_certificate_key $PRIVKEY;
     location / {
         proxy_pass http://127.0.0.1:5002;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -233,6 +238,11 @@ server {
     server_name isolation-bytes.com;
     location / {
         proxy_pass http://127.0.0.1:5002;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_connect_timeout 10s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -256,7 +266,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=/opt/antivirus-server
-ExecStart=/opt/antivirus-server/venv/bin/gunicorn -w 1 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 wsgi:application
+ExecStart=/opt/antivirus-server/venv/bin/gunicorn --workers 1 --worker-class gthread --threads 8 --timeout 120 --graceful-timeout 30 --keep-alive 5 -b 127.0.0.1:5002 wsgi:application
 Restart=always
 RestartSec=5
 Environment=PYTHONPATH=/opt/antivirus-server
