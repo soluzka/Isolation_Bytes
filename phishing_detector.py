@@ -161,8 +161,20 @@ if __name__ == "__main__":
             print("Phishing indicators found:")
             for kind, value in findings:
                 print(f"  [{kind}] {value}")
-            # Quarantine the file
-            quarantine_dir = os.path.join(os.path.dirname(file_to_scan), "quarantine")
+            # All endpoint quarantine data must stay in the canonical
+            # per-user LocalAppData\IsolationBytes\Quarantine directory.
+            try:
+                from quarantine_utils import QUARANTINE_FOLDER
+                quarantine_dir = QUARANTINE_FOLDER
+            except Exception:
+                quarantine_dir = os.path.join(
+                    os.environ.get(
+                        "LOCALAPPDATA",
+                        os.path.join(os.path.expanduser("~"), "AppData", "Local")
+                    ),
+                    "IsolationBytes",
+                    "Quarantine",
+                )
             os.makedirs(quarantine_dir, exist_ok=True)
             dest = os.path.join(quarantine_dir, os.path.basename(file_to_scan))
             try:
