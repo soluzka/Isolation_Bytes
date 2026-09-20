@@ -3405,7 +3405,7 @@ def cloud_agent_trigger_scan():
         commands[device_id] = pending
         sent += 1
     if sent > 0:
-        return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message': f'Scan triggered for {sent} agent(s). Results will appear shortly.', 'agents': sent, 'agents_triggered': sent})
+        return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message': 'Scan request accepted. Live results will update as agents report progress.', 'error': None, 'agents': sent, 'agents_triggered': sent})
     return jsonify({'ok': False, 'message': 'No connected agents to scan.'}), 404
 
 
