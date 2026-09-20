@@ -1271,11 +1271,8 @@ def run_conditional_startup_background():
     _last_progress_report = 0.0
 
     def report_progress(partial_results):
-        """Update shared state with in-progress counts so the status API
-        reflects live progress instead of appearing stuck at 0/never. This
-        used to only update counts, leaving 'last_run' as 'never' for the
-        entire (sometimes multi-minute) duration of a run, since that field
-        was only ever set once the whole scan finished."""
+        """Publish current-run progress to shared state."""
+        global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
         nonlocal _last_progress_report
         now = time.time()
         if now - _last_progress_report < 0.2:
@@ -1283,8 +1280,6 @@ def run_conditional_startup_background():
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         new_counts = {
-            # These are current-run values from conditional_startup.py.
-            # Do not derive them from any persisted agent history.
             'scanned_files': int(partial_results.get('scanned_files_count') or 0),
             'quarantined_files': len(partial_results.get('quarantined_files') or []),
             'errors': len(partial_results.get('errors') or []),
@@ -1295,9 +1290,6 @@ def run_conditional_startup_background():
             'yara_suspicious': len(partial_results.get('yara_suspicious') or []),
         }
         with conditional_startup_lock:
-            # Publish the scanner's current-run counters directly. These values
-            # are already cumulative for this run; applying deltas here caused
-            # stale/lifetime totals to survive into a new generation.
             conditional_startup_state.update({
                 'running': True,
                 'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
@@ -1313,19 +1305,14 @@ def run_conditional_startup_background():
                 'last_error': str(errors[-1]) if errors else None,
                 'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
             })
-        _persist_conditional_startup_state()
-            # Expose the latest detail lists so the review UI works
-            # even while the scan is still in progress.
-            global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
             latest_yara_suspicious = partial_results.get('yara_suspicious', [])
             latest_ransomware_indicators = partial_results.get('ransomware_indicators', [])
             latest_persistence_indicators = partial_results.get('persistence_indicators', {})
-            # Cache a flattened, reviewable list inside the state so the dashboard
-            # can render it immediately without an extra API round-trip.
             try:
                 conditional_startup_state['findings'] = _findings_for_review()
             except Exception:
                 conditional_startup_state['findings'] = []
+        _persist_conditional_startup_state()
 
     # Start a fresh live generation. Historical findings remain available
     # through the detail lists, but current-run counters must never inherit
@@ -1364,7 +1351,6 @@ def run_conditional_startup_background():
             scan_data = run_conditional_startup_logic(open_browser=False, progress_callback=report_progress, critical_dirs=critical_dirs)
         with conditional_startup_lock:
             record_conditional_startup_run(scan_data, time.time() - start_time)
-        _persist_conditional_startup_state()
             if isinstance(scan_data, dict):
                 latest_yara_suspicious = scan_data.get('yara_suspicious', [])
                 latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
@@ -1373,6 +1359,7 @@ def run_conditional_startup_background():
                 latest_yara_suspicious = []
                 latest_ransomware_indicators = []
                 latest_persistence_indicators = {}
+        _persist_conditional_startup_state()
         logger.info("Conditional startup scan completed")
     except BaseException as e:
         # BaseException so SystemExit raised by imported modules (e.g. missing
