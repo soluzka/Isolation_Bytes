@@ -40,22 +40,23 @@ def ensure_runtime_dir():
 
 def _create_json_if_missing(filename, payload):
     """Create one runtime JSON file without overwriting an existing state file."""
-    path = runtime_path(filename)
-    if os.path.exists(path):
-        return path
-    tmp = path + ".tmp"
     try:
+        path = runtime_path(filename)
+        if os.path.exists(path):
+            return path
+        tmp = path + ".tmp"
         with open(tmp, "w", encoding="utf-8") as handle:
             import json
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
+        return path
     except OSError:
         try:
-            if os.path.exists(tmp):
+            if "tmp" in locals() and os.path.exists(tmp):
                 os.remove(tmp)
         except OSError:
             pass
-    return path
+        return None
 
 
 def ensure_runtime_state_files():
