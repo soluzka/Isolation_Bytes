@@ -501,23 +501,6 @@ def _start_conditional_startup_response():
             'message': str(exc), 'error': str(exc),
         }), 500
 
-    try:
-        import quick_start
-        starter = getattr(quick_start, 'start_conditional_startup_scan', None)
-        if not callable(starter):
-            return jsonify({
-                'ok': False, 'success': False, 'status': 'error',
-                'message': 'Conditional Startup starter is unavailable',
-                'error': 'Conditional Startup starter is unavailable',
-            }), 503
-        return jsonify(starter()), 200
-    except Exception as exc:
-        logger.exception('Failed to start local Conditional Startup: %s', exc)
-        return jsonify({
-            'ok': False, 'success': False, 'status': 'error',
-            'message': str(exc), 'error': str(exc),
-        }), 500
-
 
 def _active_conditional_startup_state():
     """Return the current Conditional Startup state only while it is running."""
