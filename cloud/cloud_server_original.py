@@ -2462,12 +2462,12 @@ _INSTALL_ANDROID_SH = r'''#!/bin/bash
 set -e
 BASE_URL="${ISOLATION_BYTES_SERVER:-https://isolation-bytes.com}"
 echo "Downloading Isolation Bytes APK..."
-curl -L "$BASE_URL/download/IsolationBytes-v1.8.950.0.apk" -o /tmp/IsolationBytes-v1.8.950.0.apk
+curl -L "$BASE_URL/download/IsolationBytes-v1.8.952.0.apk" -o /tmp/IsolationBytes-v1.8.952.0.apk
 if command -v adb &>/dev/null; then
     echo "Installing via adb..."
-    adb install -r /tmp/IsolationBytes-v1.8.950.0.apk
+    adb install -r /tmp/IsolationBytes-v1.8.952.0.apk
 else
-    echo "adb not found. APK saved to /tmp/IsolationBytes-v1.8.950.0.apk"
+    echo "adb not found. APK saved to /tmp/IsolationBytes-v1.8.952.0.apk"
     echo "Transfer to your Android device and install manually."
 fi
 '''
@@ -2661,7 +2661,7 @@ def cloud_checksums():
             checksums[f] = {'sha256': h.hexdigest(), 'size': size}
         except Exception:
             pass
-    result = {'version': '1.8.950.0', 'files': checksums}
+    result = {'version': '1.8.952.0', 'files': checksums}
     cloud_checksums._cache = {'key': cache_key, 'data': result}
     return jsonify(result)
 
@@ -2705,7 +2705,7 @@ def cloud_agent_update_check():
 
     return jsonify({
         'update_available': True,
-        'version': '1.8.950.0',
+        'version': '1.8.952.0',
         'download_url': f'{request.url_root.rstrip("/")}/download/IsolationBytesAgent.exe',
         'sha256': sha256,
         'size': size,
