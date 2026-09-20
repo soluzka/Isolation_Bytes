@@ -1234,9 +1234,6 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
     the status UI always showed 0 regardless of what happened during the
     scan.
     """
-    if STOP_EVENT.is_set():
-        output.write("[conditional_startup] Process scan skipped: stop requested.\n")
-        return
     output.write("[conditional_startup] Scanning running processes...\n")
 
     def on_process_event(event):
@@ -1260,7 +1257,7 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
 
     def _locked_scan_file_for_viruses(filepath):
         with scanner_lock:
-            return scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
+            return scan_utils.scan_file_for_viruses(filepath, stop_event=None)
 
     try:
         process_monitor.scan_running_processes(
@@ -1277,9 +1274,6 @@ def _scan_running_processes_step(process_monitor, scan_utils, results, output, p
 def _scan_processes_hardening_step(process_security, results, output, progress_callback):
     """Run the process hardening scanner (YARA, entropy, signatures, memory)
     and report notable findings into the same process_events stream."""
-    if STOP_EVENT.is_set():
-        output.write("[conditional_startup] Process hardening scan skipped: stop requested.\n")
-        return
     output.write("[conditional_startup] Running process hardening scan...\n")
 
     def on_hardening_event(event):
@@ -1327,9 +1321,6 @@ def _check_persistence_indicators_step(results, output, progress_callback=None):
     location-based signals. Not used for auto-quarantine, same rationale as
     the ML/ransomware checks: these are weak proxies, not proof of malware.
     """
-    if STOP_EVENT.is_set():
-        output.write("[conditional_startup] Persistence check skipped: stop requested.\n")
-        return
     output.write("[conditional_startup] Checking for persistence/execution-location indicators...\n")
     try:
         from security.persistence_checks import run_all_checks
@@ -1545,7 +1536,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
             except Exception:
                 pass
         with scanner_lock:
-            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
+            scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=None)
         with results_lock:
             output.write(f"[conditional_startup] {msg}\n")
             scanned_file_status[filepath] = {
@@ -1861,11 +1852,6 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
         future_file.result()
         future_persistence.result()
         future_hardening.result()
-
-        if STOP_EVENT.is_set():
-            results["log"] = output.getvalue()
-            output.write("[conditional_startup] Stop requested: skipping post-scan steps.\n")
-            return results
 
     _update_phishing_blocklists_step(basedir, output)
     _launch_safe_downloader_step(basedir, output)
