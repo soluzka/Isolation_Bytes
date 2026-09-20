@@ -39,17 +39,18 @@ jobs:
               "'status': 'started'",
               "return jsonify({",
           )
+          # Full-system scan is intentionally a single authoritative agent scan.
+          # Do not require the retired dual-scan markers (Promise.allSettled,
+/run_startup).
           require(
               "templates/index.html",
-              "Promise.allSettled",
               "fetch('/api/agent-trigger-scan'",
-              "fetch('/run_startup'",
+              "Full System Scan has one authoritative owner",
           )
           require(
               "templates/yara_scanner.html",
-              "Promise.allSettled",
               "fetch('/api/agent-trigger-scan'",
-              "fetch('/run_startup'",
+              "This button controls ONE authoritative agent scan generation",
           )
           require(
               "quick_start.py",
