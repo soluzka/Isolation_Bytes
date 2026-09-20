@@ -317,7 +317,14 @@ def _validate_production_config():
 
 
 def _quarantine_dir():
-    return os.path.join(os.environ.get('USERPROFILE', 'C:\\Users\\Default'), 'AppData', 'Local', 'Temp', 'Defender_Quarantine')
+    """Return the application's quarantine directory, never Defender's private store."""
+    return os.path.join(
+        os.environ.get(
+            'ANTIVIRUS_RUNTIME_DIR',
+            os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+        ),
+        'Quarantine'
+    )
 
 
 def _is_safe_quarantine_path(path, base_dir=None):
@@ -1744,10 +1751,9 @@ def scan_report():
     latest = continuous_scan_state.get('last_result', {}) if continuous_scan_state else {}
     quarantine_log = []
     try:
-        log_path = os.path.join(
-            os.environ.get('USERPROFILE', os.path.expanduser('~')),
-            'AppData', 'Local', 'Temp', 'Defender_Quarantine', 'quarantine_log.json'
-        )
+        # Read only the application's own quarantine log; never inspect
+        # Microsoft Defender's private quarantine store.
+        log_path = os.path.join(_quarantine_dir(), 'quarantine_log.json')
         if os.path.exists(log_path):
             with open(log_path, 'r', encoding='utf-8') as f:
                 quarantine_log = json.load(f)
