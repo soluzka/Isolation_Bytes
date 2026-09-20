@@ -112,6 +112,51 @@ EXCLUDED_IMPORTS = [
 # ============================================================
 # BUILD: cloud_server.exe (PyInstaller)
 # ============================================================
+def _run_build_command(cmd, *, cwd=None, log_name="build.log"):
+    """Run a build command while preserving the real child-process diagnostics."""
+    log_path = PROJECT_ROOT / log_name
+    print("  Command:", " ".join(map(str, cmd)))
+    print(f"  Build log: {log_path}")
+    try:
+        with open(log_path, "w", encoding="utf-8", errors="replace") as log:
+            log.write("$ " + " ".join(map(str, cmd)) + "\n\n")
+            result = safe_run(
+                [str(x) for x in cmd],
+                cwd=str(cwd or PROJECT_ROOT),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                check=False,
+            )
+            output = result.stdout or ""
+            print(output, end="" if output.endswith("\n") else "\n")
+            log.write(output)
+    except OSError as exc:
+        print(f"  ERROR: unable to run build command: {exc}")
+        return False
+    if result.returncode != 0:
+        print(f"  ERROR: build command exited with code {result.returncode}")
+        print(f"  Full diagnostics: {log_path}")
+        return False
+    return True
+
+
+def _validate_security_bundle(datas):
+    """Ensure runtime-loaded behavioral rules are packaged with the EXE."""
+    required = PROJECT_ROOT / "security" / "behavioral_indicators.json"
+    if not required.is_file():
+        print(f"ERROR: required security rule file is missing: {required}")
+        return False
+    destination = "security"
+    pair = (str(required), destination)
+    if pair not in datas:
+        datas.append(pair)
+    print(f"  Bundling behavioral indicators: {required.name} -> {destination}/")
+    return True
+
+
 def build_cloud_server():
     print("\n[1/3] Building cloud_server.exe (PyInstaller)...")
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
