@@ -2335,6 +2335,37 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     persistence = results.get('persistence_indicators') or {}
     persistence_count = sum(len(v) for v in persistence.values() if isinstance(v, (list, tuple, dict)))
 
+    # Direct Conditional Startup invocations (the legacy/authenticated route)
+    # do not use the live progress callback, so merge their evidence here too.
+    global latest_errors, latest_process_events, latest_ml_detections
+    global latest_ransomware_indicators, latest_persistence_indicators
+    global latest_yara_suspicious, latest_quarantined_files
+
+    def _merge_history(existing, incoming):
+        merged = list(existing or [])
+        merged.extend(list(incoming or []))
+        return merged
+
+    latest_errors = _merge_history(latest_errors, results.get('errors'))
+    latest_process_events = _merge_history(latest_process_events, results.get('process_events'))
+    latest_ml_detections = _merge_history(latest_ml_detections, results.get('ml_detections'))
+    latest_ransomware_indicators = _merge_history(latest_ransomware_indicators, results.get('ransomware_indicators'))
+    latest_yara_suspicious = _merge_history(latest_yara_suspicious, results.get('yara_suspicious'))
+    latest_quarantined_files = _merge_history(latest_quarantined_files, results.get('quarantined_files'))
+
+    merged_persistence = dict(latest_persistence_indicators or {})
+    for key, value in (persistence or {}).items():
+        if key not in merged_persistence:
+            merged_persistence[key] = value
+        else:
+            suffix = 2
+            candidate = f"{key}#{suffix}"
+            while candidate in merged_persistence:
+                suffix += 1
+                candidate = f"{key}#{suffix}"
+            merged_persistence[candidate] = value
+    latest_persistence_indicators = merged_persistence
+
     conditional_startup_state.update({
         'running': False,
         'last_run': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
