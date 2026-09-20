@@ -2374,14 +2374,14 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
         # Use the stable integer counter so the number never decreases mid-scan.
         # scanned_files is a dict that grows during scanning; len() on it
         # fluctuates when the UI polls mid-run, causing the counter to jump.
-        'scanned_files': int(results.get('scanned_files_count') or 0),
-        'quarantined_files': count('quarantined_files'),
-        'errors': count('errors'),
-        'process_events': count('process_events'),
-        'ml_detections': count('ml_detections'),
-        'ransomware_indicators': count('ransomware_indicators'),
-        'persistence_indicators': persistence_count,
-        'yara_suspicious': count('yara_suspicious'),
+        'scanned_files': max(int(conditional_startup_state.get('scanned_files') or 0), int(results.get('scanned_files_count') or 0)),
+        'quarantined_files': max(int(conditional_startup_state.get('quarantined_files') or 0), count('quarantined_files')),
+        'errors': max(int(conditional_startup_state.get('errors') or 0), count('errors')),
+        'process_events': max(int(conditional_startup_state.get('process_events') or 0), count('process_events')),
+        'ml_detections': max(int(conditional_startup_state.get('ml_detections') or 0), count('ml_detections')),
+        'ransomware_indicators': max(int(conditional_startup_state.get('ransomware_indicators') or 0), count('ransomware_indicators')),
+        'persistence_indicators': max(int(conditional_startup_state.get('persistence_indicators') or 0), persistence_count),
+        'yara_suspicious': max(int(conditional_startup_state.get('yara_suspicious') or 0), count('yara_suspicious')),
         'blocked_threats': conditional_startup_state.get('blocked_threats', 0),
         'last_error': str(error) if error else None,
     })
