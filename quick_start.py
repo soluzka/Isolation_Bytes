@@ -1315,30 +1315,31 @@ def run_conditional_startup_background():
                 conditional_startup_state['findings'] = []
         _persist_conditional_startup_state()
 
-    # Start a fresh live generation. Historical findings remain available
-    # through the detail lists, but current-run counters must never inherit
-    # the previous completed conditional-startup scan.
-    run_started = time.strftime('%Y-%m-%d %H:%M:%S')
-    run_id = hashlib.sha256(
-        f'{run_started}:{time.time_ns()}'.encode()
-    ).hexdigest()[:24]
+    # If the caller already created a live generation, keep its run_id.
+    # Otherwise create one here for direct/internal callers.
     with conditional_startup_lock:
+        existing_run_id = str(conditional_startup_state.get('run_id') or '')
+        already_running = bool(conditional_startup_state.get('running') and existing_run_id)
+        run_started = str(conditional_startup_state.get('started_at') or '') or time.strftime('%Y-%m-%d %H:%M:%S')
+        run_id = existing_run_id or hashlib.sha256(
+            f'{run_started}:{time.time_ns()}'.encode()
+        ).hexdigest()[:24]
         conditional_startup_state.update({
             'run_id': run_id,
-            'findings': [],
+            'findings': [] if not already_running else list(conditional_startup_state.get('findings') or []),
             'running': True,
             'started_at': run_started,
             'last_run': run_started,
-            'last_updated': run_started,
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
             'duration': None,
-            'scanned_files': 0,
-            'quarantined_files': 0,
-            'errors': 0,
-            'process_events': 0,
-            'ml_detections': 0,
-            'ransomware_indicators': 0,
-            'persistence_indicators': 0,
-            'yara_suspicious': 0,
+            'scanned_files': int(conditional_startup_state.get('scanned_files') or 0) if already_running else 0,
+            'quarantined_files': int(conditional_startup_state.get('quarantined_files') or 0) if already_running else 0,
+            'errors': int(conditional_startup_state.get('errors') or 0) if already_running else 0,
+            'process_events': int(conditional_startup_state.get('process_events') or 0) if already_running else 0,
+            'ml_detections': int(conditional_startup_state.get('ml_detections') or 0) if already_running else 0,
+            'ransomware_indicators': int(conditional_startup_state.get('ransomware_indicators') or 0) if already_running else 0,
+            'persistence_indicators': int(conditional_startup_state.get('persistence_indicators') or 0) if already_running else 0,
+            'yara_suspicious': int(conditional_startup_state.get('yara_suspicious') or 0) if already_running else 0,
             'last_error': None,
             'scan_phase': 'starting',
         })
