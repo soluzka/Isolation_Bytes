@@ -100,7 +100,7 @@ def _ensure_spec_excludes(spec_path, modules):
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    marker = 'a = Analysis(\\n'
+    marker = 'a = Analysis(\n'
     if marker not in content:
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
 
@@ -108,17 +108,17 @@ def _ensure_spec_excludes(spec_path, modules):
     if 'excludes=' not in content:
         content = content.replace(
             marker,
-            marker + f'    excludes=[{exclusions}],\\n',
+            marker + f'    excludes=[{exclusions}],\n',
             1,
         )
         print(f'Added PyInstaller spec exclusions: {exclusions}')
 
-    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\\\', '\\\\\\\\')
+    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\', '\\\\')
     hook_entry = f"r'{hook_dir}'"
     if 'pyinstaller_hooks' not in content:
         if 'hookspath=' in content:
             content = re.sub(
-                r'hookspath=\\[([^\\]]*)\\]',
+                r'hookspath=\[([^\]]*)\]',
                 lambda m: f"hookspath=[{m.group(1).strip()}, {hook_entry}]",
                 content,
                 count=1,
@@ -126,7 +126,7 @@ def _ensure_spec_excludes(spec_path, modules):
         else:
             content = content.replace(
                 marker,
-                marker + f'    hookspath=[{hook_entry}],\\n',
+                marker + f'    hookspath=[{hook_entry}],\n',
                 1,
             )
         print(f'Added project PyInstaller hook path: {hook_dir}')
