@@ -214,8 +214,7 @@ def _agent_trigger_scan_response():
         _legacy.commands[device_id] = pending
         _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
         sent += 1
-    # Do not expose the legacy "Scan triggered for ..." text.  The frontend
-    # historically treated that successful status message as an error.
+    # Return a neutral success message; the frontend must not treat success as an error.
     return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True,
                     'message_type': 'success',
                     'message': 'Scan request accepted. Live results will update as agents report progress.',
