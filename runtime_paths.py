@@ -50,13 +50,13 @@ def _create_json_if_missing(filename, payload):
             json.dump(payload, handle, ensure_ascii=False, indent=2)
         os.replace(tmp, path)
         return path
-    except OSError:
+    except OSError as exc:
         try:
             if "tmp" in locals() and os.path.exists(tmp):
                 os.remove(tmp)
         except OSError:
             pass
-        return None
+        raise OSError(f"Unable to create runtime state file {filename}: {exc}") from exc
 
 
 def ensure_runtime_state_files():
