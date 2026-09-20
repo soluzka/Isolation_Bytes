@@ -109,6 +109,37 @@ if ! grep -qE '^ANTIVIRUS_RUNTIME_DIR=' /opt/antivirus-server/.env; then
     printf '\nANTIVIRUS_RUNTIME_DIR=%s\n' "$RUNTIME_DIR" >> /opt/antivirus-server/.env
 fi
 
+# Restore all application-owned JSON state files used by the cloud/dashboard.
+# Create missing files only; never overwrite existing scan history, quarantine
+# records, agent registrations, or block state.
+printf '{}\\n' > /tmp/empty-object.json
+printf '[]\\n' > /tmp/empty-array.json
+
+# Shared cloud state (must exist before gunicorn starts).
+if [ ! -f /opt/antivirus-server/agents.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/agents.json; fi
+if [ ! -f /opt/antivirus-server/agent_commands.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/agent_commands.json; fi
+if [ ! -f /opt/antivirus-server/blocked_ips.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/blocked_ips.json; fi
+if [ ! -f /opt/antivirus-server/blocked_files.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/blocked_files.json; fi
+if [ ! -f /opt/antivirus-server/scan_results.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/scan_results.json; fi
+if [ ! -f /opt/antivirus-server/scan_history.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/scan_history.json; fi
+if [ ! -f /opt/antivirus-server/phishing_alerts.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/phishing_alerts.json; fi
+if [ ! -f /opt/antivirus-server/iocs.json ]; then cp /tmp/empty-array.json /opt/antivirus-server/iocs.json; fi
+if [ ! -f /opt/antivirus-server/trusted_hashes.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/trusted_hashes.json; fi
+if [ ! -f /opt/antivirus-server/yara_rule_reputation.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/yara_rule_reputation.json; fi
+if [ ! -f /opt/antivirus-server/voice_scan_status.json ]; then cp /tmp/empty-object.json /opt/antivirus-server/voice_scan_status.json; fi
+if [ ! -f /opt/antivirus-server/scheduled_scan_state.json ]; then printf '{"enabled": false}\\n' > /opt/antivirus-server/scheduled_scan_state.json; fi
+if [ ! -f /opt/antivirus-server/conditional_startup_state.json ]; then printf '{"running": false, "scanned_files": 0, "quarantined_files": 0, "errors": 0}\\n' > /opt/antivirus-server/conditional_startup_state.json; fi
+
+# Scan cache is intentionally empty on a fresh/repaired deployment.
+mkdir -p /opt/antivirus-server/data
+if [ ! -f /opt/antivirus-server/data/scan_cache.json ]; then printf '{}\\n' > /opt/antivirus-server/data/scan_cache.json; fi
+
+# Quarantine metadata is separate from payloads and is always valid JSON.
+if [ ! -f "$QUARANTINE_DIR/quarantine_log.json" ]; then
+    printf '[]\\n' > "$QUARANTINE_DIR/quarantine_log.json"
+    chmod 600 "$QUARANTINE_DIR/quarantine_log.json"
+fi
+
 # If running interactively, ask for the Cloudflare API token so we can obtain
 # a Let's Encrypt origin certificate. The token is not echoed.
 if [ -t 0 ]; then
