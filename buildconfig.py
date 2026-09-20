@@ -106,33 +106,6 @@ EXCLUDED_IMPORTS = [
 ]
 
 # ============================================================
-# BUILD: IsolationBytesAgent.exe (PyInstaller)
-# ============================================================
-def build_agent():
-    print("\\n[1/3] Building IsolationBytesAgent.exe (PyInstaller)...")
-    spec_path = PROJECT_ROOT / "standalone_agent.spec"
-    if not spec_path.exists():
-        print(f"ERROR: {spec_path} not found")
-        return False
-
-    result = safe_run(
-        [sys.executable, "-m", "PyInstaller", str(spec_path),
-         "--noconfirm", "--distpath", str(DIST_DIR)],
-        cwd=str(PROJECT_ROOT),
-    )
-    if result.returncode != 0:
-        print("FAILED: IsolationBytesAgent.exe build")
-        return False
-
-    exe = DIST_DIR / "IsolationBytesAgent.exe"
-    if not exe.exists():
-        print("ERROR: IsolationBytesAgent.exe not found in dist/")
-        return False
-    print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
-    return True
-
-
-# ============================================================
 # BUILD: cloud_server.exe (PyInstaller)
 # ============================================================
 def build_cloud_server():
@@ -417,14 +390,12 @@ def main():
     do_clean = "--clean" in args
 
     # If specific flags given, only build those
-    if "--cloud" in args or "--launcher" in args or "--agent" in args:
+    if "--cloud" in args or "--launcher" in args:
         build_cloud = "--cloud" in args
         build_launcher_flag = "--launcher" in args
-        build_agent_flag = "--agent" in args
     else:
         build_cloud = True
         build_launcher_flag = True
-        build_agent_flag = True
 
     print(f"\n{'='*60}")
     print(f"  BUILD CONFIGURATION")
@@ -434,7 +405,6 @@ def main():
     print(f"  PUBLIC_URL:    {PUBLIC_URL}")
     print(f"  Build cloud:   {build_cloud}")
     print(f"  Build launcher: {build_launcher_flag}")
-    print(f"  Build agent:    {build_agent_flag}")
     print(f"  Order:         cloud_server.exe first, then launcher embeds it")
 
     if do_clean:
@@ -443,12 +413,10 @@ def main():
     DIST_DIR.mkdir(parents=True, exist_ok=True)
 
     ok = True
-    if build_agent_flag:
-        ok = build_agent() and ok
     if build_cloud:
         ok = build_cloud_server() and ok
     if build_launcher_flag:
-        ok = build_launcher() and ok
+        ok = build_launcher() and ok  # No longer requires cloud_server.exe
 
     print(f"\n{'='*60}")
     if ok:
