@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Dict, Iterable, List
 
 from security.behavioral_malware_detector import analyze_file, quarantine_decision
+from security.static_analysis import analyze_file as analyze_static_file
+from security.yara_behavior import behavior_signals
 
 TRAVERSAL_EXCLUSIONS = {"proc", "sys", "dev"}
 _RULE_SOURCE_SUFFIXES = {".yar", ".yara"}
@@ -111,8 +113,29 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     path = os.path.abspath(path)
     research_asset = _is_security_rule_asset(path)
     evidence = analyze_file(path)
+    static = analyze_static_file(path)
     all_matches = _yara(path) or []
     ml_confidence = _ml_confidence(path, yara_matches=all_matches)
+
+    # Correlate independent static-analysis helpers with the behavioral
+    # detector. Entropy/import evidence is never proof by itself.
+    static_signals = static.get("behavioral_signals", {})
+    static_score = 0.0
+    for value in static_signals.values():
+        try:
+            static_score = max(static_score, float(value) * 100.0)
+        except (TypeError, ValueError):
+            continue
+
+    behavior = behavior_signals(
+        events=[path],
+        persistence_values=[path, *evidence.indicators],
+    )
+    correlated_behavior = dict(evidence.categories)
+    if behavior.get("ransomware", 0.0) > 0:
+        correlated_behavior["ransomware_behavior"] = behavior["ransomware"]
+    if behavior.get("persistence", 0.0) > 0:
+        correlated_behavior["persistence_behavior"] = behavior["persistence"]
 
     # Broad/noisy rules are still executed and retained. They only become
     # decision-grade when independent behavior/ML evidence supports them.
@@ -121,6 +144,7 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         all_matches,
         behavioral_score=evidence.score,
         ml_confidence=ml_confidence,
+        code_analysis_score=static_score,
         confirmed=evidence.suspicious,
     )
     yara_severity = _yara_severity(decision_matches)
@@ -142,6 +166,11 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
             yara_severity=yara_severity,
             yara_matches=decision_matches,
             ml_confidence=ml_confidence,
+            code_analysis_score=static_score,
+            behavioral_signals={
+                **{f"category_{k}": min(100.0, float(v) * 25.0) for k, v in evidence.categories.items()},
+                **{k: float(v) * 100.0 for k, v in behavior.items() if isinstance(v, (int, float))},
+            },
             behavior_score=evidence.score,
             confirmed=evidence.suspicious,
         )
@@ -167,10 +196,16 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         "extension": evidence.extension,
         "magic": evidence.magic,
         "entropy": evidence.entropy,
+        "static_entropy": static.get("entropy", {}),
+        "suspicious_strings": static.get("strings", []),
+        "pe_imports": static.get("imports", {}),
         "printable_ratio": evidence.printable_ratio,
         "behavioral_score": evidence.score,
         "behavioral_confidence": evidence.confidence,
-        "behavioral_categories": evidence.categories,
+        "behavioral_categories": correlated_behavior,
+        "yara_behavior": behavior,
+        "static_behavioral_signals": static_signals,
+        "code_analysis_score": static_score,
         "indicators": evidence.indicators,
         "yara_severity": yara_severity,
         "yara_matches": len(decision_matches),
