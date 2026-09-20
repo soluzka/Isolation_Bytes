@@ -394,7 +394,7 @@ class StandaloneAgent:
                 _startup_log(f"[ERROR] Could not publish runtime JSON {path}: {exc}")
 
     def _reset_scan_state(self):
-        """Start a genuinely new scan generation from the first monitored root."""
+        """Start one persistent scan generation and publish it immediately."""
         self._scan_id = hashlib.sha256(
             f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
         ).hexdigest()[:24]
@@ -410,6 +410,15 @@ class StandaloneAgent:
         # scan_state.json is written first; then publish the same generation
         # to the other runtime JSON documents.
         self._get_yara_scan_state()
+        self._publish_all_runtime_json()
+
+    def _begin_scan_generation(self):
+        """Create the active scan state before any scan traversal begins."""
+        self._scan_status = 'scanning'
+        self._scan_started_at = datetime.datetime.now(
+            datetime.timezone.utc
+        ).isoformat()
+        self._reset_scan_state()
         self._publish_all_runtime_json()
 
     def __init__(self, server_url, api_key='', device_id=None, pair_code=None,
@@ -1087,7 +1096,20 @@ class StandaloneAgent:
                 return
             self._continuous_scan_requested = True
             if self._scan_lock.locked():
-                print("[CMD] Scan request ignored because a scan is already running")
+                print("[CMD] Scan request accepted: continuous scan is already running")
+                return
+            # Publish the active generation BEFORE starting the worker thread.
+            # This makes the LocalAppData JSON files authoritative immediately
+            # when the website command arrives.
+            try:
+                self._begin_scan_generation()
+                self._report([], report_type='scan_progress')
+            except Exception as exc:
+                self._scan_status = 'error'
+                self._last_report_error = f'scan state initialization failed: {exc}'
+                self._publish_all_runtime_json()
+                self._report([], report_type='scan_error')
+                print(f"[CMD] Scan state initialization failed: {exc}")
                 return
             try:
                 import threading
@@ -1097,9 +1119,9 @@ class StandaloneAgent:
                 print(f"[CMD] Scan trigger failed: {e}")
             return
         if action == 'stop_scan':
-            print("[CMD] Continuous scan stop requested")
-            self._continuous_scan_requested = False
-            self._scan_status = 'stopping'
+            # Continuous protection has no cloud stop command. A stale stop
+            # request must never terminate or reset the active normal scan.
+            print("[CMD] Ignoring stop_scan: continuous normal scan is indefinite")
             return
         if action == 'scan_file':
             filepath = cmd.get('file_path', '')
@@ -2943,7 +2965,7 @@ X-GNOME-Autostart-enabled=true
             self._last_report_error = str(e)
             return False
 
-    def _scan_cycle_once(self, continuous=False):
+    def _scan_cycle_once(self, continuous=False, new_generation=False):
         # Only one cloud-triggered full scan may run at a time. Without this
         # guard, repeated scan_now commands can create concurrent os.walk/YARA
         # threads that share the same counters and make progress appear stuck.
@@ -2954,12 +2976,14 @@ X-GNOME-Autostart-enabled=true
             cycle_start = time.time()
             self._scan_cycle_remaining = MAX_FILES_PER_SCAN
             self._scan_status = 'scanning'
-            self._scan_started_at = datetime.datetime.now(
-                datetime.timezone.utc
-            ).isoformat()
-            # Every explicit scan starts a brand-new generation at the
-            # beginning. The JSON state is never used as a skip list.
-            self._reset_scan_state()
+            # A continuous scan has ONE persistent generation. Do not reset the
+            # counters or JSON state at the end of every directory pass.
+            if new_generation or not self._scan_id:
+                self._scan_started_at = datetime.datetime.now(
+                    datetime.timezone.utc
+                ).isoformat()
+                self._reset_scan_state()
+            self._publish_all_runtime_json()
             all_findings = []
             scanned_roots = []
 
@@ -3014,25 +3038,37 @@ X-GNOME-Autostart-enabled=true
             self._scan_lock.release()
 
     def _scan_cycle(self, continuous=False):
-        """Run full scans continuously until explicitly stopped."""
+        """Run the normal scanner continuously; never turn a pass into completion."""
+        generation_started = False
         while self._running:
             try:
-                self._scan_cycle_once(continuous=continuous)
+                self._scan_cycle_once(
+                    continuous=continuous,
+                    new_generation=(continuous and not generation_started) or not continuous,
+                )
+                if continuous:
+                    generation_started = True
             except BaseException as exc:
-                # A single scanner exception must never silently kill the
-                # continuous protection thread.
+                # A scanner exception must not terminate continuous scanning.
                 self._scan_status = 'scanning' if continuous else 'error'
                 self._last_report_error = str(exc)
                 print(f"[SCAN] Scan pass failed; continuous mode will retry: {exc!r}")
                 try:
+                    self._publish_all_runtime_json()
                     self._report([], report_type='scan_error')
                 except Exception:
                     pass
             if not self._running:
                 break
-            time.sleep(1)
-        if continuous and not self._running:
-            self._scan_status = 'stopped'
+            # Immediately start the next normal scan pass. There is no
+            # watchdog/event mode and no completion state in continuous mode.
+            time.sleep(0.1)
+        if continuous:
+            self._scan_status = 'scanning'
+            try:
+                self._publish_all_runtime_json()
+            except Exception:
+                pass
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
