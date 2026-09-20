@@ -455,12 +455,19 @@ _fallback_env = os.path.join(basedir, '.env')
 if os.path.exists(_fallback_env):
     load_dotenv(_fallback_env)
 
-# Expand %ProgramData% and other Windows env vars in runtime dir
-_default_runtime = os.path.join(os.environ.get('ProgramData', r'C:\\ProgramData'), 'AntivirusServer')
+# All mutable scanner state uses the same per-user LocalAppData runtime
+# directory as quick_start.py and the standalone agent.
+_default_runtime = os.path.join(
+    os.environ.get('LOCALAPPDATA') or os.path.join(os.path.expanduser('~'), 'AppData', 'Local'),
+    'IsolationBytes'
+)
 if 'ANTIVIRUS_RUNTIME_DIR' in os.environ:
-    os.environ['ANTIVIRUS_RUNTIME_DIR'] = os.path.expandvars(os.environ['ANTIVIRUS_RUNTIME_DIR'])
+    os.environ['ANTIVIRUS_RUNTIME_DIR'] = os.path.abspath(
+        os.path.expandvars(os.environ['ANTIVIRUS_RUNTIME_DIR'])
+    )
 else:
-    os.environ['ANTIVIRUS_RUNTIME_DIR'] = _default_runtime
+    os.environ['ANTIVIRUS_RUNTIME_DIR'] = os.path.abspath(_default_runtime)
+os.makedirs(os.environ['ANTIVIRUS_RUNTIME_DIR'], exist_ok=True)
 
 # Database configuration
 runtime_dir = os.environ.get('ANTIVIRUS_RUNTIME_DIR', basedir)
