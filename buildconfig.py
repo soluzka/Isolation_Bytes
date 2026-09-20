@@ -109,6 +109,11 @@ EXCLUDED_IMPORTS = [
     "matplotlib", "IPython", "ipykernel", "notebook", "pytest",
     "pydantic",
     "pydantic_core",
+    # The standalone/cloud builds do not use the Crypto namespace. Excluding
+    # both legacy Crypto providers prevents pyinstaller-hooks-contrib from
+    # loading hook-Crypto.py and failing when the provider has no file path.
+    "Crypto",
+    "Cryptodome",
     # Pydantic 2.13.5 is runtime-optional here; excluding it avoids the
     # incompatible PyInstaller hook that probes removed Pydantic v1 APIs.
 ]
