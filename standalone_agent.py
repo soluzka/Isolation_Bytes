@@ -115,6 +115,27 @@ except ImportError:
 from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_check_call, safe_list2cmdline
 from runtime_paths import runtime_path, ensure_runtime_state_files
 
+try:
+    from security.indicator_scans import (
+        ensure_indicator_results,
+        record_yara_suspicious,
+        record_ml_suspicious,
+        record_ransomware_indicator,
+        record_persistence_indicators,
+        record_error,
+        record_process_event,
+        indicator_counts,
+    )
+except ImportError:
+    def ensure_indicator_results(results): return results
+    def indicator_counts(results):
+        p = results.get('persistence_indicators') or {}
+        pc = sum(len(v) if isinstance(v, (list, tuple, dict, set)) else 1 for v in p.values()) if isinstance(p, dict) else len(p)
+        return {k: len(results.get(k) or []) for k in ('yara_suspicious','ml_detections','ransomware_indicators','errors','process_events')} | {'persistence_indicators': pc}
+    record_yara_suspicious = record_ml_suspicious = record_ransomware_indicator = record_process_event = lambda results, *args, **kwargs: None
+    record_persistence_indicators = lambda results, findings: 0
+    record_error = lambda results, stage, error, filepath=None: None
+
 DEFAULT_SERVER = "https://isolation-bytes.com"
 DEFAULT_API_KEY = os.environ.get('CLOUD_API_KEY', '')
 HEARTBEAT_INTERVAL = 10      # seconds between heartbeats
@@ -338,63 +359,96 @@ class StandaloneAgent:
         return state
 
     def _publish_all_runtime_json(self):
-        """Publish the current scan generation to every canonical runtime JSON."""
+        """Publish the active scan plus the complete, dashboard-ready result collections."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         scan_state = self._get_yara_scan_state()
-        scanner_results = getattr(self, "_scanner_results", {}) or {}
+        scanner_results = ensure_indicator_results(getattr(self, "_scanner_results", {}) or {})
+
+        # Keep collection counts authoritative even if a caller recorded an
+        # item directly into a collection instead of updating a legacy counter.
+        ic = indicator_counts(scanner_results)
+        self._total_ml = max(int(self._total_ml), int(ic.get("ml_detections", 0)))
+        self._total_ransomware = max(int(self._total_ransomware), int(ic.get("ransomware_indicators", 0)))
+        self._total_persistence = max(int(self._total_persistence), int(ic.get("persistence_indicators", 0)))
+        self._total_yara = max(int(self._total_yara), int(ic.get("yara_suspicious", 0)))
+        scanner_results["errors_count"] = int(ic.get("errors", 0))
+        scanner_results["process_events_count"] = int(ic.get("process_events", 0))
+
         counts = {
             "files_scanned": int(self._files_scanned),
+            "scanned_files": int(self._files_scanned),
             "quarantined_files": int(self._quarantined_count),
             "blocked_threats": int(self._threats_blocked),
             "findings": int(self._total_findings),
-            "errors": int(scanner_results.get("errors_count", 0) or 0),
-            "process_events": int(scanner_results.get("process_events_count", 0) or 0),
+            "errors": int(ic.get("errors", 0)),
+            "process_events": int(ic.get("process_events", 0)),
             "ml_detections": int(self._total_ml),
             "ransomware_indicators": int(self._total_ransomware),
             "persistence_indicators": int(self._total_persistence),
             "yara_suspicious": int(self._total_yara),
         }
+
+        # This is the canonical result document.  Collections are deliberately
+        # top-level so dashboard/API consumers do not need to know the
+        # conditional_startup_state envelope.
+        result_payload = {
+            "schema_version": 3,
+            "run_id": self._scan_id,
+            "scan_id": self._scan_id,
+            "started_at": self._scan_started_at,
+            "last_updated": now,
+            "complete": self._scan_status == "complete",
+            "running": self._scan_status not in ("idle", "complete", "stopped", "error"),
+            "scan_status": self._scan_status,
+            "scan_phase": "scanning" if self._scan_status not in ("idle", "complete") else self._scan_status,
+            "counts": counts,
+            "scanner_counters": counts,
+            "errors": list(scanner_results.get("errors", []) or [])[-500:],
+            "process_events": list(scanner_results.get("process_events", []) or [])[-500:],
+            "ml_detections": list(scanner_results.get("ml_detections", []) or [])[-500:],
+            "ransomware_indicators": list(scanner_results.get("ransomware_indicators", []) or [])[-500:],
+            "persistence_indicators": dict(scanner_results.get("persistence_indicators", {}) or {}),
+            "yara_suspicious": list(scanner_results.get("yara_suspicious", []) or [])[-500:],
+            "quarantined_files": list(scanner_results.get("quarantined_files", []) or [])[-500:],
+        }
+
+        # Conditional state retains its historical envelope while exposing the
+        # same collections directly for clients that read this file instead.
         conditional = {
-            "schema_version": 2,
-            "running": self._scan_status not in ("idle", "complete"),
+            "schema_version": 3,
+            "running": result_payload["running"],
             "run_id": self._scan_id,
             "findings": int(self._total_findings),
             "started_at": self._scan_started_at,
             "last_updated": now,
-            "last_run": None if self._scan_status not in ("idle", "complete") else now,
+            "last_run": None if result_payload["running"] else now,
             "duration": None,
             "scanned_files": int(self._files_scanned),
             "quarantined_files": int(self._quarantined_count),
-            "errors": int(scanner_results.get("errors_count", 0) or 0),
-            "process_events": int(scanner_results.get("process_events_count", 0) or 0),
+            "errors": int(ic.get("errors", 0)),
+            "process_events": int(ic.get("process_events", 0)),
             "ml_detections": int(self._total_ml),
             "ransomware_indicators": int(self._total_ransomware),
             "persistence_indicators": int(self._total_persistence),
             "yara_suspicious": int(self._total_yara),
             "blocked_threats": int(self._threats_blocked),
-            "scan_phase": "scanning" if self._scan_status not in ("idle", "complete") else self._scan_status,
+            "scan_phase": result_payload["scan_phase"],
             "counts": counts,
             "scanner_counters": counts,
-            "scanner_results": {
-                "schema_version": 2,
-                "run_id": self._scan_id,
-                "started_at": self._scan_started_at,
-                "last_updated": now,
-                "complete": self._scan_status == "complete",
-                "counts": counts,
-                "errors": list(scanner_results.get("errors", []) or [])[-500:],
-                "process_events": list(scanner_results.get("process_events", []) or [])[-500:],
-                "ml_detections": list(scanner_results.get("ml_detections", []) or [])[-500:],
-                "ransomware_indicators": list(scanner_results.get("ransomware_indicators", []) or [])[-500:],
-                "persistence_indicators": dict(scanner_results.get("persistence_indicators", {}) or {}),
-                "yara_suspicious": list(scanner_results.get("yara_suspicious", []) or [])[-500:],
-                "quarantined_files": list(scanner_results.get("quarantined_files", []) or [])[-500:],
-            },
+            "errors_results": result_payload["errors"],
+            "process_event_results": result_payload["process_events"],
+            "ml_detection_results": result_payload["ml_detections"],
+            "ransomware_indicator_results": result_payload["ransomware_indicators"],
+            "persistence_indicator_results": result_payload["persistence_indicators"],
+            "yara_suspicious_results": result_payload["yara_suspicious"],
+            "quarantined_file_results": result_payload["quarantined_files"],
+            "scanner_results": result_payload,
         }
+
         targets = {
             runtime_path("scan_state.json"): scan_state,
             runtime_path("conditional_startup_state.json"): conditional,
-            runtime_path("scanner_results.json"): conditional,
+            runtime_path("scanner_results.json"): result_payload,
         }
         for path, payload in targets.items():
             tmp = path + ".tmp"
@@ -2939,35 +2993,59 @@ X-GNOME-Autostart-enabled=true
     def _report(self, findings, report_type='scan'):
         try:
             yara_status = self._scan_status
-            # Count findings by type for cumulative counters.
+            # Normalize every finding into the canonical indicator collections.
+            ensure_indicator_results(self._scanner_results)
             for f in findings:
-                ttype = (f.get('threat_type') or '').lower()
+                if not isinstance(f, dict):
+                    f = {"description": str(f)}
+                ttype = str(f.get('threat_type') or '').lower()
+                filepath = str(f.get('file') or f.get('path') or '')
                 self._total_findings += 1
-                if not hasattr(self, '_scanner_results'):
-                    self._scanner_results = {
-                        "errors": [], "errors_count": 0,
-                        "process_events": [], "process_events_count": 0,
-                        "ml_detections": [], "ransomware_indicators": [],
-                        "persistence_indicators": {}, "yara_suspicious": [],
-                        "quarantined_files": [],
-                    }
-                if ttype == 'ransomware':
-                    self._scanner_results["ransomware_indicators"].append(dict(f))
-                elif ttype == 'persistence':
-                    self._scanner_results["persistence_indicators"][str(f.get("file") or f.get("path") or len(self._scanner_results["persistence_indicators"]))] = dict(f)
-                elif ttype == 'ml_suspicious':
-                    self._scanner_results["ml_detections"].append(dict(f))
-                elif ttype in ('yara_match', 'blocked') or f.get('rule'):
-                    self._scanner_results["yara_suspicious"].append(dict(f))
 
                 if ttype == 'ransomware':
+                    record_ransomware_indicator(
+                        self._scanner_results, filepath,
+                        str(f.get('reason') or f.get('description') or 'ransomware indicator')
+                    )
                     self._total_ransomware += 1
                 elif ttype == 'persistence':
+                    key = filepath or str(len(self._scanner_results.get("persistence_indicators", {})))
+                    current = dict(self._scanner_results.get("persistence_indicators", {}) or {})
+                    current[key] = dict(f)
+                    record_persistence_indicators(self._scanner_results, current)
                     self._total_persistence += 1
-                elif ttype == 'ml_suspicious':
+                elif ttype == 'ml_suspicious' or f.get('ml_score') is not None:
+                    try:
+                        score = float(f.get('ml_score', f.get('anomaly_score', 0.0)) or 0.0)
+                    except (TypeError, ValueError):
+                        score = 0.0
+                    record_ml_suspicious(
+                        self._scanner_results, filepath, score,
+                        str(f.get('model') or f.get('ml_model') or 'heuristic')
+                    )
                     self._total_ml += 1
-                elif ttype in ('yara_match', 'blocked') or f.get('rule'):
+
+                if ttype in ('yara_match', 'blocked') or f.get('rule') or f.get('yara_rule'):
+                    rules = [str(f.get('rule'))] if f.get('rule') else []
+                    if f.get('yara_rule') and str(f.get('yara_rule')) not in rules:
+                        rules.append(str(f.get('yara_rule')))
+                    severity = str(f.get('severity') or f.get('highest_severity') or 'medium')
+                    record_yara_suspicious(
+                        self._scanner_results, filepath, severity,
+                        rules=rules,
+                        namespaces=list(f.get('namespaces') or [])
+                    )
                     self._total_yara += 1
+
+                # Preserve an explicit indicator object even when its threat
+                # type was not one of the legacy strings.
+                if f.get('indicator_type') == 'process_event':
+                    record_process_event(self._scanner_results, f)
+
+            ic = indicator_counts(self._scanner_results)
+            self._scanner_results["errors_count"] = int(ic.get("errors", 0))
+            self._scanner_results["process_events_count"] = int(ic.get("process_events", 0))
+
 
             timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
             base = {
@@ -3037,6 +3115,7 @@ X-GNOME-Autostart-enabled=true
                     self._last_report_error = f'HTTP {r.status_code}: {r.text[:200]}'
                     break
             self._last_report_ok = all_ok
+            self._publish_all_runtime_json()
             if all_ok:
                 self._last_report_error = ''
             return all_ok
@@ -3102,6 +3181,10 @@ X-GNOME-Autostart-enabled=true
                     scanned_roots.append(canonical)
                 except Exception as exc:
                     print(f"[SCAN] Directory scan error for {dirpath}: {exc}")
+                    ensure_indicator_results(self._scanner_results)
+                    record_error(self._scanner_results, "directory_scan", exc, dirpath)
+                    self._scanner_results["errors_count"] = len(self._scanner_results.get("errors", []))
+                    self._publish_all_runtime_json()
                     continue
             # A continuous scan is never marked complete. Finishing a directory
             # pass only means the next continuous pass begins immediately.
