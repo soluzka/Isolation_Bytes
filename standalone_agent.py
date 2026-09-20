@@ -464,22 +464,11 @@ class StandaloneAgent:
         self._scan_id = hashlib.sha256(
             f'{self.device_id}:{self._scan_started_at}:{time.time_ns()}'.encode()
         ).hexdigest()[:24]
-        self._files_scanned = 0
-        self._threats_blocked = 0
-        self._quarantined_count = 0
-        self._total_findings = 0
-        self._total_ransomware = 0
-        self._total_persistence = 0
-        self._total_yara = 0
-        self._total_ml = 0
+        # Scan-cycle resets only start a new traversal. Indicator evidence and
+        # cumulative indicator counters intentionally persist for the lifetime
+        # of this agent process; they are never cleared between scan passes.
         self._scan_progress_reported = 0
-        self._scanner_results = {
-            "errors": [], "errors_count": 0,
-            "process_events": [], "process_events_count": 0,
-            "ml_detections": [], "ransomware_indicators": [],
-            "persistence_indicators": {}, "yara_suspicious": [],
-            "quarantined_files": [],
-        }
+        ensure_indicator_results(getattr(self, "_scanner_results", {}))
         # scan_state.json is written first; then publish the same generation
         # to the other runtime JSON documents.
         self._get_yara_scan_state()
@@ -514,6 +503,13 @@ class StandaloneAgent:
         self._total_persistence = 0
         self._total_yara = 0
         self._total_ml = 0
+        self._scanner_results = {
+            "errors": [], "errors_count": 0,
+            "process_events": [], "process_events_count": 0,
+            "ml_detections": [], "ransomware_indicators": [],
+            "persistence_indicators": {}, "yara_suspicious": [],
+            "quarantined_files": [],
+        }
         self._last_report_ok = False
         self._last_report_error = ''
         self._scan_status = 'idle'
