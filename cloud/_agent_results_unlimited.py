@@ -64,8 +64,15 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
             if not isinstance(findings, list):
                 findings = []
 
-            files_scanned = int(
-                agent.get("files_scanned", report.get("files_scanned", 0)) or 0
+            # The current StandaloneAgent resets these counters to zero at
+            # the start of every full scan. They are therefore already
+            # per-generation values; never expose the agent's lifetime totals.
+            files_scanned = max(
+                0,
+                int(
+                    agent.get("files_scanned", report.get("files_scanned", 0))
+                    or 0
+                ),
             )
             quarantined_count = max(
                 0,
