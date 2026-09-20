@@ -137,19 +137,13 @@ from data_analysis import load_trusted_hashes
 # reparse point, fall back to the user's AppData\Local directory.
 if getattr(sys, 'frozen', False):
     onedir = os.path.dirname(sys.executable)
-    runtime_dir = onedir
-    # Some packaged locations (e.g. WindowsApps) report W_OK but are not
-    # actually writable for files, so probe by creating a test file.
-    try:
-        test_path = os.path.join(onedir, '.write_probe')
-        with open(test_path, 'w') as f:
-            f.write('probe')
-        os.remove(test_path)
-    except (OSError, IOError, PermissionError):
-        runtime_dir = os.path.join(
-            os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
-            'antivirus_server'
-        )
+    # Never keep mutable scan/quarantine state beside the EXE. The installed
+    # service may be read-only or replaced during deployment. All backends use
+    # the same per-user LocalAppData runtime directory.
+    runtime_dir = os.path.abspath(os.path.join(
+        os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+        'IsolationBytes'
+    ))
     os.makedirs(runtime_dir, exist_ok=True)
     os.environ['ANTIVIRUS_RUNTIME_DIR'] = runtime_dir
     os.chdir(runtime_dir)
@@ -926,6 +920,7 @@ _CONDITIONAL_STATE_DIR = os.environ.get(
     os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
 )
 _CONDITIONAL_STATE_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'conditional_startup_state.json')
+_SCANNER_RESULTS_FILE = os.path.join(_CONDITIONAL_STATE_DIR, 'scanner_results.json')
 
 def _persist_conditional_startup_state():
     """Atomically publish the current Conditional Startup generation."""
@@ -934,10 +929,23 @@ def _persist_conditional_startup_state():
         with conditional_startup_lock:
             payload = dict(conditional_startup_state)
             payload['findings'] = list(payload.get('findings') or [])[:100]
-        tmp = _CONDITIONAL_STATE_FILE + '.tmp'
-        with open(tmp, 'w', encoding='utf-8') as f:
-            json.dump(payload, f, ensure_ascii=False)
-        os.replace(tmp, _CONDITIONAL_STATE_FILE)
+            # Persist every scanner implementation's current counters in one
+            # shared JSON document so all local backends read the same run.
+            payload['scanner_counters'] = {
+                'scanned_files': int(payload.get('scanned_files') or 0),
+                'quarantined_files': int(payload.get('quarantined_files') or 0),
+                'errors': int(payload.get('errors') or 0),
+                'process_events': int(payload.get('process_events') or 0),
+                'ml_detections': int(payload.get('ml_detections') or 0),
+                'ransomware_indicators': int(payload.get('ransomware_indicators') or 0),
+                'persistence_indicators': int(payload.get('persistence_indicators') or 0),
+                'yara_suspicious': int(payload.get('yara_suspicious') or 0),
+            }
+        for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
+            tmp = target + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, target)
     except Exception as exc:
         logger.warning('Could not persist Conditional Startup state: %s', exc)
 
@@ -1280,6 +1288,8 @@ def run_conditional_startup_background():
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         # Publish the scanner's current-run counters directly to the dashboard state.
+        # Keep the durable scanner-results document synchronized with the
+        # exact same progress snapshot used by the dashboard.
         new_counts = {
             'scanned_files': int(partial_results.get('scanned_files_count') or 0),
             'quarantined_files': len(partial_results.get('quarantined_files') or []),
