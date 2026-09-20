@@ -777,7 +777,7 @@ folder_watcher_state = {
         '.git',         # Git repositories
         '$Recycle.Bin', # Recycle bin
         'site-packages', # Python installed packages 
-        'Lib\site-packages', # Python library packages
+        r'Lib\site-packages', # Python library packages
         'pip-',         # Pip installation folders
         'pip_cache',    # Pip cache
         'pip-tmp',      # Pip temporary files
