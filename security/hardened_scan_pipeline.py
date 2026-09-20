@@ -86,12 +86,22 @@ def _yara_severity(matches) -> str:
         return highest
 
 
-def _ml_confidence(path: str, yara_matches=None) -> float:
+def _ml_assessment(path: str, yara_matches=None) -> tuple[float, bool]:
+    """Return ML evidence and whether a fitted model actually supplied it."""
     try:
         from ml_security import security_ml
-        return float(security_ml.file_anomaly_confidence(path, yara_matches=yara_matches))
+        status = security_ml.ml_status()
+        if not status.get("available"):
+            return 0.0, False
+        return float(
+            security_ml.file_anomaly_confidence(path, yara_matches=yara_matches)
+        ), True
     except Exception:
-        return 0.0
+        return 0.0, False
+
+
+def _ml_confidence(path: str, yara_matches=None) -> float:
+    return _ml_assessment(path, yara_matches=yara_matches)[0]
 
 
 def _contain(path: str, reason: str) -> tuple[bool, str]:
@@ -115,7 +125,7 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
     evidence = analyze_file(path)
     static = analyze_static_file(path)
     all_matches = _yara(path) or []
-    ml_confidence = _ml_confidence(path, yara_matches=all_matches)
+    ml_confidence, ml_available = _ml_assessment(path, yara_matches=all_matches)
 
     # Correlate independent static-analysis helpers with the behavioral
     # detector. Entropy/import evidence is never proof by itself.
@@ -213,6 +223,8 @@ def scan_file(path: str, *, quarantine: bool = True) -> Dict[str, object]:
         "yara_broad_matches": rule_stats["broad"],
         "yara_suppressed_matches": rule_stats["suppressed"],
         "ml_confidence": ml_confidence,
+        "ml_available": ml_available,
+        "ml_role": "corroborating_evidence" if ml_available else "unavailable_no_model_verdict",
         "threat_level": threat.get("level", "low"),
         "threat_score": threat.get("score", 0.0),
         "server_context": evidence.server_context,
