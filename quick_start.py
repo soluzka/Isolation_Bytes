@@ -1061,13 +1061,6 @@ def _perform_scan_all():
                                 yara_suspicious.append({'file': file_path, 'rules': rule_names})
 
                             yara_score = yara_risk_score(rule_names)
-                            cache_entry = {
-                                'yara_matches': rule_names,
-                                'yara_score': yara_score,
-                                'quarantined': False,
-                                'reported': False
-                            }
-
                             ml_score = None
                             pe_extensions = ('.exe', '.dll', '.sys', '.scr', '.pif', '.com', '.cpl')
                             file_ext = os.path.splitext(file_path)[1].lower()
