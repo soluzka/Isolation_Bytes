@@ -100,11 +100,11 @@ def _ensure_spec_excludes(spec_path, modules):
         content = f.read()
     if 'excludes=' in content:
         return
-    marker = 'a = Analysis(\\n'
+    marker = 'a = Analysis(\n'
     if marker not in content:
         raise RuntimeError(f'Could not find Analysis() in PyInstaller spec: {spec_path}')
     exclusions = ', '.join(repr(m) for m in modules)
-    content = content.replace(marker, marker + f'    excludes=[{exclusions}],\\n', 1)
+    content = content.replace(marker, marker + f'    excludes=[{exclusions}],\n', 1)
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(content)
     print(f'Added PyInstaller spec exclusions: {exclusions}')
