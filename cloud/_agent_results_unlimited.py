@@ -54,13 +54,18 @@ def build_complete_agent_scan_results(legacy):
             or ""
         ).strip()
 
-        files_scanned = _monotonic_counter(
-            device_id,
-            "files_scanned",
-            report.get("files_scanned", 0),
-            agent.get("files_scanned", 0),
-            scan_id or None,
-        )
+        # A newly active scan owns its own live counter. Never carry the
+        # previous completed scan's count into the current scan display.
+        if (str(agent.get("scan_status") or report.get("scan_status") or "").lower() == "scanning"):
+            files_scanned = int(agent.get("files_scanned", report.get("files_scanned", 0)) or 0)
+        else:
+            files_scanned = _monotonic_counter(
+                device_id,
+                "files_scanned",
+                report.get("files_scanned", 0),
+                agent.get("files_scanned", 0),
+                scan_id or None,
+            )
         quarantined_count = _monotonic_counter(
             device_id,
             "quarantined_count",
