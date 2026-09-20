@@ -1287,13 +1287,15 @@ def _scan_processes_hardening_step(process_security, results, output, progress_c
         with results_lock:
             # Only count actionable / notable findings, not the per-process scan heartbeat
             if event.get('type') in ('malware_found', 'yara_match'):
-                results["process_events"].append(event)
+                from security.indicator_scans import record_process_event
+                record_process_event(results, event)
             elif event.get('type') == 'process_scanned' and (
                 event.get('yara') or
                 (event.get('hashes', {}).get('entropy', 0) > 7.5) or
                 event.get('signed') is False
             ):
-                results["process_events"].append(event)
+                from security.indicator_scans import record_process_event
+                record_process_event(results, event)
 
             if callable(progress_callback):
                 try:
