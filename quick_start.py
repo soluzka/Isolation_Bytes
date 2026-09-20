@@ -943,12 +943,12 @@ def _persist_conditional_startup_state():
             }
             payload['scanner_results'] = {
                 'errors': list(globals().get('latest_errors', []) or [])[-500:],
-                'process_events': list(payload.get('process_events_list') or [])[-500:],
+                'process_events': list(globals().get('latest_process_events', []) or [])[-500:],
                 'ml_detections': list(globals().get('latest_ml_detections', []) or [])[-500:],
                 'ransomware_indicators': list(globals().get('latest_ransomware_indicators', []) or [])[-500:],
                 'persistence_indicators': globals().get('latest_persistence_indicators', {}) or {},
                 'yara_suspicious': list(globals().get('latest_yara_suspicious', []) or [])[-500:],
-                'quarantined_files': list(payload.get('quarantined_files_list') or [])[-500:],
+                'quarantined_files': list(globals().get('latest_quarantined_files', []) or [])[-500:],
             }
         for target in (_CONDITIONAL_STATE_FILE, _SCANNER_RESULTS_FILE):
             tmp = target + '.tmp'
@@ -976,6 +976,8 @@ latest_ransomware_indicators = []  # Full list of ransomware heuristic findings 
 latest_persistence_indicators = {}  # Full persistence findings from the last conditional startup
 latest_errors = []
 latest_ml_detections = []
+latest_process_events = []
+latest_quarantined_files = []
 
 # -- Continuous Scan All state --
 continuous_scan_state = {
@@ -1291,7 +1293,7 @@ def run_conditional_startup_background():
 
     def report_progress(partial_results):
         """Publish current-run progress to shared state."""
-        global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators
+        global latest_yara_suspicious, latest_ransomware_indicators, latest_persistence_indicators, latest_errors, latest_ml_detections, latest_process_events, latest_quarantined_files
         nonlocal _last_progress_report
         now = time.time()
         if now - _last_progress_report < 0.2:
@@ -1332,6 +1334,8 @@ def run_conditional_startup_background():
             latest_persistence_indicators = partial_results.get('persistence_indicators', {}) or {}
             latest_errors = list(partial_results.get('errors') or [])
             latest_ml_detections = list(partial_results.get('ml_detections') or [])
+            latest_process_events = list(partial_results.get('process_events') or [])
+            latest_quarantined_files = list(partial_results.get('quarantined_files') or [])
             try:
                 conditional_startup_state['findings'] = _findings_for_review()
             except Exception:
