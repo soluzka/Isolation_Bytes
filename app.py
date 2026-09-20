@@ -188,52 +188,6 @@ def explain_privileged_msix_operation():
     return None
 
 
-# Ensure the conditional startup status endpoint is always available.
-# Returns the cached conditional_startup_state if present, otherwise a sensible default.
-@app.route('/api/conditional_startup/status', methods=['GET'])
-def conditional_startup_status_api():
-    """Status of the last conditional startup run (guaranteed JSON).
-    This duplicates the intended endpoint if it wasn't registered earlier.
-    """
-    state = globals().get('conditional_startup_state')
-    if not state:
-        # Minimal default response expected by the frontend — all counters
-        # must be present so the UI never renders NaN or undefined tiles.
-        response = jsonify({
-            'status': 'IDLE',
-            'running': False,
-            'last_run': None,
-            'started_at': None,
-            'last_updated': None,
-            'duration': None,
-            'scanned_files': 0,
-            'quarantined_files': 0,
-            'errors': 0,
-            'process_events': 0,
-            'ml_detections': 0,
-            'ransomware_indicators': 0,
-            'persistence_indicators': 0,
-            'yara_suspicious': 0,
-            'blocked_threats': 0,
-            'scan_phase': 'idle',
-            'last_error': None,
-            'network_monitor_running': bool(globals().get('network_monitor_running'))
-        })
-        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-        response.headers['X-Conditional-Startup-Source'] = 'app'
-        return response
-
-    # Copy and add runtime flags to avoid mutating original
-    resp = dict(state)
-    resp.setdefault('status', 'RUNNING' if resp.get('running') else 'IDLE')
-    resp.setdefault('scan_phase', 'scanning' if resp.get('running') else 'idle')
-    resp.setdefault('ml_models', {})
-    resp['network_monitor_running'] = bool(globals().get('network_monitor_running'))
-    response = jsonify(resp)
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
-    response.headers['X-Conditional-Startup-Source'] = 'app'
-    return response
-
 # Temporary runtime routes dump for debugging (remove after use)
 @app.route('/__routes__', methods=['GET'])
 def debug_list_routes():
