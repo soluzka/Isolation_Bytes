@@ -58,13 +58,7 @@ sed -i 's/^llama-cpp-python==/#llama-cpp-python==/' requirements.txt 2>/dev/null
 sed -i 's/^pyinstaller==/#pyinstaller==/' requirements.txt 2>/dev/null || true
 /opt/antivirus-server/venv/bin/pip install --no-cache-dir -r requirements.txt gunicorn 2>&1 | tail -5
 
-# Conditional Startup counters are generation-scoped. Remove only the shared
-# runtime state from the previous deployment; this does not touch quarantine
-# data or scan history.
-rm -f /root/IsolationBytes/conditional_startup_state.json
-rm -f /opt/antivirus-server/conditional_startup_state.json
-
-# 5. Create .env and optionally collect Cloudflare API token
+# Preserve all runtime indicator history across deployments. Existing valid state is retained.\n\n# 5. Create .env and optionally collect Cloudflare API token
 echo "[5/8] Creating .env..."
 if [ ! -f /opt/antivirus-server/.env ]; then
     CLOUD_API_KEY=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
