@@ -20,6 +20,41 @@ import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import warnings
 
+# HARD STARTUP BARRIER: Conditional Startup must create the canonical
+# per-user LocalAppData JSON state before any scanner/indicator work begins.
+# This import is deliberately near the top of this module so a standalone
+# Conditional Startup launch cannot bypass runtime initialization.
+from runtime_paths import ensure_runtime_state_files, ensure_runtime_dir, runtime_path
+
+_RUNTIME_JSON_FILES = (
+    "scan_state.json",
+    "conditional_startup_state.json",
+    "scanner_results.json",
+    "blocked_files.json",
+    "scheduled_scan_state.json",
+    "quarantine_log.json",
+    "scan_cache.json",
+)
+
+
+def _initialize_runtime_state_or_fail():
+    runtime_dir = ensure_runtime_state_files()
+    missing = [
+        name for name in _RUNTIME_JSON_FILES
+        if not os.path.isfile(os.path.join(runtime_dir, name))
+    ]
+    if missing:
+        raise RuntimeError(
+            "Isolation Bytes runtime JSON initialization failed; missing: "
+            + ", ".join(missing)
+            + f" (runtime={runtime_dir})"
+        )
+    return runtime_dir
+
+
+# Create and verify the JSON state files before loading any scanner modules.
+_RUNTIME_DIR = _initialize_runtime_state_or_fail()
+
 # Ensure the base directory is in sys.path for package imports
 basedir = os.path.dirname(os.path.abspath(__file__))
 if basedir not in sys.path:
