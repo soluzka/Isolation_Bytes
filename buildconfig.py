@@ -7,7 +7,7 @@ Builds both EXEs with the same configuration:
 The launcher is a thin client and expects the agent beside it at runtime.
 
 Usage:
-    python buildconfig.py              # build everything (cloud, agent, launcher)
+    python buildconfig.py              # build all targets
     python buildconfig.py --cloud      # only cloud_server.exe
     python buildconfig.py --agent      # only IsolationBytesAgent.exe\n    python buildconfig.py --launcher   # only IsolationBytesLogin.exe
     python buildconfig.py --clean      # clean dist/ then build everything
