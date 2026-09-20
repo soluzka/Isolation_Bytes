@@ -362,4 +362,9 @@ def _intercept_agent_scan_and_yara_quarantine():
 def conditional_startup_status_api():
     if not (session.get('logged_in') or session.get('user_logged_in')):
         return jsonify({'error': 'Authentication required'}), 401
+
+    conditional = _active_conditional_startup_state()
+    if conditional is not None:
+        return jsonify(dict(conditional, status='RUNNING')), 200
+
     return jsonify(_canonical_yara_agent_state()), 200
