@@ -1526,6 +1526,15 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     """Scan a single file, quarantining it if malware is found, and record
     its outcome into results/scanned_file_status."""
     try:
+        # Publish the file before entering the YARA engine so the live dashboard
+        # proves that the actual per-file loop has started.
+        with results_lock:
+            results["scan_current_path"] = filepath
+        if callable(progress_callback):
+            try:
+                progress_callback(results)
+            except Exception:
+                pass
         with scanner_lock:
             scan_success, malware_found, msg = scan_utils.scan_file_for_viruses(filepath, stop_event=STOP_EVENT)
         with results_lock:
@@ -1539,7 +1548,15 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
         # Try YARA scan
         yara_result = None
         try:
+            with results_lock:
+                results["scan_phase"] = "yara"
+            if callable(progress_callback):
+                try:
+                    progress_callback(results)
+                except Exception:
+                    pass
             with scanner_lock:
+                output.write(f"[conditional_startup] ENTER YARA LOOP: {filepath}\n")
                 yara_result = yara_scanner.scan_file_with_yara(filepath)
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
