@@ -1136,13 +1136,12 @@ def _perform_scan_all():
                 logger.error(f'Error scanning directory {directory}: {scan_error}')
                 results.append(f'Error scanning {directory}: {str(scan_error)}')
 
-        # Make the latest YARA ransomware/persistence matches available to the
-        # quarantine button, and update the dashboard counters from this scan.
+        # Keep continuous scan-all results separate from Conditional Startup.
+        # Conditional Startup counters belong exclusively to the current
+        # conditional-startup run and must never be populated by background
+        # continuous scans.
         global latest_yara_suspicious
         latest_yara_suspicious = yara_suspicious
-        conditional_startup_state['yara_suspicious'] = len(yara_suspicious)
-        conditional_startup_state['persistence_indicators'] = persistence_matches
-        conditional_startup_state['ransomware_indicators'] = ransomware_matches
 
 
         duration = time.time() - start_time
@@ -3873,15 +3872,9 @@ def run_scheduled_scans():
             except Exception as e:
                 logger.error(f"Error deleting quarantined files: {str(e)}")
 
-            # Update dashboard counters
-            with conditional_startup_lock:
-                conditional_startup_state['scanned_files'] = conditional_startup_state.get('scanned_files', 0) + scan_files_count
-                conditional_startup_state['quarantined_files'] = conditional_startup_state.get('quarantined_files', 0) + scan_quarantine_count
-                conditional_startup_state['ml_detections'] = conditional_startup_state.get('ml_detections', 0) + scan_ml_hits
-                conditional_startup_state['yara_suspicious'] = conditional_startup_state.get('yara_suspicious', 0) + scan_ransomware_hits + scan_persistence_hits
-                conditional_startup_state['ransomware_indicators'] = conditional_startup_state.get('ransomware_indicators', 0) + scan_ransomware_hits
-                conditional_startup_state['persistence_indicators'] = conditional_startup_state.get('persistence_indicators', 0) + scan_persistence_hits
-                conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
+            # Scheduled/continuous scans have their own counters. Do not
+            # merge them into Conditional Startup; that would resurrect files
+            # and quarantine events from older background scans in the UI.
         
         except Exception as e:
             logger.error(f"Error in scheduled scan: {str(e)}")
@@ -4136,11 +4129,9 @@ def break_the_cycle_engage():
                 except Exception:
                     pass
         results.append(f'AI/ML scanned {ai_scanned} files across {len(all_drives)} drive(s), {ai_hits} high-risk, {ai_quarantined} quarantined')
-        with conditional_startup_lock:
-            conditional_startup_state['scanned_files'] = conditional_startup_state.get('scanned_files', 0) + ai_scanned
-            conditional_startup_state['ml_detections'] = conditional_startup_state.get('ml_detections', 0) + ai_hits
-            conditional_startup_state['quarantined_files'] = conditional_startup_state.get('quarantined_files', 0) + ai_quarantined
-            conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        # This remediation scan is independent of Conditional Startup.
+        # Its counts must not be added to the Conditional Startup generation.
+
     except Exception as e:
         results.append(f'AI analysis error: {e}')
 
