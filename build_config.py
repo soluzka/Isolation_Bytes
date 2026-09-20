@@ -675,6 +675,11 @@ if os.path.isdir(agent_dir):
     if os.path.isfile(agent_exe):
         agent_size = os.path.getsize(agent_exe) / (1024 * 1024)
         print(f'  Agent:   {agent_dir} ({agent_size:.1f} MB)')
+# Show universal launcher if it was built
+launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
+if os.path.isfile(launcher_exe):
+    launcher_size = os.path.getsize(launcher_exe) / (1024 * 1024)
+    print(f'  Launcher: {launcher_exe} ({launcher_size:.1f} MB)')
 if os.path.isfile(pwa_zip):
     pwa_size = os.path.getsize(pwa_zip) / (1024 * 1024)
     print(f'  PWA:     {pwa_zip} ({pwa_size:.1f} MB)')
