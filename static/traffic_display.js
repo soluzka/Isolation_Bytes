@@ -59,41 +59,6 @@
     global.fetch = wrappedFetch;
 })(window);
 
-// Remove the stale successful agent-trigger text if an older status producer
-// puts it into the Index dashboard's red error banner. This is deliberately
-// scoped to the exact success message so real errors remain visible.
-(function installIndexAgentSuccessGuard(global) {
-    const SUCCESS_RE = /^Last error:\s*Scan triggered for \d+ agent\(s\)\./i;
-
-    function scrub(root) {
-        if (!root || !root.querySelectorAll) return;
-        root.querySelectorAll('.alert.alert-danger').forEach(function(node) {
-            const text = (node.textContent || '').trim();
-            if (SUCCESS_RE.test(text)) {
-                node.remove();
-            }
-        });
-    }
-
-    function install() {
-        scrub(document);
-        const observer = new MutationObserver(function(mutations) {
-            mutations.forEach(function(mutation) {
-                mutation.addedNodes.forEach(function(node) {
-                    if (node.nodeType === 1) scrub(node.parentNode || node);
-                });
-            });
-        });
-        observer.observe(document.documentElement || document, {childList: true, subtree: true});
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', install, {once: true});
-    } else {
-        install();
-    }
-})(window);
-
 function unwrapPayload(payload, key) {
     if (payload && typeof payload === 'object' && typeof key === 'string') {
         const match = Object.entries(payload).find(([k, v]) => k === key && v && typeof v === 'object');
