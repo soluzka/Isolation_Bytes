@@ -1260,7 +1260,6 @@ def run_conditional_startup_background():
                 'running': True,
                 'last_updated': time.strftime('%Y-%m:%d %H:%M:%S'),
                 'last_error': str(errors[-1]) if errors else None,
-                'scan_current_path': str(partial_results.get('scan_current_path') or ''),
                 'scan_phase': str(partial_results.get('scan_phase') or 'scanning'),
             })
             # Expose the latest detail lists so the review UI works
@@ -1301,7 +1300,6 @@ def run_conditional_startup_background():
             'persistence_indicators': 0,
             'yara_suspicious': 0,
             'last_error': None,
-            'scan_current_path': '',
             'scan_phase': 'starting',
         })
 
