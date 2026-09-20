@@ -500,14 +500,22 @@ def _agent_trigger_scan_response():
             'baseline_files_scanned': baseline_files_scanned,
             'baseline_quarantined': baseline_quarantined,
         }
-        agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
-        agent['files_scanned'] = 0
-        agent['threats_blocked'] = 0
-        agent['quarantined_count'] = 0
-        agent['quarantine_files'] = []
+        # Start a new scan generation without erasing accumulated evidence.
+        # Historical findings, counters, quarantine records, and scan totals
+        # remain available while the new agent report arrives.
+        scan_started_at = datetime.fromtimestamp(now, timezone.utc).isoformat()
+        previous_report = dict(agent.get('last_report') or {})
+        previous_report.update({
+            'device_id': device_id,
+            'hostname': agent.get('hostname', device_id),
+            'scan_status': 'queued',
+            'scan_started_at': scan_started_at,
+            'last_scan': scan_started_at,
+            'type': 'scan_start',
+        })
+        agent['last_report'] = previous_report
         agent['scan_status'] = 'queued'
-        agent['scan_started_at'] = agent['last_report']['scan_started_at']
-        agent['scan_id'] = ''
+        agent['scan_started_at'] = scan_started_at
         sent += 1
     reset_agent_scan_results_cache()
     return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Scan request accepted. Current-generation results were reset and will update as agents report progress.', 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
