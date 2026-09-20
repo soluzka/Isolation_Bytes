@@ -59,12 +59,17 @@ else:
 # Never use Defender's private quarantine directory or its logs.
 # Prefer the configured application runtime directory so source and frozen
 # builds use the same writable location.
-_runtime_dir = os.environ.get(
-    'ANTIVIRUS_RUNTIME_DIR',
-    os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
-)
-QUARANTINE_FOLDER = os.path.join(_runtime_dir, 'Quarantine')
+try:
+    from config import QUARANTINE_FOLDER, FAILED_QUARANTINE_FOLDER
+except Exception:
+    _runtime_dir = os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+    )
+    QUARANTINE_FOLDER = os.path.join(_runtime_dir, 'Quarantine')
+    FAILED_QUARANTINE_FOLDER = os.path.join(_runtime_dir, 'failed_quarantine')
 os.makedirs(QUARANTINE_FOLDER, exist_ok=True)
+os.makedirs(FAILED_QUARANTINE_FOLDER, exist_ok=True)
 # Set strict permissions on the quarantine folder
 import platform
 import sys
@@ -335,7 +340,7 @@ def quarantine_file(filepath, reason=''):
     FERNET_KEY = os.environ.get('FERNET_KEY')
     if FERNET_KEY is not None and isinstance(FERNET_KEY, str):
         FERNET_KEY = FERNET_KEY.encode()
-    failed_quarantine_folder = os.path.join(basedir, 'failed_quarantine')
+    failed_quarantine_folder = FAILED_QUARANTINE_FOLDER
     os.makedirs(failed_quarantine_folder, exist_ok=True)
     if not FERNET_KEY or len(FERNET_KEY) != 44:
         logging.error(f"FERNET_KEY environment variable must be set to a valid 44-character Fernet key. Quarantine failed for {filepath}.")
@@ -345,7 +350,7 @@ def quarantine_file(filepath, reason=''):
             logging.warning(f"Moved {filepath} to failed_quarantine due to missing/invalid key.")
         except Exception as move_exc:
             logging.error(f"Failed to move {filepath} to failed_quarantine: {move_exc}. Original file left in place.")
-        return
+        return False
     secure_key = SecureBuffer(FERNET_KEY.encode() if isinstance(FERNET_KEY, str) else FERNET_KEY)
     fernet = Fernet(secure_key.get_bytes())
     basename = os.path.basename(filepath)
@@ -400,7 +405,7 @@ def quarantine_file(filepath, reason=''):
             shutil.move(filepath, os.path.join(failed_quarantine_folder, os.path.basename(filepath)))
             logging.warning(f"Moved {filepath} to failed_quarantine due to verification failure.")
             secure_key.zero_and_unlock()
-            return
+            return False
 
         logging.warning(f"Quarantined (encrypted): {filepath}")
         _log_quarantine(filepath, dest, data, reason)
@@ -506,6 +511,7 @@ def quarantine_file(filepath, reason=''):
                             logging.error(f"Could not schedule {filepath} for reboot deletion")
         else:
             logging.warning(f"File already missing when attempting to remove: {filepath}")
+        return True
     except Exception as e:
         logging.error(f"Error encrypting/quarantining {filepath}: {e}")
         # Move file to failed_quarantine
