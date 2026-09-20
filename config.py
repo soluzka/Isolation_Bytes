@@ -83,8 +83,11 @@ HTTPBL_API_KEY = os.environ.get('HTTPBL_API_KEY', '')  # Set this in your .env o
 
 # Encrypted/quarantine folders
 QUARANTINE_FOLDER = os.path.join(
-    os.environ.get('USERPROFILE', os.path.expanduser('~')),
-    'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+    os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+    ),
+    'Quarantine'
 )
 FAILED_QUARANTINE_FOLDER = os.path.join(BASEDIR, 'failed_quarantine')
 ENCRYPTED_FOLDER = os.path.join(BASEDIR, 'encrypted')
