@@ -2964,6 +2964,20 @@ X-GNOME-Autostart-enabled=true
                 'scan_id': self._scan_id,
                 'scan_started_at': self._scan_started_at,
                 'scan_status': self._scan_status,
+                'scanner_counters': {
+                    'scanned_files': int(self._files_scanned),
+                    'quarantined_files': int(self._quarantined_count),
+                    'errors': int((self._scanner_results or {}).get('errors_count', 0) or 0),
+                    'process_events': int((self._scanner_results or {}).get('process_events_count', 0) or 0),
+                    'ml_detections': int(self._total_ml),
+                    'ransomware_indicators': int(self._total_ransomware),
+                    'persistence_indicators': int(self._total_persistence),
+                    'yara_suspicious': int(self._total_yara),
+                },
+                'total_ml': int(self._total_ml),
+                'total_ransomware': int(self._total_ransomware),
+                'total_persistence': int(self._total_persistence),
+                'total_yara': int(self._total_yara),
             }
 
             # Keep each HTTP request well below the server JSON limit while
