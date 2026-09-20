@@ -3877,7 +3877,7 @@ def cloud_quarantine_findings():
             'failed': [],
             'count': len(quarantined),
             'agents_triggered': sent,
-            'message': f'Scan triggered for {sent} agent(s). {len(quarantined)} file(s) quarantined.'
+            'message': f'YARA quarantine request completed for {len(quarantined)} file(s) across {sent} agent(s).'
         })
     except Exception as e:
         logger.error(f'Error in quarantine/findings: {e}')
@@ -5572,8 +5572,9 @@ def cloud_run_startup():
         pending.append({'action': 'scan_now'})
         commands[device_id] = pending
         sent += 1
-    msg = f'Scan triggered for {sent} agent(s).' if sent else 'No agents connected.'
-    return jsonify({'success': True, 'message': msg, 'scan_time': '3s'}), 200
+    if sent:
+        return jsonify({'success': True, 'status': 'started', 'message_type': 'success', 'message': 'Scan request accepted. Live agent results will update as scanning progresses.', 'error': None, 'agents_triggered': sent, 'scan_time': '3s'}), 200
+    return jsonify({'success': False, 'status': 'error', 'message_type': 'error', 'message': 'No agents connected.', 'error': 'No agents connected.', 'agents_triggered': 0}), 404
 
 
 @cloud_bp.route('/api/scan_log', methods=['GET'])
