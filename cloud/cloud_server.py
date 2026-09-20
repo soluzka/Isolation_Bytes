@@ -111,15 +111,8 @@ def _canonical_yara_agent_state():
 
     for device_id, agent in agents.items():
         report = agent.get('last_report') or {}
-        scan_state = _agent_scan_state.get(device_id)
-        if scan_state:
-            scanned_files += max(0, int(agent.get('files_scanned', report.get('files_scanned', 0)) or 0))
-            baseline_quarantined = int(scan_state.get('baseline_quarantined', 0) or 0)
-            raw_quarantined = int(agent.get('quarantined_count', report.get('quarantined_count', 0)) or 0)
-            quarantined_files += max(0, raw_quarantined - baseline_quarantined)
-        else:
-            scanned_files += _live_max(report, agent, 'files_scanned')
-            quarantined_files += _live_max(report, agent, 'quarantined_count')
+        scanned_files += _live_max(report, agent, 'files_scanned')
+        quarantined_files += _live_max(report, agent, 'quarantined_count')
         marker = _agent_report_marker(agent)
         agent_path = agent.get('scan_current_path') or report.get('scan_current_path') or ''
         agent_status = agent.get('scan_status') or report.get('scan_status') or 'idle'
@@ -131,6 +124,7 @@ def _canonical_yara_agent_state():
         if agent_started:
             current_started_at = agent_started
         last_scan = max(last_scan, marker)
+        scan_state = _agent_scan_state.get(device_id)
         pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
         if scan_state:
             started = float(scan_state.get('started_at', 0) or 0)
@@ -222,57 +216,84 @@ def _agent_trigger_scan_response():
     agents = _legacy._all_agents()
     if not agents:
         return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'No connected agents to scan.', 'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
-
     now = time.time()
     sent = 0
     for device_id, agent in agents.items():
-        pending = [
-            cmd for cmd in list(_legacy.commands.get(device_id, []))
-            if cmd.get('action') != 'scan_now'
-        ]
+        pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
         pending.append({'action': 'scan_now'})
         _legacy.commands[device_id] = pending
-
         baseline_quarantined = int(agent.get('quarantined_count', 0) or 0)
-        _agent_scan_state[device_id] = {
-            'started_at': now,
-            'report_marker': _agent_report_marker(agent),
-            'baseline_quarantined': baseline_quarantined,
-        }
-
-        # Reset the live scan result immediately. The next agent report will
-        # populate this record with the new generation's findings/progress.
-        agent['last_report'] = {
-            'device_id': device_id,
-            'hostname': agent.get('hostname', device_id),
-            'findings': [],
-            'results': [],
-            'files_scanned': 0,
-            'quarantined_count': baseline_quarantined,
-            'scan_status': 'queued',
-            'scan_current_path': '',
-            'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(),
-            'scan_id': '',
-            'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(),
-            'type': 'scan_start',
-        }
+        _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent), 'baseline_quarantined': baseline_quarantined}
+        agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_current_path': '', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
         agent['files_scanned'] = 0
         agent['scan_status'] = 'queued'
         agent['scan_current_path'] = ''
         agent['scan_started_at'] = agent['last_report']['scan_started_at']
         agent['scan_id'] = ''
         sent += 1
-
     reset_agent_scan_results_cache()
-    return jsonify({
-        'ok': True,
-        'success': True,
-        'status': 'started',
-        'accepted': True,
-        'message_type': 'success',
-        'message': 'Scan request accepted. Current-generation results were reset and will update as agents report progress.',
-        'error': None,
-        'agents': sent,
-        'agents_triggered': sent,
-    }), 200
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Scan request accepted. Current-generation results were reset and will update as agents report progress.', 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
 
+
+def _yara_only_quarantine_response():
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required', 'quarantined': [], 'failed': [], 'count': 0}), 401
+    agents = _legacy._all_agents()
+    if not agents:
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'No connected agents.', 'error': 'No connected agents.', 'quarantined': [], 'failed': [], 'count': 0, 'agents_triggered': 0}), 404
+    sent = 0
+    targeted = 0
+    for device_id, agent in agents.items():
+        last_report = agent.get('last_report') or {}
+        findings = []
+        seen = set()
+        for finding in last_report.get('findings') or last_report.get('results') or []:
+            if not isinstance(finding, dict):
+                continue
+            path = finding.get('path') or finding.get('original_path')
+            if not path or not _is_yara_finding(finding):
+                continue
+            key = _canonical_path(path)
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            findings.append({'path': path})
+        pending = list(_legacy.commands.get(device_id, []))
+        existing_scan_files = {_canonical_path(cmd.get('file_path', '')) for cmd in pending if cmd.get('action') == 'scan_file'}
+        for finding in findings:
+            path = finding['path']
+            if _canonical_path(path) not in existing_scan_files:
+                pending.append({'action': 'scan_file', 'file_path': path})
+                targeted += 1
+        _legacy.commands[device_id] = pending
+        sent += 1
+    quarantined = []
+    for device_id, agent in agents.items():
+        host = agent.get('hostname', device_id)
+        for qfile in agent.get('quarantine_files') or []:
+            quarantined.append({'hostname': host, 'device_id': device_id, 'filename': qfile.get('filename', ''), 'original_path': qfile.get('original_path', ''), 'quarantined_at': qfile.get('quarantined_at', ''), 'size': qfile.get('size', 0)})
+    return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message_type': 'success', 'quarantined': quarantined, 'failed': [], 'count': len(quarantined), 'agents_triggered': sent, 'targeted_findings': targeted, 'message': f'YARA quarantine queued for {targeted} current finding(s) across {sent} agent(s). Results will refresh after the scan.', 'error': None}), 200
+
+
+def _complete_agent_scan_results_response():
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
+    return jsonify(build_complete_agent_scan_results(_legacy, _agent_scan_state)), 200
+
+
+@app.before_request
+def _intercept_agent_scan_and_yara_quarantine():
+    if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
+        return _agent_trigger_scan_response()
+    if request.method == 'GET' and request.path == '/api/agent-scan-results':
+        return _complete_agent_scan_results_response()
+    if request.method == 'POST' and request.path == '/quarantine/yara-matches':
+        return _yara_only_quarantine_response()
+    return None
+
+
+@app.route('/api/conditional_startup/status', methods=['GET'])
+def conditional_startup_status_api():
+    if not (session.get('logged_in') or session.get('user_logged_in')):
+        return jsonify({'error': 'Authentication required'}), 401
+    return jsonify(_canonical_yara_agent_state()), 200
