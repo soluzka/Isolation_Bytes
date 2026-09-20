@@ -995,7 +995,41 @@ class StandaloneAgent:
                 pass
             return
         if action == 'scan_now':
-            print("[CMD] Scan triggered from cloud dashboard — starting continuous scan")
+            print("[CMD] Scan triggered from cloud dashboard — initializing local runtime JSON state first")
+            # This is the hard boundary: no scan thread is allowed to start
+            # until the canonical LocalAppData JSON documents exist.
+            try:
+                ensure_runtime_state_files()
+                runtime_dir = ensure_runtime_dir()
+                required_json = (
+                    "scan_state.json",
+                    "conditional_startup_state.json",
+                    "scanner_results.json",
+                    "blocked_files.json",
+                    "scheduled_scan_state.json",
+                    "quarantine_log.json",
+                    "scan_cache.json",
+                )
+                missing = [
+                    name for name in required_json
+                    if not os.path.isfile(os.path.join(runtime_dir, name))
+                ]
+                if missing:
+                    raise RuntimeError(
+                        "Runtime JSON initialization incomplete: " + ", ".join(missing)
+                    )
+                self._publish_all_runtime_json()
+                print(f"[CMD] Local runtime JSON initialized in {runtime_dir}")
+            except Exception as exc:
+                self._scan_status = 'error'
+                self._last_report_error = f"runtime JSON initialization failed: {exc}"
+                _startup_log(f"[ERROR] {self._last_report_error}")
+                print(f"[CMD] Scan refused: {self._last_report_error}")
+                try:
+                    self._report([], report_type='scan_error')
+                except Exception:
+                    pass
+                return
             self._continuous_scan_requested = True
             if self._scan_lock.locked():
                 print("[CMD] Scan request ignored because a scan is already running")
