@@ -173,6 +173,11 @@ def _canonical_yara_agent_state():
          if v.get('started_at')),
         default=''
     )
+    # Never report contradictory "Running + idle". If the cloud has an
+    # active scan request but the agent has not published its first scanning
+    # report yet, expose the state as queued until that report arrives.
+    if running and current_status == 'idle':
+        current_status = 'queued'
     scan_generation = active_started or last_scan
 
     return {
