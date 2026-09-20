@@ -367,36 +367,9 @@ def toggle_network_monitor_stop():
             return jsonify({'error': str(e), 'traceback': tb}), 500
     return jsonify({'error': 'Network monitor not available'}), 500
 
-@app.route('/run_startup', methods=['POST'])
-def run_startup_compat():
-    """Trigger conditional startup scan (legacy endpoint)."""
-    fn = globals().get('run_conditional_startup')
-    if callable(fn):
-        try:
-            fn()
-            return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Conditional startup triggered', 'error': None}), 200
-        except Exception as e:
-            logging.error(f'Error running conditional startup: {e}')
-            return jsonify({'message': 'Failed to trigger', 'error': str(e)}), 500
-    # Fallback: set a runtime flag so frontend can poll status
-    globals()['conditional_startup_state'] = {
-        'running': True,
-        'last_run': None,
-        'started_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'duration': None,
-        'scanned_files': 0,
-        'quarantined_files': 0,
-        'errors': 0,
-        'process_events': 0,
-        'ml_detections': 0,
-        'ransomware_indicators': 0,
-        'persistence_indicators': 0,
-        'yara_suspicious': 0,
-        'blocked_threats': 0,
-        'last_error': None
-    }
-    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': 'Conditional startup requested (fallback)', 'error': None}), 200
+# Legacy /run_startup compatibility route removed. The canonical asynchronous
+# route below is the only /run_startup handler so the live YARA progress callback
+# is always used.
 
 # Add direct simple route for network monitored directories (needed by YARA scanner)
 @app.route('/api/network/monitored_directories', methods=['GET'])
