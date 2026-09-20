@@ -217,8 +217,11 @@ MAX_FILE_SIZE = float('inf')
 AGENT_VERSION = "1.8.952.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
-    os.environ.get('USERPROFILE', os.path.expanduser('~')),
-    'AppData', 'Local', 'Temp', 'Defender_Quarantine'
+    os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')
+    ),
+    'Quarantine'
 )
 BLOCKED_FILES_REGISTRY = os.path.join(
     os.environ.get('LOCALAPPDATA', os.environ.get('USERPROFILE', r'C:\Users\Default')),
