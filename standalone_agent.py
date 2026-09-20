@@ -2582,48 +2582,60 @@ X-GNOME-Autostart-enabled=true
         try:
             cycle_start = time.time()
             self._scan_cycle_remaining = MAX_FILES_PER_SCAN
-        self._scan_status = 'scanning'
-        self._scan_started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        self._scan_current_path = ''
+            self._scan_status = 'scanning'
+            self._scan_started_at = datetime.datetime.now(
+                datetime.timezone.utc
+            ).isoformat()
+            self._scan_current_path = ''
             self._scan_progress_reported = self._files_scanned
             all_findings = []
             scanned_roots = []
+
             # Publish the new run immediately so the dashboard cannot display
             # an older completed scan as the current run.
             self._report([], report_type='scan_progress')
-        for dirpath in self._scan_dirs:
-            if not self._running:
-                break
-            if time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
-                break
-            if self._scan_cycle_remaining <= 0:
-                break
-            if not os.path.isdir(dirpath):
-                continue
 
-            # The discovery list intentionally contains detailed subfolders for
-            # visibility, but a drive root already covers every descendant.
-            # Avoid rescanning nested roots and multiplying the workload.
-            canonical = os.path.normcase(os.path.abspath(os.path.realpath(dirpath)))
-            if any(canonical == root or canonical.startswith(root + os.sep)
-                   for root in scanned_roots):
-                continue
+            for dirpath in self._scan_dirs:
+                if not self._running:
+                    break
+                if time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
+                    break
+                if self._scan_cycle_remaining <= 0:
+                    break
+                if not os.path.isdir(dirpath):
+                    continue
 
-            self._scan_current_path = dirpath
-            try:
-                findings = self._scan_directory(dirpath, cycle_start=cycle_start)
-                all_findings.extend(findings)
-                scanned_roots.append(canonical)
-            except Exception as e:
-                print(f"[SCAN] Directory scan error for {dirpath}: {e}")
-                continue
+                # A drive root already covers every descendant. Avoid
+                # rescanning nested roots and multiplying the workload.
+                canonical = os.path.normcase(
+                    os.path.abspath(os.path.realpath(dirpath))
+                )
+                if any(
+                    canonical == root or canonical.startswith(root + os.sep)
+                    for root in scanned_roots
+                ):
+                    continue
+
+                self._scan_current_path = dirpath
+                try:
+                    findings = self._scan_directory(
+                        dirpath, cycle_start=cycle_start
+                    )
+                    all_findings.extend(findings)
+                    scanned_roots.append(canonical)
+                except Exception as exc:
+                    print(f"[SCAN] Directory scan error for {dirpath}: {exc}")
+                    continue
 
             self._scan_current_path = ''
             self._scan_status = 'complete' if self._running else 'stopped'
             if all_findings:
-            print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
-            self._report(all_findings)
-        else:
+                print(
+                    f"[ALERT] Found {len(all_findings)} threat(s)! "
+                    f"Types: {[f.get('threat_type', '?') for f in all_findings]}"
+                )
+                self._report(all_findings)
+            else:
                 self._report([], report_type='heartbeat_scan')
         finally:
             self._scan_lock.release()
