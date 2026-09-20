@@ -1294,11 +1294,17 @@ def _perform_scan_all():
                 results.append(f'Error scanning {directory}: {str(scan_error)}')
 
         # Keep continuous scan-all results separate from Conditional Startup.
-        # Conditional Startup counters belong exclusively to the current
-        # conditional-startup run and must never be populated by background
-        # continuous scans.
+        # Never replace the append-only Conditional Startup history with a
+        # background scan-all result.
         global latest_yara_suspicious
-        latest_yara_suspicious = yara_suspicious
+        merged_yara = list(latest_yara_suspicious or [])
+        seen_yara = {repr(item) for item in merged_yara}
+        for item in list(yara_suspicious or []):
+            marker = repr(item)
+            if marker not in seen_yara:
+                merged_yara.append(item)
+                seen_yara.add(marker)
+        latest_yara_suspicious = merged_yara
 
 
         duration = time.time() - start_time
@@ -1353,32 +1359,69 @@ def _count_persistence_indicators(scan_data):
 
 
 def record_conditional_startup_run(scan_data=None, duration=None, error=None):
-    """Update conditional_startup_state after a run completes or fails."""
+    """Finalize a Conditional Startup pass without discarding accumulated history."""
+    global latest_errors, latest_process_events, latest_ml_detections
+    global latest_ransomware_indicators, latest_persistence_indicators
+    global latest_yara_suspicious, latest_quarantined_files
+
     if not isinstance(scan_data, dict):
         scan_data = {}
-    errors = scan_data.get('errors', [])
-    last_internal = str(errors[-1]) if errors else None
-    conditional_startup_state.update({
-        'running': False,
-        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
-        'duration': round(duration, 2) if duration is not None else None,
-        'scanned_files': int(scan_data.get('scanned_files_count') or 0),
-        'quarantined_files': len(scan_data.get('quarantined_files') or []),
-        'errors': len(errors),
-        'process_events': len(scan_data.get('process_events', [])),
-        'ml_detections': len(scan_data.get('ml_detections') or []),
-        'ransomware_indicators': len(scan_data.get('ransomware_indicators') or []),
-        'persistence_indicators': _count_persistence_indicators(scan_data),
-        'yara_suspicious': len(scan_data.get('yara_suspicious') or []),
-        'last_error': str(error) if error else last_internal,
-    })
-    # Finalize findings from this run only. Do not use setdefault here:
-    # run_startup intentionally initializes findings=[] for every new generation.
-    try:
-        conditional_startup_state['findings'] = _findings_for_review()
-    except Exception:
-        conditional_startup_state['findings'] = list(conditional_startup_state.get('findings') or [])
+
+    def _merge(existing, incoming):
+        merged = list(existing or [])
+        seen = {repr(item) for item in merged}
+        for item in list(incoming or []):
+            marker = repr(item)
+            if marker not in seen:
+                merged.append(item)
+                seen.add(marker)
+        return merged
+
+    latest_errors = _merge(latest_errors, scan_data.get('errors'))
+    latest_process_events = _merge(latest_process_events, scan_data.get('process_events'))
+    latest_ml_detections = _merge(latest_ml_detections, scan_data.get('ml_detections'))
+    latest_ransomware_indicators = _merge(latest_ransomware_indicators, scan_data.get('ransomware_indicators'))
+    latest_yara_suspicious = _merge(latest_yara_suspicious, scan_data.get('yara_suspicious'))
+    latest_quarantined_files = _merge(latest_quarantined_files, scan_data.get('quarantined_files'))
+
+    incoming_persistence = scan_data.get('persistence_indicators') or {}
+    merged_persistence = dict(latest_persistence_indicators or {})
+    if isinstance(incoming_persistence, dict):
+        for key, value in incoming_persistence.items():
+            candidate = str(key)
+            suffix = 2
+            while candidate in merged_persistence and merged_persistence[candidate] != value:
+                candidate = f'{key}#{suffix}'
+                suffix += 1
+            merged_persistence[candidate] = value
+    latest_persistence_indicators = merged_persistence
+
+    scanned_now = int(scan_data.get('scanned_files_count') or 0)
+    persistence_count = len(latest_persistence_indicators)
+    internal_error = str((scan_data.get('errors') or [])[-1]) if scan_data.get('errors') else None
+
+    with conditional_startup_lock:
+        conditional_startup_state.update({
+            'running': False,
+            'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'duration': round(duration, 2) if duration is not None else None,
+            'scanned_files': max(int(conditional_startup_state.get('scanned_files') or 0), scanned_now),
+            'quarantined_files': max(int(conditional_startup_state.get('quarantined_files') or 0), len(latest_quarantined_files)),
+            'errors': max(int(conditional_startup_state.get('errors') or 0), len(latest_errors)),
+            'process_events': max(int(conditional_startup_state.get('process_events') or 0), len(latest_process_events)),
+            'ml_detections': max(int(conditional_startup_state.get('ml_detections') or 0), len(latest_ml_detections)),
+            'ransomware_indicators': max(int(conditional_startup_state.get('ransomware_indicators') or 0), len(latest_ransomware_indicators)),
+            'persistence_indicators': max(int(conditional_startup_state.get('persistence_indicators') or 0), persistence_count),
+            'yara_suspicious': max(int(conditional_startup_state.get('yara_suspicious') or 0), len(latest_yara_suspicious)),
+            'last_error': str(error) if error else internal_error or conditional_startup_state.get('last_error'),
+        })
+        try:
+            conditional_startup_state['findings'] = _findings_for_review()
+        except Exception:
+            conditional_startup_state['findings'] = list(conditional_startup_state.get('findings') or [])
+
+    _persist_conditional_startup_state()
 
 
 def run_conditional_startup_background():
