@@ -1580,12 +1580,10 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                         # Path-based trust: in trusted Windows directories we only
                         # record the hit as suspicious if multiple families matched.
                         if not trusted_path or multi_family:
-                            results["yara_suspicious"].append({
-                                "file": filepath,
-                                "highest_severity": highest,
-                                "rules": rule_names,
-                                "namespaces": sorted(yara_namespaces)
-                            })
+                            from security.indicator_scans import record_yara_suspicious
+                            record_yara_suspicious(
+                                results, filepath, highest, rule_names, sorted(yara_namespaces)
+                            )
 
                     # Critical YARA only forces quarantine if we have confidence.
                     # For protected Windows paths, wait for ML corroboration.
@@ -1693,7 +1691,6 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 "quarantined": False,
                 "error": str(perm_error)
             }
-            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
             if callable(progress_callback):
                 progress_callback(results)
     except Exception as scan_exc:
