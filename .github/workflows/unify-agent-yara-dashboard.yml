@@ -84,7 +84,7 @@ jobs:
           require(
               "standalone_agent.py",
               "from runtime_paths import runtime_path",
-              "self._SCAN_STATE_PATH = runtime_path(\"scan_state.json\")",
+              "_SCAN_STATE_PATH = runtime_path(\"scan_state.json\")",
           )
 
           print("Required Agent/YARA synchronization and LocalAppData state markers are present.")
