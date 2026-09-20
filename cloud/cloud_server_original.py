@@ -2936,13 +2936,32 @@ def github_webhook():
                 pass
         return jsonify({'error': f'deployment update failed: {e}'}), 500
 
-    # Restart only after the new revision passes syntax validation, then
-    # verify the actual localhost origin before reporting deployment success.
+    # Restart only after the new revision passes validation. Windows deployments
+    # use the packaged AntivirusCloudServer service and restart_service.ps1;
+    # Linux deployments use systemd. This keeps the GitHub webhook compatible
+    # with the actual host serving isolation-bytes.com.
     try:
-        restarted = _sp.run(
-            ['systemctl', 'restart', 'antivirus-cloud'],
-            capture_output=True, text=True, timeout=30
-        )
+        if os.name == 'nt':
+            project_root = Path(__file__).resolve().parent.parent
+            restart_script = project_root / 'restart_service.ps1'
+            if not restart_script.exists() and getattr(sys, 'frozen', False):
+                restart_script = Path(sys.executable).resolve().parent / 'restart_service.ps1'
+            if not restart_script.exists():
+                return jsonify({
+                    'error': 'Windows deployment script not found',
+                    'details': str(restart_script),
+                }), 500
+            restarted = _sp.run(
+                ['powershell.exe', '-NoProfile', '-ExecutionPolicy', 'Bypass',
+                 '-File', str(restart_script)],
+                cwd=str(project_root),
+                capture_output=True, text=True, timeout=300
+            )
+        else:
+            restarted = _sp.run(
+                ['systemctl', 'restart', 'antivirus-cloud'],
+                capture_output=True, text=True, timeout=30
+            )
         if restarted.returncode != 0:
             return jsonify({
                 'error': 'service restart failed',
@@ -2951,13 +2970,20 @@ def github_webhook():
 
         healthy = False
         health_error = ''
-        for _attempt in range(20):
+        for _attempt in range(30):
             try:
-                probe = _sp.run(
-                    ['curl', '-fsS', '--max-time', '5', '-o', '/dev/null',
-                     'http://127.0.0.1:5002/'],
-                    capture_output=True, text=True, timeout=8
-                )
+                if os.name == 'nt':
+                    probe = _sp.run(
+                        [sys.executable, '-c',
+                         'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/", timeout=5).read(1)'],
+                        capture_output=True, text=True, timeout=8
+                    )
+                else:
+                    probe = _sp.run(
+                        ['curl', '-fsS', '--max-time', '5', '-o', '/dev/null',
+                         'http://127.0.0.1:5002/'],
+                        capture_output=True, text=True, timeout=8
+                    )
                 if probe.returncode == 0:
                     healthy = True
                     break
@@ -2968,26 +2994,18 @@ def github_webhook():
 
         if not healthy:
             details = health_error
-            try:
-                status = _sp.run(
-                    ['systemctl', '--no-pager', '--full', 'status',
-                     'antivirus-cloud'],
-                    capture_output=True, text=True, timeout=15
-                )
-                details = (status.stdout or status.stderr or details).strip()
-            except Exception:
-                pass
-            if previous_revision:
-                _sp.run(
-                    ['git', 'reset', '--hard', previous_revision],
-                    cwd=str(BASE_DIR), capture_output=True, text=True, timeout=60
-                )
-                _sp.run(
-                    ['systemctl', 'restart', 'antivirus-cloud'],
-                    capture_output=True, text=True, timeout=30
-                )
+            if os.name != 'nt':
+                try:
+                    status = _sp.run(
+                        ['systemctl', '--no-pager', '--full', 'status',
+                         'antivirus-cloud'],
+                        capture_output=True, text=True, timeout=15
+                    )
+                    details = (status.stdout or status.stderr or details).strip()
+                except Exception:
+                    pass
             return jsonify({
-                'error': 'deployment health check failed; previous revision restored',
+                'error': 'deployment health check failed',
                 'details': details,
             }), 500
     except Exception as e:
