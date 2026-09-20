@@ -2508,8 +2508,6 @@ X-GNOME-Autostart-enabled=true
         findings = []
         if not os.path.isdir(dirpath):
             return findings
-        if not hasattr(self, '_skipped_files'):
-            self._skipped_files = set()
         # Never scan the scanner's own runtime state or quarantine tree.
         # Full-PC roots such as C:\\ and C:\\Users would otherwise recurse
         # into LocalAppData\\IsolationBytes and count historical quarantine
@@ -2547,9 +2545,6 @@ X-GNOME-Autostart-enabled=true
                     dirs[:] = []
                     break
                 filepath = os.path.join(root, filename)
-                # Skip files we've already failed to access (persists across scan cycles)
-                if filepath in self._skipped_files:
-                    continue
                 try:
                     if os.path.getsize(filepath) > MAX_FILE_SIZE:
                         continue
@@ -2604,7 +2599,6 @@ X-GNOME-Autostart-enabled=true
                                 'blocked': True,
                             })
                             continue
-                        self._skipped_files.add(filepath)
                         continue
                     matches = self._scan_file_yara(filepath)
                     if matches:
