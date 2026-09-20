@@ -10,6 +10,10 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <UseWindowsForms>false</UseWindowsForms>
     <UseWPF>false</UseWPF>
+    <AssemblyTitle>Isolation Bytes Protected Admin</AssemblyTitle>
+    <AssemblyProduct>Isolation Bytes</AssemblyProduct>
+    <AssemblyCompany>soluzka</AssemblyCompany>
+    <Version>1.8.952.0</Version>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.ServiceProcess.ServiceController" Version="8.0.0" />
