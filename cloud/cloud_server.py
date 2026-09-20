@@ -126,11 +126,18 @@ def _canonical_yara_agent_state():
         last_scan = max(last_scan, marker)
         scan_state = _agent_scan_state.get(device_id)
         pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
+        current_scan_id = str(agent.get('scan_id') or report.get('scan_id') or '')
         if scan_state:
             started = float(scan_state.get('started_at', 0) or 0)
-            previous_marker = str(scan_state.get('report_marker') or '')
-            if marker and marker != previous_marker:
-                _agent_scan_state.pop(device_id, None)
+            previous_scan_id = str(scan_state.get('previous_scan_id') or '')
+            # Do not use last_scan/timestamp as the generation boundary.
+            # The server publishes a synthetic scan-start report immediately,
+            # so its timestamp changes before the agent actually begins.
+            generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
+            if generation_started:
+                running = agent_status in {'scanning', 'queued'} or bool(agent_path)
+                if agent_status in {'complete', 'stopped'}:
+                    _agent_scan_state.pop(device_id, None)
             elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
                 running = True
             else:
@@ -223,7 +230,13 @@ def _agent_trigger_scan_response():
         pending.append({'action': 'scan_now'})
         _legacy.commands[device_id] = pending
         baseline_quarantined = int(agent.get('quarantined_count', 0) or 0)
-        _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent), 'baseline_quarantined': baseline_quarantined}
+        previous_scan_id = str(agent.get('scan_id') or (agent.get('last_report') or {}).get('scan_id') or '')
+        _agent_scan_state[device_id] = {
+            'started_at': now,
+            'report_marker': _agent_report_marker(agent),
+            'previous_scan_id': previous_scan_id,
+            'baseline_quarantined': baseline_quarantined,
+        }
         agent['last_report'] = {'device_id': device_id, 'hostname': agent.get('hostname', device_id), 'findings': [], 'results': [], 'files_scanned': 0, 'quarantined_count': baseline_quarantined, 'scan_status': 'queued', 'scan_current_path': '', 'scan_started_at': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'scan_id': '', 'last_scan': datetime.fromtimestamp(now, timezone.utc).isoformat(), 'type': 'scan_start'}
         agent['files_scanned'] = 0
         agent['scan_status'] = 'queued'
