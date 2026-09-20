@@ -341,6 +341,7 @@ class StandaloneAgent:
         """Publish the current scan generation to every canonical runtime JSON."""
         now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         scan_state = self._get_yara_scan_state()
+        scanner_results = getattr(self, "_scanner_results", {}) or {}
         conditional = {
             "running": self._scan_status not in ("idle", "complete"),
             "run_id": self._scan_id,
@@ -351,8 +352,8 @@ class StandaloneAgent:
             "duration": None,
             "scanned_files": int(self._files_scanned),
             "quarantined_files": int(self._quarantined_count),
-            "errors": 0,
-            "process_events": 0,
+            "errors": int(scanner_results.get("errors_count", 0) or 0),
+            "process_events": int(scanner_results.get("process_events_count", 0) or 0),
             "ml_detections": int(self._total_ml),
             "ransomware_indicators": int(self._total_ransomware),
             "persistence_indicators": int(self._total_persistence),
@@ -370,13 +371,13 @@ class StandaloneAgent:
                 "yara_suspicious": int(self._total_yara),
             },
             "scanner_results": {
-                "errors": [],
-                "process_events": [],
-                "ml_detections": [],
-                "ransomware_indicators": [],
-                "persistence_indicators": {},
-                "yara_suspicious": [],
-                "quarantined_files": [],
+                "errors": list(scanner_results.get("errors", []) or [])[-500:],
+                "process_events": list(scanner_results.get("process_events", []) or [])[-500:],
+                "ml_detections": list(scanner_results.get("ml_detections", []) or [])[-500:],
+                "ransomware_indicators": list(scanner_results.get("ransomware_indicators", []) or [])[-500:],
+                "persistence_indicators": dict(scanner_results.get("persistence_indicators", {}) or {}),
+                "yara_suspicious": list(scanner_results.get("yara_suspicious", []) or [])[-500:],
+                "quarantined_files": list(scanner_results.get("quarantined_files", []) or [])[-500:],
             },
         }
         targets = {
@@ -407,6 +408,13 @@ class StandaloneAgent:
         self._total_yara = 0
         self._total_ml = 0
         self._scan_progress_reported = 0
+        self._scanner_results = {
+            "errors": [], "errors_count": 0,
+            "process_events": [], "process_events_count": 0,
+            "ml_detections": [], "ransomware_indicators": [],
+            "persistence_indicators": {}, "yara_suspicious": [],
+            "quarantined_files": [],
+        }
         # scan_state.json is written first; then publish the same generation
         # to the other runtime JSON documents.
         self._get_yara_scan_state()
