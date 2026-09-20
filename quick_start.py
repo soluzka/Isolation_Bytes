@@ -1437,9 +1437,9 @@ def run_conditional_startup_background():
                     continuous=True,
                 )
 
-            # Keep the continuous generation alive instead of recording a
-            # completed/idle state. Counters represent the latest live pass;
-            # findings are refreshed for the next pass.
+            # Continuous protection never publishes a completed/idle pass.
+            # The inner scan pass returns only so the next pass can begin;
+            # externally the worker remains RUNNING for its entire lifetime.
             if isinstance(scan_data, dict):
                 latest_yara_suspicious = scan_data.get('yara_suspicious', [])
                 latest_ransomware_indicators = scan_data.get('ransomware_indicators', [])
@@ -1447,10 +1447,9 @@ def run_conditional_startup_background():
                 with conditional_startup_lock:
                     conditional_startup_state.update({
                         'running': True,
-                        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
                         'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
                         'duration': round(time.time() - start_time, 2),
-                        'scan_phase': 'continuous-wait',
+                        'scan_phase': 'scanning',
                         'last_error': None,
                     })
                     try:
@@ -1458,7 +1457,6 @@ def run_conditional_startup_background():
                     except Exception:
                         conditional_startup_state['findings'] = []
             _persist_conditional_startup_state()
-            logger.info("Conditional startup scan pass completed; continuing continuous protection")
         except BaseException as e:
             logger.error(f"Error running continuous conditional startup scan: {e!r}")
             with conditional_startup_lock:
@@ -1471,9 +1469,8 @@ def run_conditional_startup_background():
                 })
             _persist_conditional_startup_state()
 
-        # Brief yield between full passes. The next pass always starts.
-        # Do not consult STOP_EVENT here: continuous protection is indefinite.
-        time.sleep(2)
+        # No completion state and no inter-pass sleep. The next scan begins
+        # immediately; continuous protection is one uninterrupted lifetime.
 
     # This point is unreachable during normal continuous protection. Keep the
     # state finalization only as a defensive fallback if the Python process is
