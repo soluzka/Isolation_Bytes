@@ -1786,8 +1786,10 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
     yara_scanner = modules['yara_scanner']
     quarantine_utils = modules['quarantine_utils']
 
-    while True:
-        for folder in monitored_folders:
+    # One invocation performs one complete traversal of every monitored folder.
+    # Cross-run persistence is handled separately; there is intentionally no
+    # "already scanned" set here, so every new run revisits every eligible file.
+    for folder in monitored_folders:
             for root, dirs, files in os.walk(folder):
                 if "OneDriveTemp" in root:
                     continue
@@ -1813,8 +1815,9 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
                         progress_callback,
                     )
 
-        # Deliberately do not return. The next traversal starts immediately
-        # inside the same scan operation, with no completion state or pause.
+    # Return after the full traversal. Continuous mode is implemented by the
+    # outer run_conditional_startup_logic() loop, which starts a fresh traversal
+    # and therefore rescans every monitored path/file on each pass.
 
 def _open_browser_when_ready(output):
     """Wait for the local server to come up, then open it in a browser."""
