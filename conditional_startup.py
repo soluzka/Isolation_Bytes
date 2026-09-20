@@ -19,6 +19,7 @@ import time
 import webbrowser
 from concurrent.futures import ThreadPoolExecutor
 import warnings
+import uuid
 
 # HARD STARTUP BARRIER: Conditional Startup must create the canonical
 # per-user LocalAppData JSON state before any scanner/indicator work begins.
@@ -1409,6 +1410,42 @@ def _launch_safe_downloader_step(basedir, output):
         output.write("[conditional_startup] safe_downloader.py started as background process.\n")
 
 
+def _sync_scan_state_from_results(results, status=None):
+    """Mirror Conditional Startup's live counters into canonical scan_state.json."""
+    try:
+        path = runtime_path("scan_state.json")
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                state = json.load(handle) or {}
+        except (OSError, ValueError, TypeError):
+            state = {}
+        scan_id = str(state.get("scan_id") or uuid.uuid4())
+        state.update({
+            "scan_id": scan_id,
+            "status": status or ("complete" if results.get("_scan_complete") else "scanning"),
+            "started_at": state.get("started_at") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "complete": bool(status == "complete" or results.get("_scan_complete")),
+            "files_scanned": int(results.get("scanned_files_count") or 0),
+            "quarantined_count": len(results.get("quarantined_files") or []),
+            "threats_blocked": int(results.get("blocked_threats") or 0),
+            "findings": len(results.get("results") or []),
+            "ransomware_indicators": len(results.get("ransomware_indicators") or []),
+            "persistence_indicators": sum(len(v) if isinstance(v, (list, tuple, dict, set)) else 1 for v in (results.get("persistence_indicators") or {}).values()),
+            "yara_suspicious": len(results.get("yara_suspicious") or []),
+            "ml_suspicious": len(results.get("ml_detections") or []),
+            "errors": len(results.get("errors") or []),
+            "process_events": len(results.get("process_events") or []),
+            "last_error": (results.get("errors") or [])[-1] if results.get("errors") else None,
+        })
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+        os.replace(tmp, path)
+    except (OSError, TypeError, ValueError) as exc:
+        logging.getLogger(__name__).debug("Could not mirror Conditional Startup to scan_state.json: %s", exc)
+
+
 def _load_scheduled_scan_state(state_file, output):
     """Read scheduled_scan_state.json, returning whether scans are enabled."""
     candidates = [state_file, get_resource_path('scheduled_scan_state.json')]
@@ -1834,6 +1871,17 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
 
 
     output = io.StringIO()
+
+    original_progress_callback = progress_callback
+    def _publish_progress(current_results):
+        _sync_scan_state_from_results(current_results)
+        if callable(original_progress_callback):
+            try:
+                original_progress_callback(current_results)
+            except Exception as exc:
+                output.write(f"[WARNING] progress_callback raised: {exc}\\n")
+    progress_callback = _publish_progress
+
     results = {
         "scanned_files": {},
         "scanned_files_count": 0,  # stable integer — only incremented when a file finishes
@@ -1912,6 +1960,8 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
 
     results["results"] = _build_scanned_results(results, scanned_file_status)
     results["log"] = output.getvalue()
+    results["_scan_complete"] = True
+    _sync_scan_state_from_results(results, status="complete")
 
     # Persist the detailed log in the module folder and writable runtime folder.
     _persist_conditional_startup_log(results["log"], basedir)
