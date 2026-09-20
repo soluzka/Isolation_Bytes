@@ -10,6 +10,22 @@ from cloud import cloud_server_original as _legacy
 from cloud._agent_results_unlimited import build_complete_agent_scan_results, reset_agent_scan_results_cache
 
 app = _legacy.app
+
+
+def create_cloud_app():
+    """Return the already-configured cloud Flask app for WSGI servers.
+
+    The compatibility layer patches the legacy app at module import time, so
+    WSGI entry points must return this same instance rather than constructing
+    a second unpatched Flask application.
+    """
+    return app
+
+
+# Export the legacy blueprint for callers that historically imported it from
+# cloud.cloud_server rather than cloud.cloud_server_original.
+cloud_bp = getattr(_legacy, 'cloud_bp', None)
+
 _agent_scan_state = {}
 _AGENT_SCAN_STALE_SECONDS = 30 * 60
 
@@ -171,7 +187,16 @@ def _canonical_yara_agent_state():
         elif pending_scan:
             running = True
 
-        report_findings = report.get('findings') or report.get('results') or []
+        # Never expose a heartbeat/report as a current scan unless this
+        # process owns an explicit scan generation for the agent. This prevents
+        # stale findings from a previous process/restart from becoming a new
+        # scan generation.
+        report_findings = []
+        if scan_state:
+            previous_scan_id = str(scan_state.get('previous_scan_id') or '')
+            generation_started = bool(current_scan_id and current_scan_id != previous_scan_id)
+            if generation_started:
+                report_findings = report.get('findings') or report.get('results') or []
         for finding in report_findings:
             if not isinstance(finding, dict) or not _is_yara_finding(finding):
                 continue
@@ -470,15 +495,35 @@ def _complete_agent_scan_results_response():
             'message': 'Conditional Startup is the current dashboard scan generation.',
         }), 200
 
+    # Cloud deployments do not run the Windows Conditional Startup worker.
+    # Fall back to the server-owned connected-agent generation instead of
+    # returning a false empty scan.
+    state = _canonical_yara_agent_state()
+    findings = state.get('findings') or []
+    scanned = int(state.get('scanned_files') or 0)
+    quarantined = int(state.get('quarantined_files') or 0)
+    running = bool(state.get('running'))
     return jsonify({
         'ok': True,
         'success': True,
-        'agents': [],
-        'total_files_scanned': 0,
-        'total_findings': 0,
-        'total_quarantined': 0,
-        'status': 'idle',
-        'message': 'No current scan generation.',
+        'agents': [{
+            'device_id': 'cloud-agent-generation',
+            'hostname': 'Connected Agent Scan',
+            'files_scanned': scanned,
+            'finding_count': len(findings),
+            'findings': findings[:50],
+            'quarantined_count': quarantined,
+            'scan_id': str(state.get('scan_generation') or ''),
+            'scan_dirs': [],
+            'scan_status': state.get('scan_status') or ('scanning' if running else 'idle'),
+            'scan_started_at': str(state.get('scan_started_at') or ''),
+            'last_scan': str(state.get('last_run') or ''),
+        }] if (running or state.get('scan_generation')) else [],
+        'total_files_scanned': scanned,
+        'total_findings': len(findings),
+        'total_quarantined': quarantined,
+        'status': 'running' if running else 'idle',
+        'message': 'Connected-agent scan is the current dashboard scan generation.' if (running or state.get('scan_generation')) else 'No current scan generation.',
     }), 200
 
 
@@ -520,6 +565,36 @@ def conditional_startup_status_api():
         payload.setdefault('errors', 0)
         payload.setdefault('scan_phase', 'scanning' if payload.get('running') else 'idle')
     else:
+        # On the Linux/cloud deployment Conditional Startup is unavailable.
+        # Report the connected-agent generation rather than an unconditional
+        # zero/idle state, which made the scan panel appear stale.
+        state = _canonical_yara_agent_state()
+        payload = {
+            'status': 'RUNNING' if state.get('running') else 'IDLE',
+            'running': bool(state.get('running')),
+            'run_id': str(state.get('scan_generation') or ''),
+            'last_run': state.get('last_run'),
+            'started_at': state.get('started_at'),
+            'last_updated': state.get('last_updated'),
+            'duration': state.get('duration'),
+            'scanned_files': int(state.get('scanned_files') or 0),
+            'quarantined_files': int(state.get('quarantined_files') or 0),
+            'blocked_threats': int(state.get('blocked_threats') or 0),
+            'errors': int(state.get('errors') or 0),
+            'process_events': int(state.get('process_events') or 0),
+            'ml_detections': int(state.get('ml_detections') or 0),
+            'ransomware_indicators': int(state.get('ransomware_indicators') or 0),
+            'persistence_indicators': int(state.get('persistence_indicators') or 0),
+            'yara_suspicious': int(state.get('yara_suspicious') or 0),
+            'scan_phase': 'scanning' if state.get('running') else 'idle',
+            'last_error': state.get('last_error') or None,
+        }
+        response = jsonify(payload)
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        return response, 200
+
+    else_unused = None
+    if False:
         payload = {
             'status': 'IDLE',
             'running': False,
