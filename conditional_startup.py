@@ -1524,8 +1524,12 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     """Scan a single file, quarantining it if malware is found, and record
     its outcome into results/scanned_file_status."""
     try:
-        # Publish the file before entering the YARA engine so the live dashboard
-        # proves that the actual per-file loop has started.
+        # Count the file as soon as the per-file scan begins.  The live
+        # dashboard must not remain at 0 while YARA/ML is processing the file.
+        # This counter represents files entered by the scan loop; failures are
+        # still counted so the UI reflects real scan progress.
+        with results_lock:
+            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
         if callable(progress_callback):
             try:
                 progress_callback(results)
@@ -1671,9 +1675,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
                 output.write(f"[INFO] rule_reputation update skipped for {filepath}: {rep_exc}\n")
         # ──────────────────────────────────────────────────────────────────────
 
-        # Increment the stable counter now that this file is fully processed
-        with results_lock:
-            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
+        # Publish the completed-file state after all scan stages have finished.
         if callable(progress_callback):
             progress_callback(results)
     except (PermissionError, OSError) as perm_error:
