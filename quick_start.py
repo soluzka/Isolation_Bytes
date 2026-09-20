@@ -1810,7 +1810,9 @@ def start_conditional_startup_scan():
             'last_updated': now,
             'last_run': conditional_startup_state.get('last_run'),
             'duration': None,
-            'last_error': None,
+            # Preserve the previous error for the persistent audit trail.
+            # A new scan does not erase historical error evidence.
+            'last_error': conditional_startup_state.get('last_error'),
             'scan_phase': 'starting',
         })
         _persist_conditional_startup_state()
