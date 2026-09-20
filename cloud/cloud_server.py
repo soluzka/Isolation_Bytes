@@ -298,9 +298,52 @@ def _yara_only_quarantine_response():
     return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message_type': 'success', 'quarantined': quarantined, 'failed': [], 'count': len(quarantined), 'agents_triggered': sent, 'targeted_findings': targeted, 'message': f'YARA quarantine queued for {targeted} current finding(s) across {sent} agent(s). Results will refresh after the scan.', 'error': None}), 200
 
 
+def _active_conditional_startup_state():
+    """Return the live conditional-startup generation when it is running."""
+    try:
+        import quick_start
+        state = getattr(quick_start, 'conditional_startup_state', None)
+        if not isinstance(state, dict) or not state.get('running'):
+            return None
+        return dict(state)
+    except Exception:
+        return None
+
 def _complete_agent_scan_results_response():
     if not (session.get('logged_in') or session.get('user_logged_in')):
         return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
+
+    # Conditional startup is itself the active YARA generation. Do not expose
+    # the previous agent heartbeat/report while that scan is running.
+    conditional = _active_conditional_startup_state()
+    if conditional is not None:
+        started = str(conditional.get('started_at') or '')
+        findings = conditional.get('findings') or []
+        scanned = int(conditional.get('scanned_files') or 0)
+        quarantined = int(conditional.get('quarantined_files') or 0)
+        return jsonify({
+            'ok': True, 'success': True,
+            'agents': [{
+                'device_id': 'conditional-startup',
+                'hostname': 'Conditional Startup',
+                'files_scanned': scanned,
+                'finding_count': len(findings),
+                'findings': findings[:50],
+                'quarantined_count': quarantined,
+                'scan_id': str(conditional.get('run_id') or ''),
+                'scan_dirs': [],
+                'scan_status': 'scanning',
+                'scan_current_path': str(conditional.get('scan_current_path') or ''),
+                'scan_started_at': started,
+                'last_scan': started,
+            }],
+            'total_files_scanned': scanned,
+            'total_findings': len(findings),
+            'total_quarantined': quarantined,
+            'status': 'running',
+            'message': 'Conditional startup is the active YARA scan generation.',
+        }), 200
+
     return jsonify(build_complete_agent_scan_results(_legacy, _agent_scan_state)), 200
 
 
