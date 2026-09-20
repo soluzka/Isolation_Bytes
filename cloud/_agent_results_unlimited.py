@@ -32,13 +32,17 @@ def build_complete_agent_scan_results(legacy, active_scan_state=None):
         active_started = float(active.get("started_at", 0) or 0)
         baseline_quarantined = int(active.get("baseline_quarantined", 0) or 0)
 
-        report_marker = str(
-            agent.get("last_scan") or report.get("timestamp") or ""
+        current_scan_id = str(
+            agent.get("scan_id") or report.get("scan_id") or ""
         )
-        previous_marker = str(active.get("report_marker") or "")
+        previous_scan_id = str(active.get("previous_scan_id") or "")
+        # A new scan generation begins only when the agent publishes its new
+        # scan_id. Timestamps cannot be used here because the cloud writes a
+        # synthetic scan-start report before the agent consumes scan_now.
         generation_started = bool(
-            active_started and previous_marker and report_marker
-            and report_marker != previous_marker
+            active_started
+            and current_scan_id
+            and current_scan_id != previous_scan_id
         )
 
         if active_started and not generation_started:
