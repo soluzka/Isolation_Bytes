@@ -3,7 +3,7 @@ const CACHE_NAME = 'isolation-bytes-v1-8-952-0';
 const CLOUD_URL = 'https://isolation-bytes.com';
 const API_KEY = '__CLOUD_API_KEY__';
 const PWA_DEVICE_ID = 'PWA-' + (self.registration ? self.registration.scope : 'unknown').slice(-12, -1).toUpperCase();
-const AGENT_VERSION = '1.8.952.0';
+const AGENT_VERSION = '1.8.953.0';
 const APP_SHELL = [
     '/',
     '/install',
