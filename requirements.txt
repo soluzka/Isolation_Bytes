@@ -35,6 +35,7 @@ seaborn>=0.12.0
 numpy>=1.24.0
 scipy>=1.10.0
 scikit-learn>=1.2.0
+skops>=0.10.0
 
 # ClamAV integration on Linux/macOS
 clamd>=1.0.2

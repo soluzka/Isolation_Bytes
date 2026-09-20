@@ -4,20 +4,23 @@ import os
 import re
 from datetime import datetime
 
-import joblib
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+try:
+    import skops.io as skops_io
+except ImportError:
+    skops_io = None
 
 
 class SecurityMLModel:
     """Defensive anomaly model for network and static file/code analysis."""
 
-    def __init__(self, model_path='models/malware_model.pkl',
-                 pca_path='models/malware_pca.pkl',
-                 scaler_path='models/malware_scaler.pkl'):
+    def __init__(self, model_path='models/malware_model.skops',
+                 pca_path='models/malware_pca.skops',
+                 scaler_path='models/malware_scaler.skops'):
         self.model_path = model_path
         self.pca_path = pca_path
         self.scaler_path = scaler_path
@@ -28,29 +31,14 @@ class SecurityMLModel:
         self.initialize_model()
 
     def initialize_model(self):
-        if os.path.exists(self.model_path):
+        if skops_io is not None and os.path.exists(self.model_path):
             self.load_model()
         else:
             self.create_new_model()
-            self.save_model()
-        if os.path.exists(self.pca_path):
-            try:
-                self.pca = joblib.load(self.pca_path)
-            except Exception as exc:
-                logging.warning("Invalid PCA artifact; using a fresh PCA: %s", exc)
-                self.pca = PCA(n_components=0.95)
-        else:
-            self.pca = PCA(n_components=0.95)
-        if os.path.exists(self.scaler_path):
-            try:
-                self.scaler = joblib.load(self.scaler_path)
-            except Exception as exc:
-                logging.warning("Invalid scaler artifact; using a fresh scaler: %s", exc)
-                self.scaler = StandardScaler()
-        else:
-            self.scaler = StandardScaler()
-        self.pipeline = Pipeline([
-            ('scaler', self.scaler), ('pca', self.pca), ('model', self.model)
+        self.pipeline = self.pipeline or Pipeline([
+            ('scaler', StandardScaler()),
+            ('pca', PCA(n_components=0.95)),
+            ('model', self.model),
         ])
 
     def create_new_model(self):
@@ -64,36 +52,57 @@ class SecurityMLModel:
         ])
 
     def train_model(self, X_train):
+        """Train only on an explicitly supplied baseline dataset.
+
+        The scanner never trains on files it is currently deciding about.
+        This prevents an attacker-controlled file from poisoning the model.
+        """
+        X_train = np.asarray(X_train, dtype=np.float64)
+        if X_train.ndim != 2 or X_train.shape[0] < 10:
+            raise ValueError("At least 10 baseline samples are required for ML training")
+        if not np.isfinite(X_train).all():
+            raise ValueError("Training data contains non-finite values")
         self.pipeline.fit(X_train)
         self.model = self.pipeline.named_steps['model']
-        logging.info("Security ML model trained successfully")
+        logging.info("Security ML model trained successfully on %d baseline samples", X_train.shape[0])
 
     def save_model(self):
+        if skops_io is None:
+            logging.warning("skops is unavailable; refusing to persist an executable ML artifact")
+            return False
         os.makedirs(os.path.dirname(self.model_path) or '.', exist_ok=True)
-        joblib.dump(self.pipeline if self.pipeline is not None else self.model, self.model_path)
-        logging.info("Security ML model saved successfully")
+        skops_io.dump(self.pipeline if self.pipeline is not None else self.model, self.model_path)
+        logging.info("Security ML model saved in safe skops format")
+        return True
 
     def load_model(self):
-        try:
-            loaded = joblib.load(self.model_path)
-            if isinstance(loaded, Pipeline):
-                self.pipeline = loaded
-                self.model = loaded.named_steps.get('model')
-            else:
-                self.model = loaded
-            logging.info("Security ML model loaded successfully")
-        except Exception as exc:
-            logging.error("Error loading model: %s", exc)
+        if skops_io is None:
+            logging.warning("skops is unavailable; ML artifact loading disabled")
             self.model = None
             self.create_new_model()
-
-    def retrain_model(self, X, y=None):
+            return False
         try:
-            self.pipeline.fit(X)
-            self.model = self.pipeline.named_steps['model']
-            self.save_model()
+            loaded = skops_io.load(self.model_path, trusted=[])
+            if not isinstance(loaded, Pipeline):
+                raise ValueError("ML artifact is not a scikit-learn Pipeline")
+            self.pipeline = loaded
+            self.model = loaded.named_steps.get('model')
+            if not isinstance(self.model, IsolationForest):
+                raise ValueError("ML artifact contains an unexpected estimator")
+            logging.info("Security ML model loaded from safe skops artifact")
             return True
         except Exception as exc:
+            logging.error("Unsafe or invalid ML model artifact rejected: %s", exc)
+            self.model = None
+            self.create_new_model()
+            return False
+
+    def retrain_model(self, X, y=None):
+        """Retrain from an explicitly supplied baseline dataset only."""
+        try:
+            self.train_model(X)
+            return bool(self.save_model())
+        except (TypeError, ValueError, OSError) as exc:
             logging.error("Error training model: %s", exc)
             return False
 
@@ -199,15 +208,30 @@ class SecurityMLModel:
             min(text.count('cmd.exe'), 20) / 20.0,
         ]], dtype=np.float64)
 
+    def ml_status(self):
+        """Expose whether ML is actually usable for a scan decision."""
+        return {
+            'available': bool(self.pipeline is not None and self.is_fitted()),
+            'model_type': type(self.model).__name__ if self.model is not None else None,
+        }
+
     def file_anomaly_confidence(self, filepath, yara_matches=None):
+        """Map IsolationForest's anomaly margin to a bounded confidence.
+
+        This is a monotonic anomaly-confidence transform, not a calibrated
+        probability. It is only returned when a genuinely fitted model exists.
+        """
         if not os.path.isfile(filepath) or not self.is_fitted():
             return 0.0
         features = self.get_file_features(filepath, yara_matches=yara_matches)
         _, scores = self.predict(features)
         if scores is None or len(scores) == 0:
             return 0.0
-        score = self._safe_number(scores[0])
-        return max(0.0, min(1.0, 0.5 - score))
+        margin = self._safe_number(scores[0])
+        if not math.isfinite(margin):
+            return 0.0
+        confidence = 1.0 / (1.0 + math.exp(max(-60.0, min(60.0, 8.0 * margin))))
+        return max(0.0, min(1.0, confidence))
 
     def get_features(self, connection_data):
         features = {

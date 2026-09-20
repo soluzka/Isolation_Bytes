@@ -1,6 +1,7 @@
 """Verified quarantine entry point shared by security scanners."""
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from typing import Iterable
@@ -42,11 +43,36 @@ def _artifacts(filepath: str) -> list[str]:
     return list(dict.fromkeys(result))
 
 
-def verify(filepath: str) -> bool:
-    """Return true only after the source disappears and an artifact exists."""
+def verify(filepath: str, expected_sha256: str | None = None) -> bool:
+    """Verify source removal and, when possible, exact artifact preservation."""
     if os.path.lexists(filepath):
         return False
-    return any(os.path.isfile(path) for path in _artifacts(filepath))
+
+    artifacts = [path for path in _artifacts(filepath) if os.path.isfile(path)]
+    if not artifacts:
+        return False
+    if not expected_sha256:
+        return True
+
+    try:
+        from cryptography.fernet import Fernet
+        key = os.environ.get("FERNET_KEY", "").encode()
+        if len(key) != 44:
+            return False
+        fernet = Fernet(key)
+    except Exception:
+        return False
+
+    expected = str(expected_sha256).lower()
+    for artifact in artifacts:
+        try:
+            with open(artifact, "rb") as handle:
+                plaintext = fernet.decrypt(handle.read())
+            if hashlib.sha256(plaintext).hexdigest().lower() == expected:
+                return True
+        except Exception:
+            continue
+    return False
 
 
 def quarantine_and_verify(filepath: str, *, reason: str = "") -> bool:
@@ -54,9 +80,16 @@ def quarantine_and_verify(filepath: str, *, reason: str = "") -> bool:
     if not filepath or not os.path.isfile(filepath):
         return False
     try:
+        with open(filepath, "rb") as handle:
+            expected_sha256 = hashlib.sha256(handle.read()).hexdigest()
+    except OSError as exc:
+        logging.warning("Cannot hash quarantine candidate %s: %s", filepath, exc)
+        return False
+
+    try:
         import quarantine_utils
         quarantine_utils.quarantine_file(filepath, reason=reason)
     except (OSError, RuntimeError, ValueError) as exc:
         logging.warning("Quarantine operation failed for %s: %s", filepath, exc)
         return False
-    return verify(filepath)
+    return verify(filepath, expected_sha256=expected_sha256)
