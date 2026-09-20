@@ -1034,18 +1034,15 @@ if (stopAutoUpdatesBtn) {
                         messageDiv.innerHTML = failed
                             ? '<p style="color:#b36200;">One scan started; the other reported an error. Check the YARA scanner status.</p>'
                             : '<p style="color:#27a745;">Conditional Startup and agent YARA started together.</p>';
-                        const waitForFinish = setInterval(() => {
-                            refreshStatus().then(d => {
-                                if (d && !d.running) {
-                                    clearInterval(waitForFinish);
-                                    runBtn.disabled = false;
-                                    runBtn.textContent = originalText;
-                                    messageDiv.innerHTML = failed
-                                        ? '<p style="color:#b36200;">Conditional Startup finished; one scan reported an error.</p>'
-                                        : '<p style="color:#27a745;">Both scans have finished.</p>';
-                                }
-                            }).catch(() => {});
-                        }, 5000);
+                        // Both scan engines are continuous services. Do not use a
+                        // one-shot completion watcher here: a completed pass is not the
+                        // end of protection. Keep the controls in the active state until
+                        // an explicit stop is requested.
+                        runBtn.disabled = true;
+                        runBtn.textContent = 'Continuous Scanning';
+                        messageDiv.innerHTML = failed
+                            ? '<p style="color:#b36200;">Continuous protection is active; one scan reported an error and will continue retrying.</p>'
+                            : '<p style="color:#27a745;">Continuous protection is active. Both scan engines will keep running until explicitly stopped.</p>';
                     }).catch(error => {
                         messageDiv.innerHTML = `<div class="alert alert-danger">Error starting scans: ${htmlEscape(error.message || error)}</div>`;
                         runBtn.disabled = false;
