@@ -2792,9 +2792,12 @@ X-GNOME-Autostart-enabled=true
             for dirpath in self._scan_dirs:
                 if not self._running:
                     break
-                if time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
+                # Continuous protection has no artificial per-pass file/time
+                # ceiling. A pass ends only after the monitored roots have
+                # actually been traversed (or an explicit stop occurs).
+                if not continuous and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
                     break
-                if self._scan_cycle_remaining <= 0:
+                if not continuous and self._scan_cycle_remaining <= 0:
                     break
                 if not os.path.isdir(dirpath):
                     continue
