@@ -510,6 +510,41 @@ class StandaloneAgent:
             "persistence_indicators": {}, "yara_suspicious": [],
             "quarantined_files": [],
         }
+
+        # Restore accumulated indicator evidence before publishing any new
+        # runtime state. A process restart must never turn historical evidence
+        # back into an empty collection.
+        try:
+            persisted_path = runtime_path("scanner_results.json")
+            if os.path.isfile(persisted_path):
+                with open(persisted_path, "r", encoding="utf-8") as handle:
+                    persisted = json.load(handle) or {}
+                source = persisted.get("scanner_results") if isinstance(persisted.get("scanner_results"), dict) else persisted
+                if isinstance(source, dict):
+                    ensure_indicator_results(source)
+                    for key in (
+                        "errors", "process_events", "ml_detections",
+                        "ransomware_indicators", "yara_suspicious",
+                        "quarantined_files"
+                    ):
+                        self._scanner_results[key] = list(source.get(key) or [])
+                    self._scanner_results["persistence_indicators"] = dict(
+                        source.get("persistence_indicators") or {}
+                    )
+                    restored_counts = indicator_counts(self._scanner_results)
+                    self._total_ml = int(restored_counts.get("ml_detections", 0))
+                    self._total_ransomware = int(restored_counts.get("ransomware_indicators", 0))
+                    self._total_persistence = int(restored_counts.get("persistence_indicators", 0))
+                    self._total_yara = int(restored_counts.get("yara_suspicious", 0))
+                    self._total_findings = max(
+                        int(persisted.get("counts", {}).get("findings", 0) or 0),
+                        self._total_ml + self._total_ransomware + self._total_persistence + self._total_yara,
+                    )
+        except (OSError, ValueError, TypeError):
+            # A corrupt state file is never treated as permission to erase
+            # in-memory history; start empty only when there is no usable state.
+            pass
+
         self._last_report_ok = False
         self._last_report_error = ''
         self._scan_status = 'idle'
