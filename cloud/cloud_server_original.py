@@ -2751,6 +2751,69 @@ def cloud_download_checksum(filename):
 # GitHub webhook — auto-pull on push and restart the service
 # ---------------------------------------------------------------------------
 @cloud_bp.route('/api/github-webhook', methods=['POST'])
+
+def _ensure_deployment_runtime_state():
+    """Create/repair application-owned runtime state before a deployment restart."""
+    import shutil as _shutil
+    from datetime import datetime as _dt
+    app_root = Path(__file__).resolve().parent.parent
+    runtime_dir = Path(os.environ.get(
+        'ANTIVIRUS_RUNTIME_DIR',
+        str(Path(os.environ.get('PROGRAMDATA', '/var/lib')) / 'AntivirusServer')
+    )).expanduser()
+    quarantine_dir = runtime_dir / 'Quarantine'
+    (app_root / 'data').mkdir(parents=True, exist_ok=True)
+    quarantine_dir.mkdir(parents=True, exist_ok=True)
+    state_files = {
+        app_root / 'agents.json': {},
+        app_root / 'agent_commands.json': {},
+        app_root / 'blocked_ips.json': {},
+        app_root / 'blocked_files.json': {},
+        app_root / 'scan_results.json': {},
+        app_root / 'scan_history.json': [],
+        app_root / 'phishing_alerts.json': [],
+        app_root / 'iocs.json': [],
+        app_root / 'trusted_hashes.json': {},
+        app_root / 'yara_rule_reputation.json': {},
+        app_root / 'voice_scan_status.json': {},
+        app_root / 'scheduled_scan_state.json': {'enabled': False},
+        app_root / 'conditional_startup_state.json': {
+            'running': False, 'scanned_files': 0, 'quarantined_files': 0,
+            'errors': 0, 'process_events': 0, 'ml_detections': 0,
+            'ransomware_indicators': 0, 'persistence_indicators': 0,
+            'yara_suspicious': 0,
+        },
+        app_root / 'data' / 'scan_cache.json': {},
+        quarantine_dir / 'quarantine_log.json': [],
+    }
+    for path, default in state_files.items():
+        valid = False
+        if path.exists() and path.is_file():
+            try:
+                with path.open('r', encoding='utf-8') as fh:
+                    json.load(fh)
+                valid = True
+            except (OSError, json.JSONDecodeError, ValueError):
+                valid = False
+        if valid:
+            continue
+        if path.exists():
+            stamp = _dt.now().strftime('%Y%m%d-%H%M%S')
+            backup = path.with_name(path.name + f'.corrupt-{stamp}')
+            _shutil.move(str(path), str(backup))
+            logger.warning('Preserved invalid deployment state: %s -> %s', path, backup)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('w', encoding='utf-8') as fh:
+            json.dump(default, fh, indent=2)
+            fh.write('\n')
+    try:
+        os.chmod(str(runtime_dir), 0o700)
+        os.chmod(str(quarantine_dir), 0o700)
+        os.chmod(str(quarantine_dir / 'quarantine_log.json'), 0o600)
+    except OSError:
+        pass
+
+
 def github_webhook():
     """GitHub push webhook. Pulls latest code and restarts the service."""
     secret = os.environ.get('GITHUB_WEBHOOK_SECRET', '').strip()
@@ -2824,6 +2887,9 @@ def github_webhook():
         )
         if checked_out.returncode != 0:
             return jsonify({'error': f'git reset failed: {(checked_out.stderr or checked_out.stdout or "").strip()}'}), 500
+
+        # Recreate/repair runtime files before import validation and service restart.
+        _ensure_deployment_runtime_state()
 
         python_bin = str(BASE_DIR / 'venv' / 'bin' / 'python')
         if not os.path.exists(python_bin):
