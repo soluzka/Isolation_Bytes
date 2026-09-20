@@ -3,7 +3,7 @@
 ## Supported Versions
 
 Security fixes are applied to the current release line shown in `version.txt`.
-The current project version is **1.8.952.0**.
+The current project version is **1.8.953.0**.
 
 | Version | Supported |
 | ------- | --------- |
