@@ -1704,29 +1704,42 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
 
 
 def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_file_status, output, progress_callback):
-    """Walk every monitored folder and scan each accessible file."""
+    """Continuously scan monitored folders; the first scan never completes."""
     scan_utils = modules['scan_utils']
     yara_scanner = modules['yara_scanner']
     quarantine_utils = modules['quarantine_utils']
 
-    for folder in monitored_folders:
-        for root, dirs, files in os.walk(folder):
-            # Skip OneDriveTemp directories entirely
-            if "OneDriveTemp" in root:
-                continue
-
-            for filename in files:
-                filepath = os.path.join(root, filename)
-
-                # Skip files that can't be accessed due to permissions
-                try:
-                    with open(filepath, 'rb') as test_access:
-                        pass
-                except (PermissionError, OSError):
-                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\n")
+    # This is intentionally an unbounded worker. The initial filesystem
+    # traversal is already the continuous protection session: when the current
+    # traversal reaches its end, immediately begin another traversal without
+    # returning a "completed scan" state to the caller.
+    while True:
+        for folder in monitored_folders:
+            for root, dirs, files in os.walk(folder):
+                # Skip OneDriveTemp directories entirely
+                if "OneDriveTemp" in root:
                     continue
 
-                _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, results, scanned_file_status, output, progress_callback)
+                for filename in files:
+                    filepath = os.path.join(root, filename)
+
+                    try:
+                        with open(filepath, 'rb'):
+                            pass
+                    except (PermissionError, OSError):
+                        output.write(f"[INFO] Skipping inaccessible file: {filepath}\n")
+                        continue
+
+                    _scan_file_and_record(
+                        filepath,
+                        scan_utils,
+                        yara_scanner,
+                        quarantine_utils,
+                        results,
+                        scanned_file_status,
+                        output,
+                        progress_callback,
+                    )
 
 
 def _open_browser_when_ready(output):
