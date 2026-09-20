@@ -804,6 +804,11 @@
                 loadMonitoredDirectories();
             });
             
+            document.getElementById('scanDirectoriesTab').addEventListener('click', function() {
+                openTab(this, 'ScanDirectories');
+                loadScanDirectoriesEditor();
+            });
+
             document.getElementById('networkMonitorTab').addEventListener('click', function() {
                 openTab(this, 'NetworkMonitor');
                 fetchNetworkMonitoredDirectories();
