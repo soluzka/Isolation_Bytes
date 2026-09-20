@@ -1378,7 +1378,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     try:
         conditional_startup_state['findings'] = _findings_for_review()
     except Exception:
-        conditional_startup_state['findings'] = []
+        conditional_startup_state['findings'] = list(conditional_startup_state.get('findings') or [])
 
 
 def run_conditional_startup_background():
@@ -1462,7 +1462,7 @@ def run_conditional_startup_background():
                 try:
                     conditional_startup_state['findings'] = _findings_for_review()
                 except Exception:
-                    conditional_startup_state['findings'] = []
+                    conditional_startup_state['findings'] = list(conditional_startup_state.get('findings') or [])
             _persist_conditional_startup_state()
 
         with conditional_startup_lock:
@@ -1524,7 +1524,7 @@ def run_conditional_startup_background():
                     try:
                         conditional_startup_state['findings'] = _findings_for_review()
                     except Exception:
-                        conditional_startup_state['findings'] = []
+                        conditional_startup_state['findings'] = list(conditional_startup_state.get('findings') or [])
             _persist_conditional_startup_state()
         except BaseException as e:
             logger.error(f"Error running continuous conditional startup scan: {e!r}")
