@@ -925,28 +925,62 @@
         });
 
         function fetchAgentScanResults() {
-            fetch('/api/agent-scan-results', {credentials: 'same-origin'})
-                .then(r => r.json())
-                .then(data => {
-                    renderAgentScanResults(data);
-                    const totalYaraFiles = (data.agents || []).reduce(
-                        (sum, ag) => sum + (Number(ag.files_scanned) || 0), 0
-                    );
-                    const counter = document.getElementById('yaraFilesScanned');
-                    if (counter) counter.textContent = String(totalYaraFiles);
-                    const current = document.getElementById('yaraCurrentPath');
-                    const scanStatus = document.getElementById('yaraScanStatus');
-                    const active = (data.agents || []).find(ag => ag.scan_status === 'scanning' || ag.scan_current_path);
-                    if (current) current.textContent = active && active.scan_current_path ? active.scan_current_path : 'Waiting for agent...';
-                    if (scanStatus) scanStatus.textContent = active ? (active.scan_status || 'scanning') : 'idle';
-                    // Hide loading indicator once we have results
-                    const li = document.getElementById('loadingIndicator');
-                    if (li) li.style.display = 'none';
-                })
-                .catch(() => {
-                    const el = document.getElementById('agent_scan_results');
-                    if (el) el.innerHTML = '<p class="alert alert-warning">Unable to load agent scan results.</p>';
-                });
+            // Conditional Startup is the live scan generation. Prefer its own
+            // live state so this page cannot fall back to an older agent report.
+            Promise.all([
+                fetch('/api/conditional_startup/status', {credentials: 'same-origin'}).then(r => r.ok ? r.json() : null),
+                fetch('/api/agent-scan-results', {credentials: 'same-origin'}).then(r => r.ok ? r.json() : null)
+            ])
+            .then(([conditional, agentData]) => {
+                const live = conditional && (
+                    conditional.status === 'RUNNING' ||
+                    conditional.running === true
+                );
+                let data;
+                if (live) {
+                    const findings = conditional.findings || [];
+                    data = {
+                        agents: [{
+                            device_id: 'conditional-startup',
+                            hostname: 'Conditional Startup',
+                            files_scanned: Number(conditional.scanned_files) || 0,
+                            finding_count: findings.length,
+                            findings: findings,
+                            quarantined_count: Number(conditional.quarantined_files) || 0,
+                            scan_id: conditional.run_id || '',
+                            scan_dirs: conditional.monitored_directories || conditional.scan_dirs || [],
+                            scan_status: conditional.scan_phase === 'yara' ? 'scanning' : 'scanning',
+                            scan_current_path: conditional.scan_current_path || '',
+                            scan_started_at: conditional.started_at || '',
+                            last_scan: conditional.last_run || conditional.started_at || ''
+                        }]
+                    };
+                } else {
+                    data = agentData || {agents: []};
+                }
+
+                renderAgentScanResults(data);
+                const totalYaraFiles = (data.agents || []).reduce(
+                    (sum, ag) => sum + (Number(ag.files_scanned) || 0), 0
+                );
+                const counter = document.getElementById('yaraFilesScanned');
+                if (counter) counter.textContent = String(totalYaraFiles);
+                const current = document.getElementById('yaraCurrentPath');
+                const scanStatus = document.getElementById('yaraScanStatus');
+                const active = (data.agents || []).find(
+                    ag => ag.scan_status === 'scanning' || ag.scan_current_path
+                );
+                if (current) current.textContent =
+                    active && active.scan_current_path ? active.scan_current_path : 'Waiting for agent...';
+                if (scanStatus) scanStatus.textContent =
+                    active ? (active.scan_status || 'scanning') : 'idle';
+                const li = document.getElementById('loadingIndicator');
+                if (li) li.style.display = 'none';
+            })
+            .catch(() => {
+                const el = document.getElementById('agent_scan_results');
+                if (el) el.innerHTML = '<p class="alert alert-warning">Unable to load live scan results.</p>';
+            });
         }
 
         // Poll the same authoritative API during a scan so YARA's
