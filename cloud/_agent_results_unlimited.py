@@ -29,7 +29,7 @@ def _monotonic_counter(device_id, key, report_value, live_value, generation=None
     return value
 
 
-def build_complete_agent_scan_results(legacy):
+def build_complete_agent_scan_results(legacy, active_scan_state=None):
     """Build a bounded browser payload without deleting historical findings."""
     now = time.monotonic()
     cached = _RESULTS_CACHE.get("payload")
@@ -74,6 +74,32 @@ def build_complete_agent_scan_results(legacy):
             scan_id or None,
         )
 
+        # A cloud-side scan request is the authoritative start of a new
+        # generation, even before the agent publishes its first progress report.
+        active_state = (active_scan_state or {}).get(device_id) or {}
+        pending_scan = any(
+            isinstance(cmd, dict) and cmd.get("action") == "scan_now"
+            for cmd in legacy.commands.get(device_id, [])
+        )
+        active_started = float(active_state.get("started_at", 0) or 0)
+        agent_status = str(
+            agent.get("scan_status") or report.get("scan_status") or "idle"
+        ).lower()
+        if active_state and (pending_scan or active_started):
+            if agent_status == "idle":
+                agent_status = "queued"
+        if agent_status in {"queued", "scanning"} and active_started:
+            from datetime import datetime, timezone
+            live_last_scan = datetime.fromtimestamp(
+                active_started, timezone.utc
+            ).isoformat()
+        else:
+            live_last_scan = (
+                agent.get("last_scan")
+                or report.get("last_scan")
+                or report.get("timestamp", "")
+            )
+
         # Keep the normalized live counters available to other in-process
         # routes, while leaving the persisted report/history untouched.
         try:
@@ -88,16 +114,12 @@ def build_complete_agent_scan_results(legacy):
                 "device_id": device_id,
                 "files_scanned": files_scanned,
                 "finding_count": len(findings),
-                "last_scan": (
-                    agent.get("last_scan")
-                    or report.get("last_scan")
-                    or report.get("timestamp", "")
-                ),
+                "last_scan": live_last_scan,
                 "findings": findings[:50],
                 "quarantined_count": quarantined_count,
                 "scan_id": scan_id,
                 "scan_dirs": agent.get("scan_dirs") or report.get("scan_dirs") or [],
-                "scan_status": agent.get("scan_status") or report.get("scan_status") or "idle",
+                "scan_status": agent_status,
                 "scan_current_path": (
                     agent.get("scan_current_path")
                     or report.get("scan_current_path")
