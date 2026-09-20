@@ -217,7 +217,8 @@ def block_connection(ip, port, *, program=None, pid=None, reason=""):
 
     args = [
         "add", "rule", f"name={rule_name}", "dir=out", "action=block",
-        "enable=yes", "profile=any", f"remoteip={ip}", f"remoteport={port}",
+        "enable=yes", "profile=any", "protocol=tcp",
+        f"remoteip={ip}", f"remoteport={port}",
     ]
     if program_path:
         args.append(f"program={program_path}")
