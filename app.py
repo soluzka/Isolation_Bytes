@@ -2333,7 +2333,10 @@ def run_startup():
             from conditional_startup import run_conditional_startup_logic
             start_time = time.time()
             scan_data = run_conditional_startup_logic(
-                open_browser=False, progress_callback=_progress)
+                open_browser=False,
+                progress_callback=_progress,
+                continuous=True,
+            )
             duration = time.time() - start_time
             record_conditional_startup_run(scan_data, duration)
         except Exception as e:
