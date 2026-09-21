@@ -45,13 +45,15 @@ a = Analysis(
     optimize=0,
 )
 pyz = PYZ(a.pure)
+
+# ONEFILE: all Python code, native modules, bundled resources, YARA rules,
+# and configuration are packed into one IsolationBytesAgent.exe.
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
     a.datas,
     [],
-    exclude_binaries=True,
     name='IsolationBytesAgent',
     debug=False,
     bootloader_ignore_signals=False,
@@ -66,15 +68,4 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=os.path.join(_BASE, 'static', 'favicon.ico'),
-)
-
-
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='IsolationBytesAgent',
 )
