@@ -1656,17 +1656,9 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
     """Scan a single file, quarantining it if malware is found, and record
     its outcome into results/scanned_file_status."""
     try:
-        # Count the file as soon as the per-file scan begins.  The live
-        # dashboard must not remain at 0 while YARA/ML is processing the file.
-        # This counter represents files entered by the scan loop; failures are
-        # still counted so the UI reflects real scan progress.
-        with results_lock:
-            results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
-        if callable(progress_callback):
-            try:
-                progress_callback(results)
-            except Exception:
-                pass
+        # The traversal records the file before entering this function so
+        # blocking filesystem operations cannot prevent the progress counter
+        # from advancing.
         scan_timeout = os.environ.get("CONDITIONAL_FILE_SCAN_TIMEOUT_SECONDS", "30")
         completed, scan_value, scan_error = _run_scan_stage_with_timeout(
             lambda: scan_utils.scan_file_for_viruses(filepath, stop_event=None),
@@ -1948,12 +1940,17 @@ def _scan_monitored_folders_step(monitored_folders, modules, results, scanned_fi
             for filename in files:
                 filepath = os.path.join(root, filename)
 
-                try:
-                    with open(filepath, 'rb'):
+                # Count immediately when the traversal reaches the file.
+                # Do not perform a separate open() probe here: on Windows,
+                # network/reparse/filter-driver files can block during open()
+                # before the scanner watchdog even gets control.
+                with results_lock:
+                    results["scanned_files_count"] = results.get("scanned_files_count", 0) + 1
+                if callable(progress_callback):
+                    try:
+                        progress_callback(results)
+                    except Exception:
                         pass
-                except (PermissionError, OSError):
-                    output.write(f"[INFO] Skipping inaccessible file: {filepath}\\n")
-                    continue
 
                 _scan_file_and_record(
                     filepath,
