@@ -438,8 +438,16 @@ def build_agent():
         return False
 
     exe = DIST_DIR / "IsolationBytesAgent.exe"
-    if not exe.exists():
-        print("ERROR: IsolationBytesAgent.exe was not produced by the one-file build")
+    # The public artifact must live directly in dist\\ and nowhere else.
+    # A one-file PyInstaller build produces exactly this file; it must not
+    # leave or relocate the agent into dist\\IsolationBytesAgent\\.
+    stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
+    if stale_agent_dir.exists():
+        print("ERROR: PyInstaller produced an agent directory; ONEFILE output is required.")
+        print(f"  Unexpected directory: {stale_agent_dir}")
+        return False
+    if not exe.is_file() or exe.parent != DIST_DIR:
+        print("ERROR: IsolationBytesAgent.exe was not produced directly in dist\\")
         print(f"  Expected: {exe}")
         print(f"  Build log: {PROJECT_ROOT / 'agent-build.log'}")
         return False
