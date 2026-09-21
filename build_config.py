@@ -595,6 +595,40 @@ def _signing_identity_diagnostics():
             print('  Recent AppxPackaging/Operational events:')
             print(events.stdout.rstrip())
 
+def _sign_msix_from_store(msix_file):
+    """Import the PFX into CurrentUser\\My and sign by thumbprint."""
+    powershell = shutil.which('powershell.exe') or shutil.which('powershell')
+    if not powershell:
+        return False
+    safe_password = PFX_PASSWORD.replace("'", "''")
+    safe_pfx = PFX.replace("'", "''")
+    ps = ("$ErrorActionPreference='Stop'; "
+          f"$pwd=ConvertTo-SecureString '{safe_password}' -AsPlainText -Force; "
+          f"$c=Import-PfxCertificate -FilePath '{safe_pfx}' -CertStoreLocation 'Cert:\\CurrentUser\\My' -Password $pwd -Exportable; "
+          "if (-not $c.HasPrivateKey) { throw 'Certificate has no private key' }; $c.Thumbprint")
+    imported = safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command', ps],
+                        cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        text=True, encoding='utf-8', errors='replace', check=False)
+    thumbprint = None
+    for line in reversed((imported.stdout or '').splitlines()):
+        value = re.sub(r'[^0-9A-Fa-f]', '', line)
+        if len(value) in (40, 64) and re.fullmatch(r'[0-9A-Fa-f]+', value):
+            thumbprint = value
+            break
+    if not thumbprint:
+        print(imported.stdout or '')
+        return False
+    try:
+        result = safe_run([SIGNTOOL, 'sign', '/debug', '/v', '/sha1', thumbprint, '/fd', 'sha256', msix_file],
+                          cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                          text=True, encoding='utf-8', errors='replace', check=False)
+        print(result.stdout or '', end='' if (result.stdout or '').endswith('\\n') else '\\n')
+        return result.returncode == 0
+    finally:
+        safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command',
+                  f"Remove-Item -Path 'Cert:\\CurrentUser\\My\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
+                 cwd=BASE_DIR, check=False)
+
 def _sign_msix(msix_file):
     """Sign the MSIX with the configured PFX and expose useful diagnostics."""
     if not os.path.isfile(SIGNTOOL):
@@ -648,7 +682,11 @@ def _sign_msix(msix_file):
     if result.returncode == 0:
         return
 
-    print('Primary MSIX signing attempt failed; retrying with certificate auto-selection...')
+    print('Direct PFX signing failed; trying the certificate-store private key path...')
+    if _sign_msix_from_store(msix_file):
+        return
+
+    print('Certificate-store signing failed; retrying with certificate auto-selection...')
     retry = [
         SIGNTOOL, 'sign', '/debug', '/v', '/a',
         '/f', PFX, '/p', PFX_PASSWORD,
