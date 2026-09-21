@@ -1878,30 +1878,32 @@ def stop_conditional_startup():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 # -- Web auth for quick_start.py dashboard --
-# The YARA scanner (and its supporting API endpoints) are intentionally public
-# so the desktop "Start YARA Scanner" shortcut works without an extra login step.
-YARA_SCANNER_PREFIXES = (
-    '/yara', '/yara_scanner', '/scan', '/scan_all', '/toggle_scan_all',
-    '/add_folder', '/remove-monitored-folder', '/api/monitored-directories',
-    '/api/network/monitored_directories', '/toggle_folder_watcher',
-    '/folder-watcher-paths', '/get_folder_watcher_paths', '/start_realtime',
-    '/get_network_monitored_directories', '/get_traffic_stats',
-    '/get_c2_patterns', '/get_live_connections', '/start_traffic_monitoring',
-)
-
-
+# All dashboards and scanner APIs require an authenticated web session.
+# The previous implementation exempted YARA/scanning paths so desktop
+# shortcuts could bypass the login page. That also exposed scanner data and
+# controls before authentication.
 @app.before_request
 def _require_login():
-    """Redirect unauthenticated users to /login except for public pages/scanning APIs."""
+    """Require authentication before opening any dashboard or scanner endpoint."""
     if request.endpoint in ('login', 'logout', 'static'):
-        return
-    if request.path.startswith(YARA_SCANNER_PREFIXES):
-        return
-    if session.get('logged_in'):
+        return None
+
+    if session.get('logged_in') or session.get('user_logged_in'):
         if 'csrf_token' not in session:
             session['csrf_token'] = secrets.token_urlsafe(32)
-        return
+        return None
 
+    # Browser navigation should go through the normal login page. API calls
+    # need a machine-readable response so the UI can redirect to login.
+    if request.path.startswith('/api/') or request.method != 'GET':
+        return jsonify({
+            'success': False,
+            'error': 'Authentication required',
+            'login_required': True,
+            'redirect': url_for('login'),
+        }), 401
+
+    return redirect(url_for('login', next=request.full_path))
 
 def _is_exempt_from_csrf():
     """Return True if the current request does not need a CSRF token."""
