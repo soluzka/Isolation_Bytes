@@ -373,6 +373,25 @@ def build_agent():
     # Remove stale agent output and its PyInstaller cache before rebuilding.
     stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
     if stale_agent_dir.exists():
+        # The previous onedir artifact may still be running. On Windows an
+        # executable that is in use cannot be removed, even by the owner.
+        # Stop only the project's agent process before cleaning its stale
+        # distribution directory; do not terminate unrelated applications.
+        try:
+            taskkill = shutil.which("taskkill")
+            if taskkill:
+                safe_run(
+                    [taskkill, "/F", "/IM", "IsolationBytesAgent.exe"],
+                    cwd=str(PROJECT_ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+        except OSError:
+            pass
+        import time
+        time.sleep(1)
+
         # Windows/OneDrive can briefly hold files from the previous onedir
         # build open. Retry removal instead of failing the whole build on the
         # first transient sharing violation.
