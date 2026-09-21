@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Isolation Bytes Installer</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;font-family:"Segoe UI",sans-serif;background:radial-gradient(circle at top,#17304a,#0b1321 55%);color:#e7edf5}
+main{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:48px}
+.card{width:min(760px,100%);padding:44px;border:1px solid #29445f;border-radius:24px;background:rgba(10,21,35,.92);box-shadow:0 24px 80px rgba(0,0,0,.35)}
+.logo{font-size:15px;letter-spacing:.18em;text-transform:uppercase;color:#90e0ef;font-weight:700}
+h1{font-size:42px;margin:12px 0 10px}
+p{font-size:17px;line-height:1.6;color:#aebed0}
+.features{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:28px 0}
+.feature{padding:16px;border:1px solid #233b53;border-radius:14px;background:#101f31}
+button{border:0;border-radius:12px;padding:14px 24px;font-size:16px;font-weight:700;cursor:pointer}
+.primary{background:#48cae4;color:#07121d}.secondary{background:#1a2c40;color:#dce9f5;margin-left:10px}
+#status{min-height:28px;margin-top:18px;color:#90e0ef}
+@media(max-width:700px){.features{grid-template-columns:1fr}.card{padding:28px}h1{font-size:32px}}
+</style>
+</head>
+<body>
+<main><section class="card">
+<div class="logo">Isolation Bytes</div>
+<h1>Install your security application</h1>
+<p id="intro">This self-extracting installer will install the Isolation Bytes WebView application, its local scanning components, and the required Windows integration.</p>
+<div class="features">
+<div class="feature">✓ WebView2 desktop application</div>
+<div class="feature">✓ Local antivirus engine</div>
+<div class="feature">✓ Windows integration</div>
+<div class="feature">✓ Secure cloud dashboard</div>
+</div>
+<div>
+<button class="primary" id="install" onclick="install()">Install Isolation Bytes</button>
+<button class="secondary" onclick="cancel()">Cancel</button>
+</div>
+<div id="status"></div>
+</section></main>
+<script>
+function send(message){window.chrome.webview.postMessage(message)}
+function install(){
+ document.getElementById('install').disabled=true;
+ document.getElementById('status').textContent='Starting installation…';
+ send('install');
+}
+function cancel(){send('cancel')}
+window.setInstallerStatus=function(raw){
+ const data=JSON.parse(raw);
+ document.getElementById('status').textContent=data.message||'';
+ if(data.state==='error') document.getElementById('install').disabled=false;
+};
+</script>
+</body>
+</html>
