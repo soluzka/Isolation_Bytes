@@ -462,12 +462,15 @@ for d in ['msix', 'bin', 'obj']:
         shutil.rmtree(p, ignore_errors=True)
 
 print(f'\n{"="*60}\nCompiling IsolationBytes WPF launcher\n{"="*60}')
+dotnet_env = os.environ.copy()
+dotnet_env['ISOLATION_BYTES_PFX_PASSWORD'] = PFX_PASSWORD
 with _with_secret_injection(MAINWINDOW_CS, secret=CLOUD_API_KEY):
     run([dotnet, 'publish', CSPROJ,
          '-c', 'Release',
          '-r', 'win-x64',
          '-p:Platform=x64',
-         '--self-contained', 'false'])
+         '--self-contained', 'false'],
+         env=dotnet_env)
 
 publish_dir = os.path.join(NATIVE_DIR, 'bin', 'x64', 'Release',
                            'net8.0-windows', 'win-x64', 'publish')
