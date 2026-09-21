@@ -593,8 +593,8 @@ appinstaller_xml = f'''<?xml version="1.0" encoding="utf-8"?>
     Version="{APP_VERSION}"
     Uri="https://isolation-bytes.com/download/IsolationBytes.appinstaller" >
     <MainPackage
-        Name="soluzka.IsolationBytes"
-        Publisher="CN=soluzka, O=soluzka, C=US"
+        Name="soluzka.moodman"
+        Publisher="CN=911003E9-3151-40FA-9941-AA619C0A80D3"
         Version="{APP_VERSION}"
         ProcessorArchitecture="x64"
         Uri="https://isolation-bytes.com/download/IsolationBytes.msix" />
