@@ -100,7 +100,7 @@ if ($hasDesktopPackage) {
     Write-Host '  Certificate trusted.'
 
     # ─── 2. Remove and install the desktop package ─────────────────────
-    $pkgName = 'soluzka.IsolationBytes'
+    $pkgName = 'soluzka.moodman'
     $existing = Get-AppxPackage -Name $pkgName -ErrorAction SilentlyContinue
     if ($existing) {
         Write-Host "Removing previous version ($($existing.Version))..."
