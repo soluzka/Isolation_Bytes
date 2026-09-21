@@ -113,7 +113,7 @@ internal static class AntiDebug
 
 public static class Global
 {
-    public const string AUMID = "soluzka.IsolationBytes!IsolationBytes";
+    public const string AUMID = "soluzka.moodman!IsolationBytes";
     public const string PAYMENT_URL = "https://buy.stripe.com/7sY6oBaNqfsk7VrbgM0sU04";
     // No PUBLIC_KEY — license verification is done server-side now
     public const string SERVER_URL = "https://isolation-bytes.com";
@@ -619,7 +619,7 @@ public class LoginForm : Form
                 "Packages");
             if (Directory.Exists(winApps))
             {
-                foreach (var dir in Directory.GetDirectories(winApps, "soluzka.IsolationBytes*"))
+                foreach (var dir in Directory.GetDirectories(winApps, "soluzka.moodman*"))
                 {
                     candidates.Add(Path.Combine(dir, "IsolationBytes.exe"));
                 }
