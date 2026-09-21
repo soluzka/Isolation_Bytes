@@ -4,8 +4,8 @@
     Version="1.8.953.0"
     Uri="https://isolation-bytes.com/download/IsolationBytes.appinstaller" >
     <MainPackage
-        Name="soluzka.IsolationBytes"
-        Publisher="CN=soluzka, O=soluzka, C=US"
+        Name="soluzka.moodman"
+        Publisher="CN=911003E9-3151-40FA-9941-AA619C0A80D3"
         Version="1.8.953.0"
         ProcessorArchitecture="x64"
         Uri="https://isolation-bytes.com/download/IsolationBytes.msix" />
