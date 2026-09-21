@@ -339,9 +339,24 @@ def build_agent():
         print(f"ERROR: {spec_path} not found")
         return False
 
-    # Remove stale onedir output before producing the single-file agent.
+    # Agent-only builds produce a clean distribution containing only the
+    # standalone EXE. This prevents old cloud/login artifacts from being
+    # mistaken for agent dependencies.
+    if set(sys.argv[1:]) >= {"--agent"} and not ({"--cloud", "--launcher"} & set(sys.argv[1:])):
+        for item in DIST_DIR.iterdir():
+            try:
+                if item.is_dir():
+                    shutil.rmtree(item, ignore_errors=True)
+                else:
+                    item.unlink()
+            except OSError as exc:
+                print(f"ERROR: unable to clean agent-only output {item}: {exc}")
+                return False
+
+    # The spec is configured as PyInstaller ONEFILE: no COLLECT/onedir
+    # directory is allowed to remain beside the agent EXE.
     stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
-    if stale_agent_dir.is_dir():
+    if stale_agent_dir.exists():
         shutil.rmtree(stale_agent_dir, ignore_errors=True)
         if stale_agent_dir.exists():
             print(f"ERROR: unable to remove stale agent directory: {stale_agent_dir}")
@@ -355,20 +370,23 @@ def build_agent():
         return False
 
     exe = DIST_DIR / "IsolationBytesAgent.exe"
-    # The agent spec is intentionally one-file so the launcher can place a
-    # single executable beside the login EXE. Keep a compatibility fallback
-    # for older onedir builds left in dist/ by previous versions.
     if not exe.exists():
-        onedir_exe = DIST_DIR / "IsolationBytesAgent" / "IsolationBytesAgent.exe"
-        if onedir_exe.exists():
-            shutil.copy2(onedir_exe, exe)
-            print(f"  OK: copied legacy onedir agent to {exe}")
-        else:
-            print("ERROR: IsolationBytesAgent.exe was not produced by PyInstaller")
-            print(f"  Expected: {exe}")
-            print(f"  Build log: {PROJECT_ROOT / 'agent-build.log'}")
-            return False
+        print("ERROR: IsolationBytesAgent.exe was not produced by the one-file build")
+        print(f"  Expected: {exe}")
+        print(f"  Build log: {PROJECT_ROOT / 'agent-build.log'}")
+        return False
+
+    # Hard guarantee: the agent distribution contains the EXE only.
+    leftovers = [p for p in DIST_DIR.iterdir() if p.name != exe.name]
+    if leftovers:
+        print("ERROR: agent-only distribution contains unexpected files:")
+        for p in leftovers:
+            print(f"  - {p}")
+        return False
+
     print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
+    print("  OK: agent distribution contains only IsolationBytesAgent.exe")
+
     return True
 
 
