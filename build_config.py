@@ -366,23 +366,24 @@ if not args.skip_exe:
     else:
         print('NOTE: Optional universal launcher source/spec not available — skipping Python launcher EXE.')
 
-    # ── Build the standalone agent as onedir ──
-    agent_spec = os.path.join(BASE_DIR, 'standalone_agent.spec')
-    if os.path.isfile(agent_spec):
-        print(f'\n{"="*60}\nBuilding standalone agent onedir\n{"="*60}')
-        _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent', 'IsolationBytesAgent.exe'))
-        _ensure_spec_excludes(agent_spec, ('pydantic', 'pydantic_core'))
-        run([sys.executable, '-m', 'PyInstaller', agent_spec,
-             '--noconfirm',
-             '--distpath', DIST_DIR,
-             '--workpath', BUILD_DIR])
-        agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
-        agent_exe = os.path.join(agent_dir, 'IsolationBytesAgent.exe')
-        if os.path.isfile(agent_exe):
-            agent_size = os.path.getsize(agent_exe) / 1048576
-            print(f'Standalone agent onedir: {agent_dir} ({agent_size:.1f} MB)')
-        else:
-            print('WARNING: Standalone agent onedir not found.')
+    # ── Validate the standalone agent as a true ONEFILE ──
+    # buildconfig.py already builds standalone_agent.spec. Do not invoke
+    # PyInstaller a second time here: that old path recreated the
+    # dist/IsolationBytesAgent/ onedir directory.
+    print(f'\n{"="*60}\nValidating standalone agent ONEFILE\n{"="*60}')
+    agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
+    stale_agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
+    if os.path.isdir(stale_agent_dir):
+        shutil.rmtree(stale_agent_dir, ignore_errors=True)
+        if os.path.isdir(stale_agent_dir):
+            print(f'ERROR: stale agent directory could not be removed: {stale_agent_dir}')
+            sys.exit(1)
+    if not os.path.isfile(agent_exe):
+        print(f'ERROR: IsolationBytesAgent.exe not found at {agent_exe}')
+        print('The agent must be produced by buildconfig.py as a PyInstaller ONEFILE.')
+        sys.exit(1)
+    agent_size = os.path.getsize(agent_exe) / 1048576
+    print(f'IsolationBytesAgent.exe: {agent_size:.1f} MB (ONEFILE)')
 else:
     print('Skipping PyInstaller build (--skip-exe)')
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
@@ -449,14 +450,15 @@ server_dst = os.path.join(stage_dir, 'antivirus_server')
 shutil.copytree(onedir, server_dst, dirs_exist_ok=True)
 print(f'Embedded antivirus_server onedir ({len(os.listdir(server_dst))} items) into MSIX staging')
 
-# Embed the standalone agent onedir inside the MSIX
-agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
-if os.path.isdir(agent_dir):
-    agent_dst = os.path.join(stage_dir, 'IsolationBytesAgent')
-    shutil.copytree(agent_dir, agent_dst, dirs_exist_ok=True)
-    print(f'Embedded IsolationBytesAgent onedir ({len(os.listdir(agent_dst))} items) into MSIX staging')
+# Embed the standalone agent ONEFILE directly in the MSIX root.
+# No IsolationBytesAgent/ directory is created.
+agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
+if os.path.isfile(agent_exe):
+    agent_dst = os.path.join(stage_dir, 'IsolationBytesAgent.exe')
+    shutil.copy2(agent_exe, agent_dst)
+    print(f'Embedded IsolationBytesAgent.exe ({os.path.getsize(agent_dst) / 1048576:.1f} MB) into MSIX staging')
 else:
-    print('WARNING: IsolationBytesAgent onedir not found — MSIX will not include the agent')
+    print('WARNING: IsolationBytesAgent.exe not found — MSIX will not include the agent')
 
 total_items = sum(len(files) for _, _, files in os.walk(stage_dir))
 print(f'Staged {total_items} total files in {stage_dir}')
@@ -680,13 +682,11 @@ cloud_exe = os.path.join(DIST_DIR, 'cloud_server.exe')
 if os.path.isfile(cloud_exe):
     cloud_size = os.path.getsize(cloud_exe) / (1024 * 1024)
     print(f'  Cloud:   {cloud_exe} ({cloud_size:.1f} MB)')
-# Show agent onedir if it was built
-agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
-if os.path.isdir(agent_dir):
-    agent_exe = os.path.join(agent_dir, 'IsolationBytesAgent.exe')
-    if os.path.isfile(agent_exe):
-        agent_size = os.path.getsize(agent_exe) / (1024 * 1024)
-        print(f'  Agent:   {agent_dir} ({agent_size:.1f} MB)')
+# Show the standalone agent ONEFILE if it was built
+agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
+if os.path.isfile(agent_exe):
+    agent_size = os.path.getsize(agent_exe) / (1024 * 1024)
+    print(f'  Agent:   {agent_exe} ({agent_size:.1f} MB) [ONEFILE]')
 # Show universal launcher if it was built
 launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
 if os.path.isfile(launcher_exe):
