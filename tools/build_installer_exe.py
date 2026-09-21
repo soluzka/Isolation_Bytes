@@ -241,10 +241,17 @@ shutil.copytree(installer_payload, sfx_launcher)
 # PyInstaller installer underneath it as a private backend.
 backend_dir = sfx_launcher / 'installer_backend'
 backend_dir.mkdir(parents=True, exist_ok=True)
-backend_exe = sfx_launcher / 'Install_AntivirusServer.exe'
-if not backend_exe.exists():
+# Move the complete PyInstaller onedir payload, not just its EXE. PyInstaller
+# keeps its _internal/dependency tree beside the executable.
+backend_items = list(sfx_launcher.iterdir())
+if not backend_items:
     raise FileNotFoundError('PyInstaller installer backend was not produced')
-shutil.move(str(backend_exe), str(backend_dir / 'Install_AntivirusServer.exe'))
+for item in backend_items:
+    if item == backend_dir:
+        continue
+    shutil.move(str(item), str(backend_dir / item.name))
+if not (backend_dir / 'Install_AntivirusServer.exe').exists():
+    raise FileNotFoundError('PyInstaller installer backend executable was not produced')
 if sfx_webview_exe is None:
     raise FileNotFoundError('WebView2 SFX executable was not built')
 shutil.copy2(str(sfx_webview_exe), sfx_launcher / 'Install_AntivirusServer.exe')
