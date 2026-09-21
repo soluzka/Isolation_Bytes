@@ -368,9 +368,10 @@ if not args.skip_exe:
     daily_admin_source = os.path.join(BASE_DIR, 'tools', 'get_daily_admin.py')
     if os.path.isfile(daily_admin_spec) and os.path.isfile(daily_admin_source):
         print(f'\n{"="*60}\nBuilding GetDailyAdmin.exe\n{"="*60}')
+        # GetDailyAdmin.spec already defines a standalone EXE. PyInstaller
+        # rejects makespec flags such as --onefile when a .spec file is used.
         run([sys.executable, '-m', 'PyInstaller', daily_admin_spec,
              '--noconfirm',
-             '--onefile',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
         daily_admin_exe = os.path.join(DIST_DIR, 'GetDailyAdmin.exe')
