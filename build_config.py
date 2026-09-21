@@ -546,9 +546,95 @@ print(f'MSIX packed: {msix_path}')
 # 6. Sign the MSIX with signtool.exe
 # ---------------------------------------------------------------------------
 
+def _sign_msix(msix_file):
+    """Sign the MSIX with the configured PFX and expose useful diagnostics."""
+    if not os.path.isfile(SIGNTOOL):
+        raise RuntimeError(f'SignTool not found: {SIGNTOOL}')
+    if not os.path.isfile(PFX):
+        raise RuntimeError(f'MSIX signing certificate not found: {PFX}')
+    if not PFX_PASSWORD:
+        raise RuntimeError('ISOLATION_BYTES_PFX_PASSWORD is empty. Set it before signing.')
+
+    certutil = shutil.which('certutil.exe') or shutil.which('certutil')
+    if certutil:
+        print('Validating MSIX signing certificate with certutil...')
+        probe = safe_run(
+            [certutil, '-dump', '-p', PFX_PASSWORD, PFX],
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            check=False,
+        )
+        if probe.returncode != 0:
+            print(probe.stdout or '')
+            raise RuntimeError(
+                f'Windows could not open the signing PFX (certutil exit {probe.returncode}). '
+                'Check the PFX password, certificate, and private-key provider.'
+            )
+        cert_output = probe.stdout or ''
+        if 'Private key' not in cert_output and 'Private key:' not in cert_output:
+            print('WARNING: certutil did not report a private key in the PFX.')
+
+    primary = [
+        SIGNTOOL, 'sign', '/debug', '/v',
+        '/f', PFX, '/p', PFX_PASSWORD,
+        '/fd', 'sha256', msix_file,
+    ]
+    print('Signing MSIX with the configured PFX...')
+    result = safe_run(
+        [str(x) for x in primary],
+        cwd=BASE_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
+    )
+    output = result.stdout or ''
+    print(output, end='' if output.endswith('\n') else '\n')
+    if result.returncode == 0:
+        return
+
+    print('Primary MSIX signing attempt failed; retrying with certificate auto-selection...')
+    retry = [
+        SIGNTOOL, 'sign', '/debug', '/v', '/a',
+        '/f', PFX, '/p', PFX_PASSWORD,
+        '/fd', 'sha256', msix_file,
+    ]
+    retry_result = safe_run(
+        [str(x) for x in retry],
+        cwd=BASE_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
+    )
+    retry_output = retry_result.stdout or ''
+    print(retry_output, end='' if retry_output.endswith('\n') else '\n')
+    if retry_result.returncode == 0:
+        return
+
+    diagnostics = output + '\n' + retry_output
+    if '0x8007000b' in diagnostics or 'SignerSign() failed' in diagnostics:
+        raise RuntimeError(
+            'SignTool could not use the configured PFX private key. '
+            'This usually indicates an incompatible/corrupt private-key provider '
+            'or a PFX/certificate mismatch. The build did not replace the signing identity. '
+            f'PFX: {PFX}'
+        )
+    raise RuntimeError(
+        f'SignTool failed with exit code {retry_result.returncode}. '
+        'See the verbose SignTool output above.'
+    )
+
 print(f'\n{"="*60}\nSigning MSIX\n{"="*60}')
-run([SIGNTOOL, 'sign', '/f', PFX, '/p', PFX_PASSWORD,
-     '/fd', 'sha256', msix_path])
+_sign_msix(msix_path)
 print('MSIX signed.')
 
 # ---------------------------------------------------------------------------
