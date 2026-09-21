@@ -361,6 +361,26 @@ if not args.skip_exe:
         sys.exit(1)
     print(f'Onedir: {onedir}')
 
+    # ── Build the daily admin credentials utility ──
+    # Keep this as a standalone one-file executable so it is available in
+    # dist/ alongside the other Windows helper applications.
+    daily_admin_spec = os.path.join(BASE_DIR, 'GetDailyAdmin.spec')
+    daily_admin_source = os.path.join(BASE_DIR, 'tools', 'get_daily_admin.py')
+    if os.path.isfile(daily_admin_spec) and os.path.isfile(daily_admin_source):
+        print(f'\n{"="*60}\nBuilding GetDailyAdmin.exe\n{"="*60}')
+        run([sys.executable, '-m', 'PyInstaller', daily_admin_spec,
+             '--noconfirm',
+             '--onefile',
+             '--distpath', DIST_DIR,
+             '--workpath', BUILD_DIR])
+        daily_admin_exe = os.path.join(DIST_DIR, 'GetDailyAdmin.exe')
+        if not os.path.isfile(daily_admin_exe):
+            print(f'ERROR: GetDailyAdmin.exe was not produced at {daily_admin_exe}')
+            sys.exit(1)
+        print(f'GetDailyAdmin.exe built: {daily_admin_exe}')
+    else:
+        print('WARNING: GetDailyAdmin.spec or tools/get_daily_admin.py is missing; skipping credential utility.')
+
     # ── Build the universal launcher as a single standalone EXE ──
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
     launcher_source = os.path.join(BASE_DIR, 'universal_launcher.py')
