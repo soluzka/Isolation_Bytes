@@ -376,16 +376,24 @@ def build_agent():
         print(f"  Build log: {PROJECT_ROOT / 'agent-build.log'}")
         return False
 
-    # Hard guarantee: the agent distribution contains the EXE only.
-    leftovers = [p for p in DIST_DIR.iterdir() if p.name != exe.name]
-    if leftovers:
-        print("ERROR: agent-only distribution contains unexpected files:")
-        for p in leftovers:
-            print(f"  - {p}")
-        return False
-
-    print(f"  OK: {exe.name} ({exe.stat().st_size / 1048576:.1f} MB)")
-    print("  OK: agent distribution contains only IsolationBytesAgent.exe")
+    # Only an explicit agent-only build must contain the EXE and nothing else.
+    # Full builds intentionally place cloud_server.exe and/or the launcher in
+    # the same dist/ directory, so those artifacts must not be treated as
+    # unexpected agent dependencies.
+    agent_only = (
+        "--agent" in sys.argv[1:]
+        and not ({"--cloud", "--launcher"} & set(sys.argv[1:]))
+    )
+    if agent_only:
+        leftovers = [p for p in DIST_DIR.iterdir() if p.name != exe.name]
+        if leftovers:
+            print("ERROR: agent-only distribution contains unexpected files:")
+            for p in leftovers:
+                print(f"  - {p}")
+            return False
+        print("  OK: agent-only distribution contains only IsolationBytesAgent.exe")
+    else:
+        print("  OK: IsolationBytesAgent.exe built as a standalone ONEFILE artifact")
 
     return True
 
