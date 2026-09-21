@@ -404,8 +404,17 @@ if not args.skip_exe:
         print(f'ERROR: IsolationBytesAgent.exe not found at {agent_exe}')
         print('The agent must be produced by buildconfig.py as a PyInstaller ONEFILE.')
         sys.exit(1)
+    # The agent must remain a single EXE directly under dist\\. Do not
+    # stage/copy it into a sibling IsolationBytesAgent directory.
+    agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
+    if os.path.isdir(agent_dir):
+        print(f'ERROR: agent onedir directory exists: {agent_dir}')
+        sys.exit(1)
+    if os.path.dirname(os.path.abspath(agent_exe)) != os.path.abspath(DIST_DIR):
+        print(f'ERROR: agent EXE is not directly under dist: {agent_exe}')
+        sys.exit(1)
     agent_size = os.path.getsize(agent_exe) / 1048576
-    print(f'IsolationBytesAgent.exe: {agent_size:.1f} MB (ONEFILE)')
+    print(f'IsolationBytesAgent.exe: {agent_size:.1f} MB (ONEFILE, dist-root)')
 else:
     print('Skipping PyInstaller build (--skip-exe)')
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
