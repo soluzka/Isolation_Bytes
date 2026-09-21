@@ -547,6 +547,54 @@ print(f'MSIX packed: {msix_path}')
 # 6. Sign the MSIX with signtool.exe
 # ---------------------------------------------------------------------------
 
+
+def _signing_identity_diagnostics():
+    """Print the certificate identity and recent AppxPackaging errors."""
+    expected = None
+    try:
+        with open(MANIFEST, encoding='utf-8') as mf:
+            manifest = mf.read()
+        match = re.search(r'<Identity\\b[^>]*\\bPublisher="([^"]+)"', manifest)
+        if match:
+            expected = match.group(1).strip()
+    except OSError as exc:
+        print(f'WARNING: could not read package manifest: {exc}')
+
+    print('MSIX signing identity diagnostics:')
+    print(f'  Manifest Publisher: {expected or "<not found>"}')
+
+    certutil = shutil.which('certutil.exe') or shutil.which('certutil')
+    if certutil:
+        probe = safe_run(
+            [certutil, '-dump', '-p', PFX_PASSWORD, PFX],
+            cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace', check=False)
+        out = probe.stdout or ''
+        if probe.returncode == 0:
+            subject = None
+            for line in out.splitlines():
+                if line.strip().lower().startswith('subject:'):
+                    subject = line.split(':', 1)[1].strip()
+                    break
+            print(f'  PFX Subject:       {subject or "<not reported>"}')
+            if expected and subject and expected.casefold() != subject.casefold():
+                print('  ERROR: Manifest Publisher does not exactly match the PFX Subject.')
+        else:
+            print(f'  WARNING: certutil could not inspect the PFX (exit {probe.returncode}).')
+
+    powershell = shutil.which('powershell.exe') or shutil.which('powershell')
+    if powershell:
+        ps = ("$log='Microsoft-Windows-AppxPackaging/Operational'; "
+              "Get-WinEvent -FilterHashtable @{LogName=$log; StartTime=(Get-Date).AddMinutes(-10)} "
+              "-ErrorAction SilentlyContinue | Select-Object -First 5 TimeCreated,Id,Message | Format-List")
+        events = safe_run(
+            [powershell, '-NoProfile', '-Command', ps],
+            cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding='utf-8', errors='replace', check=False)
+        if events.stdout and events.stdout.strip():
+            print('  Recent AppxPackaging/Operational events:')
+            print(events.stdout.rstrip())
+
 def _sign_msix(msix_file):
     """Sign the MSIX with the configured PFX and expose useful diagnostics."""
     if not os.path.isfile(SIGNTOOL):
@@ -622,6 +670,7 @@ def _sign_msix(msix_file):
         return
 
     diagnostics = output + '\n' + retry_output
+    _signing_identity_diagnostics()
     if '0x8007000b' in diagnostics or 'SignerSign() failed' in diagnostics:
         raise RuntimeError(
             'SignTool could not use the configured PFX private key. '
