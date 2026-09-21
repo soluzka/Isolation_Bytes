@@ -6,11 +6,17 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+# This script is launched as tools/build_installer_exe.py, so Python initially
+# puts tools/ (not the repository root) on sys.path. Add the repository root
+# before importing the shared utils package.
+base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if base_dir not in sys.path:
+    sys.path.insert(0, base_dir)
+
 import PyInstaller.__main__
 
 from utils.subprocess_safe import safe_run, safe_check_call
 
-base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 dist_dir = os.environ.get('ANTIVIRUS_BUILD_DIST', os.path.join(base_dir, 'dist'))
 app = os.path.join(base_dir, 'installer_app.py')
 msix = os.path.join(dist_dir, 'IsolationBytes.msix')
