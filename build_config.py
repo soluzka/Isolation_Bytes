@@ -34,7 +34,7 @@ NATIVE_DIR = os.path.join(BASE_DIR, 'native', 'IsolationBytesMSIX')
 CSPROJ = os.path.join(NATIVE_DIR, 'IsolationBytes.csproj')
 MANIFEST = os.path.join(NATIVE_DIR, 'Package.appxmanifest')
 PFX = os.path.join(NATIVE_DIR, 'IsolationBytes.pfx')
-PFX_PASSWORD = os.environ.get('ISOLATION_BYTES_PFX_PASSWORD', 'IsolationBytes2026')
+PFX_PASSWORD = 'IsolationBytes2026'
 
 # Windows SDK tools
 SDK_BIN = r'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
