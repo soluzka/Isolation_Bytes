@@ -353,17 +353,39 @@ def build_agent():
                 print(f"ERROR: unable to clean agent-only output {item}: {exc}")
                 return False
 
-    # The spec is configured as PyInstaller ONEFILE: no COLLECT/onedir
-    # directory is allowed to remain beside the agent EXE.
+    # Enforce the repository's ONEFILE contract before invoking PyInstaller.
+    # A stale local spec containing COLLECT would otherwise silently recreate
+    # the old onedir layout and make the later validation fail.
+    try:
+        spec_text = spec_path.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        print(f"ERROR: unable to read agent spec: {exc}")
+        return False
+    if "COLLECT(" in spec_text or "exclude_binaries=True" in spec_text:
+        print("ERROR: standalone_agent.spec is still configured for PyInstaller onedir output.")
+        print("  Update the local checkout to the security-v2 ONEFILE spec before building.")
+        print(f"  Spec: {spec_path}")
+        return False
+    if "exe = EXE(" not in spec_text:
+        print("ERROR: standalone_agent.spec does not contain the required direct EXE build.")
+        return False
+
+    # Remove stale agent output and its PyInstaller cache before rebuilding.
     stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
     if stale_agent_dir.exists():
         shutil.rmtree(stale_agent_dir, ignore_errors=True)
         if stale_agent_dir.exists():
             print(f"ERROR: unable to remove stale agent directory: {stale_agent_dir}")
             return False
+    agent_build_dir = PROJECT_ROOT / "build" / "IsolationBytesAgent"
+    if agent_build_dir.exists():
+        shutil.rmtree(agent_build_dir, ignore_errors=True)
+        if agent_build_dir.exists():
+            print(f"ERROR: unable to remove stale agent build cache: {agent_build_dir}")
+            return False
 
     if not _run_build_command(
-        [sys.executable, "-m", "PyInstaller", str(spec_path), "--noconfirm", "--distpath", str(DIST_DIR)],
+        [sys.executable, "-m", "PyInstaller", str(spec_path), "--noconfirm", "--clean", "--distpath", str(DIST_DIR)],
         cwd=PROJECT_ROOT, log_name="agent-build.log"
     ):
         print("FAILED: IsolationBytesAgent.exe build")
