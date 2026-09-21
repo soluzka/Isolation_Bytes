@@ -373,15 +373,42 @@ def build_agent():
     # Remove stale agent output and its PyInstaller cache before rebuilding.
     stale_agent_dir = DIST_DIR / "IsolationBytesAgent"
     if stale_agent_dir.exists():
-        shutil.rmtree(stale_agent_dir, ignore_errors=True)
-        if stale_agent_dir.exists():
-            print(f"ERROR: unable to remove stale agent directory: {stale_agent_dir}")
+        # Windows/OneDrive can briefly hold files from the previous onedir
+        # build open. Retry removal instead of failing the whole build on the
+        # first transient sharing violation.
+        removed = False
+        for attempt in range(1, 6):
+            try:
+                shutil.rmtree(stale_agent_dir)
+            except OSError as exc:
+                print(f"  Waiting for stale agent directory to unlock (attempt {attempt}/5): {exc}")
+                import time
+                time.sleep(2)
+            if not stale_agent_dir.exists():
+                removed = True
+                break
+        if not removed:
+            print("ERROR: unable to remove stale agent directory after 5 attempts.")
+            print(f"  Path: {stale_agent_dir}")
+            print("  Close any running IsolationBytesAgent.exe process and pause OneDrive syncing, then retry.")
             return False
+
     agent_build_dir = PROJECT_ROOT / "build" / "IsolationBytesAgent"
     if agent_build_dir.exists():
-        shutil.rmtree(agent_build_dir, ignore_errors=True)
-        if agent_build_dir.exists():
-            print(f"ERROR: unable to remove stale agent build cache: {agent_build_dir}")
+        removed = False
+        for attempt in range(1, 6):
+            try:
+                shutil.rmtree(agent_build_dir)
+            except OSError as exc:
+                print(f"  Waiting for agent build cache to unlock (attempt {attempt}/5): {exc}")
+                import time
+                time.sleep(1)
+            if not agent_build_dir.exists():
+                removed = True
+                break
+        if not removed:
+            print("ERROR: unable to remove stale agent build cache after 5 attempts.")
+            print(f"  Path: {agent_build_dir}")
             return False
 
     if not _run_build_command(
