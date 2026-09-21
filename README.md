@@ -161,10 +161,10 @@ Auto-detects the OS, installs the appropriate components, and launches the app. 
 
 | Property | Value |
 |----------|-------|
-| Package Name | `soluzka.IsolationBytes` |
+| Package Name | `soluzka.moodman` |
 | Application ID | `IsolationBytes` |
-| AUMID | `soluzka.IsolationBytes!IsolationBytes` |
-| Publisher | `CN=soluzka, O=soluzka, C=US` |
+| AUMID | `soluzka.moodman!IsolationBytes` |
+| Publisher | `CN=911003E9-3151-40FA-9941-AA619C0A80D3` |
 | Auto-update | Every 6 hours via AppInstaller |
 
 ## Login Launcher
