@@ -689,10 +689,12 @@ def _complete_agent_scan_results_response():
             'message': 'Conditional Startup is the current dashboard scan generation.',
         }), 200
 
-    # Cloud deployments do not run the Windows Conditional Startup worker.
-    # Fall back to the server-owned connected-agent generation instead of
-    # returning a false empty scan.
-    state = _canonical_yara_agent_state()
+    # Prefer the persisted Conditional Startup generation whenever this
+    # deployment exposes it. The dashboard must use one authoritative scan
+    # counter instead of mixing it with the connected-agent generation.
+    state = _conditional_startup_state()
+    if not isinstance(state, dict):
+        state = _canonical_yara_agent_state()
     findings = state.get('findings') or []
     scanned = int(state.get('scanned_files') or 0)
     quarantined = int(state.get('quarantined_files') or 0)
