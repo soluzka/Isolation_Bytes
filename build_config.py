@@ -84,7 +84,7 @@ args = parser.parse_args()
 
 
 def run(cmd, **kw):
-    """Run a build command and preserve actionable child diagnostics."""
+    """Run a build command while preserving actionable diagnostics."""
     cmd = [str(x) for x in cmd]
     print(f'>>> {" ".join(cmd)}')
     kw.setdefault('check', True)
@@ -92,45 +92,22 @@ def run(cmd, **kw):
 
 
 def _run_buildconfig():
-    """Run buildconfig.py without hiding the real child-process failure."""
+    """Run buildconfig.py and preserve the real child-process diagnostics."""
     buildconfig = os.path.join(BASE_DIR, 'buildconfig.py')
-    if not os.path.isfile(buildconfig):
-        print('NOTE: buildconfig.py not found — skipping cloud server + login exe build.')
-        return True
-
-    print(f'\n{"="*60}\nBuilding cloud_server.exe + IsolationBytesAgent.exe + IsolationBytesLogin.exe\n{"="*60}')
-    command = [sys.executable, buildconfig]
-
-    # Keep the child output visible.  The previous implementation used
-    # check=True, which converted the useful inner failure into only:
-    # "CalledProcessError ... buildconfig.py ... exit status 1".
+    print(f'>>> {sys.executable} {buildconfig}')
     result = safe_run(
-        command,
+        [sys.executable, buildconfig],
         cwd=BASE_DIR,
-        stdout=None,
-        stderr=None,
         check=False,
     )
-
     if result.returncode == 0:
-        login_exe = os.path.join(DIST_DIR, 'IsolationBytesLogin.exe')
-        if os.path.isfile(login_exe):
-            login_size = os.path.getsize(login_exe) / 1048576
-            print(f'IsolationBytesLogin.exe built ({login_size:.1f} MB)')
         return True
-
-    print(f'\nERROR: buildconfig.py failed with exit code {result.returncode}.')
-    print('The failure occurred inside buildconfig.py, not in the MSIX wrapper.')
-
-    # The child builder writes separate logs for the PyInstaller targets.
-    # Show their locations so the first actionable error is immediately
-    # available instead of requiring the user to reproduce the build.
+    print(f'ERROR: buildconfig.py failed with exit code {result.returncode}.')
     for log_name in ('cloud_server-build.log', 'agent-build.log'):
         log_path = os.path.join(BASE_DIR, log_name)
         if os.path.isfile(log_path):
             print(f'  Build log: {log_path}')
-
-    raise SystemExit(result.returncode)
+    return False
 
 
 def _ensure_spec_excludes(spec_path, modules):
@@ -147,58 +124,209 @@ def _ensure_spec_excludes(spec_path, modules):
     hook_found = False
     excludes_found = False
     skip_excludes_continuation = False
-
     for line in lines:
         stripped = line.strip()
         if skip_excludes_continuation:
-            if ']' in line:
+            if stripped.startswith('noarchive=') or stripped.startswith('noarchive ='):
                 skip_excludes_continuation = False
+                normalized.append(line)
             continue
-        if stripped.startswith('hookspath='):
-            hook_found = True
-        if stripped.startswith('excludes='):
-            excludes_found = True
-            prefix, _, remainder = line.partition('[')
-            existing = []
-            if ']' in remainder:
-                remainder = remainder.split(']', 1)[0]
-                try:
-                    existing = ast.literal_eval('[' + remainder + ']')
-                except Exception:
-                    existing = []
-            merged = list(dict.fromkeys([str(x) for x in existing] + wanted))
+        if stripped.startswith('hookspath=') or stripped.startswith('hookspath ='):
             indent = line[:len(line) - len(line.lstrip())]
-            normalized.append(f"{indent}excludes={merged!r},")
-            if ']' not in line:
+            hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks')
+            normalized.append(indent + 'hookspath=[' + repr(hook_dir) + '],')
+            hook_found = True
+            continue
+        if stripped.startswith('excludes=') or stripped.startswith('excludes ='):
+            indent = line[:len(line) - len(line.lstrip())]
+            existing = []
+            try:
+                value = stripped.split('=', 1)[1].strip().rstrip(',')
+                parsed = ast.literal_eval(value)
+                if isinstance(parsed, (list, tuple)):
+                    existing = [str(x) for x in parsed]
+            except (SyntaxError, ValueError):
+                pass
+            merged = list(dict.fromkeys(existing + wanted))
+            normalized.append(indent + 'excludes=[' + ', '.join(repr(x) for x in merged) + '],')
+            excludes_found = True
+            if not stripped.endswith(']'):
                 skip_excludes_continuation = True
             continue
         normalized.append(line)
-
+    content = chr(10).join(normalized) + chr(10)
     if not hook_found:
-        for i, line in enumerate(normalized):
-            if line.strip().startswith('pathex='):
-                normalized.insert(i + 1, "    hookspath=[],")
-                break
-
+        content = re.sub(r'(\bAnalysis\s*\(\s*\n)', lambda m: m.group(1) + '    hookspath=[' + repr(os.path.join(BASE_DIR, 'pyinstaller_hooks')) + '],\n', content, count=1)
     if not excludes_found:
-        for i, line in enumerate(normalized):
-            if line.strip() == 'noarchive=False,':
-                normalized.insert(i, f"    excludes={wanted!r},")
-                break
-
+        content = re.sub(r'(\bAnalysis\s*\(\s*\n)', lambda m: m.group(1) + '    excludes=[' + ', '.join(repr(x) for x in wanted) + '],\n', content, count=1)
     with open(spec_path, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(normalized) + '\n')
+        f.write(content)
+    print(f'PyInstaller spec normalized: {os.path.basename(spec_path)}')
+    print(f'  exclusions: {", ".join(wanted)}')
+
+def _generate_antivirus_server_spec(spec_path):
+    """Generate the antivirus server spec so stale local specs cannot break builds."""
+    project = BASE_DIR.replace('\\', '\\\\')
+    data_dirs = ['templates', 'static', 'website', 'security', 'blocklists', 'utils', 'yara_rules', 'security/ml_models']
+    datas = []
+    for directory in data_dirs:
+        source = os.path.join(BASE_DIR, directory)
+        if os.path.isdir(source):
+            datas.append((source, directory))
+    data_str = ',\n    '.join('(' + repr(src) + ', ' + repr(dst) + ')' for src, dst in datas)
+    hidden = ['flask','flask.sessions','flask_cors','flask_limiter','flask_wtf','werkzeug','requests','psutil','ssl','dotenv','cryptography','cryptography.fernet','cryptography.hazmat','cryptography.hazmat.primitives','cryptography.hazmat.backends','cryptography.x509','bcrypt','pyotp','security.yara_scanner','security.ml_yara_analyzer','security.c2_detector','security.secure_memory','security.local_assistant','security.assistant_trainer','security.assistant_database','security.local_agent','quarantine_utils','file_crypto','utils.paths','waitress','sklearn','sklearn.ensemble','sklearn.linear_model','sklearn.svm','sklearn.tree','sklearn.neural_network','sklearn.preprocessing','sklearn.decomposition','sklearn.pipeline','sklearn.metrics','sklearn.model_selection','numpy','scipy','scipy.sparse','onnxruntime','yara','joblib','pefile','tlsh','lief']
+    excludes = ['tensorflow','torch','torchvision','sentence_transformers','transformers','safetensors','matplotlib','IPython','ipykernel','notebook','pytest','pydantic','pydantic_core','_pyinstaller_hooks_contrib','Crypto']
+    spec = """# -*- mode: python ; coding: utf-8 -*-
+# AUTO-GENERATED by build_config.py. Do not edit manually.
+datas = [
+    %s
+]
+binaries = []
+hiddenimports = [%s]
+excludes = [%s]
+
+a = Analysis(
+    [r'%s\\app.py'],
+    pathex=[r'%s'],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
+    hookspath=[r'%s\\pyinstaller_hooks'],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=excludes,
+    noarchive=False,
+    optimize=0,
+)
+pyz = PYZ(a.pure)
+exe = EXE(
+    pyz, a.scripts, [],
+    exclude_binaries=True,
+    name='antivirus_server',
+    debug=False, bootloader_ignore_signals=False, strip=False,
+    upx=True, upx_exclude=[], runtime_tmpdir=None,
+    console=True, disable_windowed_traceback=False, argv_emulation=False,
+    target_arch=None, codesign_identity=None, entitlements_file=None,
+)
+coll = COLLECT(
+    exe, a.binaries, a.datas, strip=False, upx=True, upx_exclude=[], name='antivirus_server',
+)
+""" % (data_str, ', '.join(repr(x) for x in hidden), ', '.join(repr(x) for x in excludes), project, project, project)
+    with open(spec_path, 'w', encoding='utf-8') as f:
+        f.write(spec)
+    print(f'Generated antivirus_server.spec: {spec_path}')
+
+def find_dotnet():
+    for c in [shutil.which('dotnet'),
+              os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
+              r'C:\Program Files\dotnet\dotnet.exe']:
+        if c and os.path.isfile(c):
+            return c
+    raise RuntimeError('.NET SDK not found. Install from https://dot.net')
+
+
+def _stop_running_agent_processes(exe_path):
+    """Release the agent EXE before PyInstaller replaces it on Windows."""
+    try:
+        import psutil
+    except ImportError:
+        return
+
+    target = os.path.normcase(os.path.abspath(exe_path))
+    processes = []
+    for process in psutil.process_iter(['pid', 'exe']):
+        try:
+            process_exe = process.info.get('exe')
+            if process_exe and os.path.normcase(os.path.abspath(process_exe)) == target:
+                processes.append(process)
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    if not processes:
+        return
+
+    print(f'Stopping {len(processes)} running agent process(es) before rebuild')
+    for process in processes:
+        try:
+            process.terminate()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+
+    _, alive = psutil.wait_procs(processes, timeout=5)
+    for process in alive:
+        try:
+            process.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    if alive:
+        psutil.wait_procs(alive, timeout=5)
+
+
+def update_version(version):
+    """Update version in .csproj, Package.appxmanifest, Android, and PWA."""
+    with open(CSPROJ, encoding='utf-8') as f:
+        content = f.read()
+    content = re.sub(r'<Version>[\d.]+</Version>', f'<Version>{version}</Version>', content)
+    with open(CSPROJ, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    with open(MANIFEST, encoding='utf-8') as f:
+        m = f.read()
+    m = re.sub(r'Version="[\d.]+"', f'Version="{version}"', m, count=1)
+    with open(MANIFEST, 'w', encoding='utf-8') as f:
+        f.write(m)
+
+    parts = [int(p) for p in version.split('.')]
+    while len(parts) < 4:
+        parts.append(0)
+    version_code = parts[0] * 10000000 + parts[1] * 1000000 + parts[2] * 1000 + parts[3]
+
+    gradle_path = os.path.join(BASE_DIR, 'android', 'app', 'build.gradle')
+    with open(gradle_path, encoding='utf-8') as f:
+        g = f.read()
+    g = re.sub(r'versionName "[^"]*"', f'versionName "{version}"', g)
+    g = re.sub(r'versionCode \d+', f'versionCode {version_code}', g)
+    with open(gradle_path, 'w', encoding='utf-8') as f:
+        f.write(g)
+
+    agent_path = os.path.join(BASE_DIR, 'android', 'app', 'src', 'main', 'java', 'com', 'soluzka', 'antivirus', 'AgentService.kt')
+    with open(agent_path, encoding='utf-8') as f:
+        kt = f.read()
+    kt = re.sub(r'AGENT_VERSION = "[^"]*"', f'AGENT_VERSION = "{version}"', kt)
+    with open(agent_path, 'w', encoding='utf-8') as f:
+        f.write(kt)
+
+    sw_path = os.path.join(BASE_DIR, 'static', 'sw.js')
+    with open(sw_path, encoding='utf-8') as f:
+        sw = f.read()
+    sw = re.sub(r"const AGENT_VERSION = '[^']*';", f"const AGENT_VERSION = '{version}';", sw)
+    cache_name = f'isolation-bytes-v{version.replace(".", "-")}'
+    sw = re.sub(r"const CACHE_NAME = '[^']*';", f"const CACHE_NAME = '{cache_name}';", sw)
+    with open(sw_path, 'w', encoding='utf-8') as f:
+        f.write(sw)
+
+    print(f'Updated version to {version}')
 
 
 # ---------------------------------------------------------------------------
 # 1. Build cloud_server.exe + IsolationBytesLogin.exe (via buildconfig.py)
+#    This builds the cloud server, embeds resources, then builds the login
+#    launcher EXE with cloud_server.exe embedded inside it.
 # ---------------------------------------------------------------------------
 
 if not args.skip_exe:
     buildconfig = os.path.join(BASE_DIR, 'buildconfig.py')
     if os.path.isfile(buildconfig):
+        print(f'\n{"="*60}\nBuilding cloud_server.exe + IsolationBytesLogin.exe\n{"="*60}')
         with _with_secret_injection(PROGRAM_CS, secret=CLOUD_API_KEY):
-            _run_buildconfig()
+            if not _run_buildconfig():
+                sys.exit(1)
+        login_exe = os.path.join(DIST_DIR, 'IsolationBytesLogin.exe')
+        if os.path.isfile(login_exe):
+            login_size = os.path.getsize(login_exe) / 1048576
+            print(f'IsolationBytesLogin.exe built ({login_size:.1f} MB)')
+        else:
+            print('WARNING: IsolationBytesLogin.exe not found — continuing with MSIX build.')
     else:
         print('NOTE: buildconfig.py not found — skipping cloud server + login exe build.')
 
@@ -218,6 +346,8 @@ if not args.skip_exe:
     spec = os.path.join(BASE_DIR, 'antivirus_server.spec')
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
+    # Always regenerate this local spec from repository configuration. This
+    # prevents stale/manual specs from causing syntax or option errors.
     _generate_antivirus_server_spec(spec)
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
@@ -236,6 +366,9 @@ if not args.skip_exe:
     launcher_source = os.path.join(BASE_DIR, 'universal_launcher.py')
     launcher_dist_source = os.path.join(DIST_DIR, 'universal_launcher.py')
 
+    # The WPF MSIX is the primary Windows launcher. The legacy Python
+    # universal launcher is optional and may not be checked into the repo.
+    # Never abort the MSIX build merely because that optional source is absent.
     if os.path.isfile(launcher_spec) and (os.path.isfile(launcher_source) or os.path.isfile(launcher_dist_source)):
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
         if not os.path.isfile(launcher_dist_source) and os.path.isfile(launcher_source):
@@ -256,6 +389,9 @@ if not args.skip_exe:
         print('NOTE: Optional universal launcher source/spec not available — skipping Python launcher EXE.')
 
     # ── Validate the standalone agent as a true ONEFILE ──
+    # buildconfig.py already builds standalone_agent.spec. Do not invoke
+    # PyInstaller a second time here: that old path recreated the
+    # dist/IsolationBytesAgent/ onedir directory.
     print(f'\n{"="*60}\nValidating standalone agent ONEFILE\n{"="*60}')
     agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
     stale_agent_dir = os.path.join(DIST_DIR, 'IsolationBytesAgent')
@@ -270,6 +406,12 @@ if not args.skip_exe:
         sys.exit(1)
     agent_size = os.path.getsize(agent_exe) / 1048576
     print(f'IsolationBytesAgent.exe: {agent_size:.1f} MB (ONEFILE)')
+else:
+    print('Skipping PyInstaller build (--skip-exe)')
+    onedir = os.path.join(DIST_DIR, 'antivirus_server')
+    if not os.path.isdir(onedir):
+        print(f'ERROR: {onedir} not found. Run without --skip-exe first.')
+        sys.exit(1)
 
 # ---------------------------------------------------------------------------
 # 2. Update version
@@ -313,6 +455,7 @@ if os.path.isdir(stage_dir):
     shutil.rmtree(stage_dir, ignore_errors=True)
 os.makedirs(stage_dir)
 
+# Copy the WPF app files
 for item in os.listdir(publish_dir):
     src = os.path.join(publish_dir, item)
     dst = os.path.join(stage_dir, item)
@@ -321,12 +464,16 @@ for item in os.listdir(publish_dir):
     else:
         shutil.copy2(src, dst)
 
+# Copy the AppxManifest.xml
 shutil.copy2(MANIFEST, os.path.join(stage_dir, 'AppxManifest.xml'))
 
+# Embed the antivirus_server onedir inside the MSIX
 server_dst = os.path.join(stage_dir, 'antivirus_server')
 shutil.copytree(onedir, server_dst, dirs_exist_ok=True)
 print(f'Embedded antivirus_server onedir ({len(os.listdir(server_dst))} items) into MSIX staging')
 
+# Embed the standalone agent ONEFILE directly in the MSIX root.
+# No IsolationBytesAgent/ directory is created.
 agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
 if os.path.isfile(agent_exe):
     agent_dst = os.path.join(stage_dir, 'IsolationBytesAgent.exe')
@@ -338,11 +485,16 @@ else:
 total_items = sum(len(files) for _, _, files in os.walk(stage_dir))
 print(f'Staged {total_items} total files in {stage_dir}')
 
+# ---------------------------------------------------------------------------
+# 5. Pack the MSIX with makeappx.exe
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nPacking IsolationBytes MSIX v{APP_VERSION}\n{"="*60}')
 
 os.makedirs(DIST_DIR, exist_ok=True)
 msix_path = os.path.join(DIST_DIR, 'IsolationBytes.msix')
 
+# Build in temp to avoid OneDrive sync issues, then copy
 temp_msix = os.path.join(os.environ.get('TEMP', os.path.expanduser('~')),
                          'IsolationBytes.msix')
 if os.path.isfile(temp_msix):
@@ -350,6 +502,7 @@ if os.path.isfile(temp_msix):
 
 run([MAKEAPPX, 'pack', '/d', stage_dir, '/p', temp_msix, '/nv', '/o'])
 
+# OneDrive/cloud-only files can reject an in-place overwrite; remove first.
 if os.path.isfile(msix_path):
     try:
         os.remove(msix_path)
@@ -360,10 +513,18 @@ shutil.copy2(temp_msix, msix_path)
 os.remove(temp_msix)
 print(f'MSIX packed: {msix_path}')
 
+# ---------------------------------------------------------------------------
+# 6. Sign the MSIX with signtool.exe
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nSigning MSIX\n{"="*60}')
 run([SIGNTOOL, 'sign', '/f', PFX, '/p', PFX_PASSWORD,
      '/fd', 'sha256', msix_path])
 print('MSIX signed.')
+
+# ---------------------------------------------------------------------------
+# 7. Export the public certificate for sideload installation
+# ---------------------------------------------------------------------------
 
 cer_path = os.path.join(DIST_DIR, 'IsolationBytes.cer')
 ps_cmd = (
@@ -376,6 +537,10 @@ run(['powershell.exe', '-NoProfile', '-Command', ps_cmd], check=False)
 if os.path.isfile(cer_path):
     print(f'Certificate exported: {cer_path}')
 
+# ---------------------------------------------------------------------------
+# 7b. Trust the certificate locally so the MSIX can be sideloaded
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nTrusting certificate\n{"="*60}')
 trust_cmd = (
     f"Import-Certificate -FilePath '{cer_path}' "
@@ -384,6 +549,10 @@ trust_cmd = (
 run(['powershell.exe', '-NoProfile', '-Command', trust_cmd], check=False)
 print(f'Certificate trusted in LocalMachine\\TrustedPeople')
 
+# ---------------------------------------------------------------------------
+# 8. Copy universal installer scripts to dist/
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nCopying installer scripts\n{"="*60}')
 for script in ['install-windows.ps1', 'install-windows.bat',
                'install-macos.sh', 'install-linux.sh',
@@ -391,6 +560,7 @@ for script in ['install-windows.ps1', 'install-windows.bat',
                'standalone_agent.py', 'start_agent.bat',
                'install-universal.bat', 'install-universal.sh',
                'install-android.sh', 'install-chromeos.sh']:
+    # Check dist/ first (install scripts live there now), then BASE_DIR as fallback
     src = os.path.join(DIST_DIR, script)
     if not os.path.isfile(src):
         src = os.path.join(BASE_DIR, script)
@@ -401,6 +571,10 @@ for script in ['install-windows.ps1', 'install-windows.bat',
             print(f'Copied {script} to dist/')
         else:
             print(f'{script} already in dist/')
+
+# ---------------------------------------------------------------------------
+# 8b. Generate the .appinstaller file so Windows can sideload & auto-update
+# ---------------------------------------------------------------------------
 
 print(f'\n{"="*60}\nGenerating IsolationBytes.appinstaller v{APP_VERSION}\n{"="*60}')
 appinstaller_path = os.path.join(DIST_DIR, 'IsolationBytes.appinstaller')
@@ -430,6 +604,10 @@ appinstaller_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 with open(appinstaller_path, 'w', encoding='utf-8') as f:
     f.write(appinstaller_xml)
 print(f'AppInstaller generated: {appinstaller_path}')
+
+# ---------------------------------------------------------------------------
+# 9. Package PWA and Chrome extension
+# ---------------------------------------------------------------------------
 
 pwa_zip = os.path.join(DIST_DIR, f'IsolationBytesPWA-v{APP_VERSION}.zip')
 ext_zip = os.path.join(DIST_DIR, f'IsolationBytesChrome-v{APP_VERSION}.zip')
@@ -461,6 +639,10 @@ if os.path.isdir(ext_dir):
 else:
     print('WARNING: browser_extension/ not found — Chrome zip skipped')
 
+# ---------------------------------------------------------------------------
+# 10. Build Android APK
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nBuilding Android APK\n{"="*60}')
 
 apk_dst = os.path.join(DIST_DIR, f'IsolationBytes-v{APP_VERSION}.apk')
@@ -481,8 +663,11 @@ if os.path.isfile(gradlew):
 else:
     print(f'WARNING: gradlew.bat not found — Android APK build skipped')
 
-print(f'\n{"="*60}\nBuilding SFX installer\n{"="*60}')
+# ---------------------------------------------------------------------------
+# 11. Build WinRAR self-extracting installer (SFX)
+# ---------------------------------------------------------------------------
 
+print(f'\n{"="*60}\nBuilding SFX installer\n{"="*60}')
 sfx_builder = os.path.join(BASE_DIR, 'tools', 'build_installer_exe.py')
 if os.path.isfile(sfx_builder):
     sfx_result = safe_run(
@@ -499,6 +684,10 @@ if os.path.isfile(sfx_builder):
 else:
     print(f'WARNING: {sfx_builder} not found — SFX build skipped.')
 
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
+
 msix_size_mb = os.path.getsize(msix_path) / (1024 * 1024)
 print(f'\n{"="*60}')
 print(f'Build complete!')
@@ -506,6 +695,7 @@ print(f'  Version: {APP_VERSION}')
 print(f'  MSIX:    {msix_path} ({msix_size_mb:.1f} MB)')
 print(f'  Cert:    {cer_path}')
 print(f'  AppInstaller: {appinstaller_path}')
+# Show login exe if it was built
 login_exe = os.path.join(DIST_DIR, 'IsolationBytesLogin.exe')
 if os.path.isfile(login_exe):
     login_size = os.path.getsize(login_exe) / (1024 * 1024)
@@ -514,10 +704,12 @@ cloud_exe = os.path.join(DIST_DIR, 'cloud_server.exe')
 if os.path.isfile(cloud_exe):
     cloud_size = os.path.getsize(cloud_exe) / (1024 * 1024)
     print(f'  Cloud:   {cloud_exe} ({cloud_size:.1f} MB)')
+# Show the standalone agent ONEFILE if it was built
 agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
 if os.path.isfile(agent_exe):
     agent_size = os.path.getsize(agent_exe) / (1024 * 1024)
     print(f'  Agent:   {agent_exe} ({agent_size:.1f} MB) [ONEFILE]')
+# Show universal launcher if it was built
 launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
 if os.path.isfile(launcher_exe):
     launcher_size = os.path.getsize(launcher_exe) / (1024 * 1024)
