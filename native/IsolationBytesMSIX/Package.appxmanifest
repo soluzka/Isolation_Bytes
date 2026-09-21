@@ -8,8 +8,9 @@
   xmlns:desktop="http://schemas.microsoft.com/appx/manifest/desktop/windows10"
   IgnorableNamespaces="uap uap3 rescap com desktop">
 
-  <Identity Name="soluzka.IsolationBytes"
-            Publisher="CN=soluzka, O=soluzka, C=US"
+  <!-- Store-reserved package identity. Do not change Name or Publisher. -->
+  <Identity Name="soluzka.moodman"
+            Publisher="CN=911003E9-3151-40FA-9941-AA619C0A80D3"
             Version="1.8.953.0"
             ProcessorArchitecture="x64" />
 
