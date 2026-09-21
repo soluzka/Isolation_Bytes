@@ -81,11 +81,50 @@ if upx:
 else:
     print('UPX not found; executable compression is disabled.')
 
-print('Building onedir installer with:', args)
+print('Building onedir installer backend with:', args)
 try:
     PyInstaller.__main__.run(args)
 finally:
     shutil.rmtree(work_root, ignore_errors=True)
+
+# Build the SFX entry point as a native WebView2 application. The existing
+# PyInstaller installer remains the privileged installation backend; the
+# visible SFX UI is now the same WebView2 technology used by the desktop app.
+sfx_proj = os.path.join(base_dir, 'native', 'SfxInstaller', 'SfxInstaller.csproj')
+sfx_publish = Path(tempfile.mkdtemp(prefix='antivirus_sfx_webview_publish_'))
+sfx_webview_exe = None
+sfx_webview_html = os.path.join(base_dir, 'native', 'SfxInstaller', 'installer.html')
+if os.path.exists(sfx_proj):
+    print('Building WebView2 SFX application...')
+    try:
+        dotnet = shutil.which('dotnet')
+        if not dotnet:
+            dotnet = r'C:\Program Files\dotnet\dotnet.exe'
+            if not os.path.exists(dotnet):
+                dotnet = os.path.join(
+                    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+                    r'Microsoft\dotnet\dotnet.exe'
+                )
+        if not os.path.exists(dotnet):
+            raise FileNotFoundError('dotnet SDK not found; cannot build WebView2 SFX application')
+        safe_check_call([
+            dotnet, 'publish', sfx_proj,
+            '-c', 'Release',
+            '-r', 'win-x64',
+            '--self-contained', 'false',
+            '-o', str(sfx_publish),
+        ])
+        candidate = sfx_publish / 'Install_AntivirusServer.exe'
+        if candidate.exists():
+            sfx_webview_exe = candidate
+        else:
+            raise FileNotFoundError('WebView2 SFX publish did not produce Install_AntivirusServer.exe')
+    finally:
+        # Keep the published files until they have been copied into the SFX
+        # payload below; cleanup happens after staging.
+        pass
+else:
+    raise FileNotFoundError('native/SfxInstaller/SfxInstaller.csproj is missing')
 
 # Build the .NET 8 SDK launcher EXE so the SFX can launch it post-install.
 sdk_app = os.path.join(base_dir, 'tools', 'install_dotnet_sdk.py')
@@ -197,6 +236,23 @@ if not sdk_zip.exists():
 
 sfx_launcher = stage_root / 'Install_AntivirusServer'
 shutil.copytree(installer_payload, sfx_launcher)
+
+# The visible SFX executable is the WebView2 shell. Move the existing
+# PyInstaller installer underneath it as a private backend.
+backend_dir = sfx_launcher / 'installer_backend'
+backend_dir.mkdir(parents=True, exist_ok=True)
+backend_exe = sfx_launcher / 'Install_AntivirusServer.exe'
+if not backend_exe.exists():
+    raise FileNotFoundError('PyInstaller installer backend was not produced')
+shutil.move(str(backend_exe), str(backend_dir / 'Install_AntivirusServer.exe'))
+if sfx_webview_exe is None:
+    raise FileNotFoundError('WebView2 SFX executable was not built')
+shutil.copy2(str(sfx_webview_exe), sfx_launcher / 'Install_AntivirusServer.exe')
+if os.path.exists(sfx_webview_html):
+    shutil.copy2(sfx_webview_html, sfx_launcher / 'installer.html')
+else:
+    raise FileNotFoundError('native/SfxInstaller/installer.html is missing')
+
 if include_local_model:
     shutil.copytree(standalone, stage_root / 'antivirus_server')
 else:
@@ -217,8 +273,7 @@ if not os.path.exists(winrar):
 sfx_output = os.path.join(dist_dir, 'Install_AntivirusServer_SFX.exe')
 sfx_fd, sfx_path = tempfile.mkstemp(prefix='antivirus_server_sfx_', suffix='.txt')
 os.close(sfx_fd)
-sfx_config = Path(sfx_path)
-sfx_config.write_text(
+sfx_config = Path(sfx_path)sfx_config.write_text(
     'TempMode=1\n'
     'Silent=1\n'
     'Overwrite=1\n'
@@ -264,6 +319,7 @@ try:
 finally:
     sfx_config.unlink(missing_ok=True)
     shutil.rmtree(stage_root, ignore_errors=True)
+    shutil.rmtree(sfx_publish, ignore_errors=True)
 
 installer_payload = os.path.join(dist_dir, 'Install_AntivirusServer')
 if os.path.isdir(installer_payload):
