@@ -181,7 +181,7 @@ def main():
         )
 
         _run_powershell(
-            "Get-AppxPackage -Name 'soluzka.IsolationBytes' | Remove-AppxPackage -ErrorAction SilentlyContinue; "
+            "Get-AppxPackage -Name 'soluzka.moodman' | Remove-AppxPackage -ErrorAction SilentlyContinue; "
             "Add-AppxPackage -Path '{}' -ForceApplicationShutdown -ForceUpdateFromAnyVersion".format(work_msix),
             "Installing Isolation Bytes"
         )
@@ -194,7 +194,7 @@ def main():
         os.makedirs(desktop, exist_ok=True)
         shortcut_path = os.path.join(desktop, 'Isolation Bytes.lnk')
         _run_powershell(
-            "$pkg = Get-AppxPackage -Name 'soluzka.IsolationBytes'; "
+            "$pkg = Get-AppxPackage -Name 'soluzka.moodman'; "
             "if (-not $pkg) {{ throw 'Package not found after install' }}; "
             "$exe = Join-Path $pkg.InstallLocation 'antivirus_server.exe'; "
             "$aumid = $pkg.PackageFamilyName + '!App'; "
