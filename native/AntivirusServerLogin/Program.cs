@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Security.Cryptography;
 
 namespace AntivirusServerLogin;
 
@@ -681,29 +682,82 @@ public class LoginForm : Form
         return Path.Combine(dir, "credentials.lic");
     }
 
+    private static string? FindInstalledAgentExe()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localAppAgent = Path.Combine(localAppData, "IsolationBytes", "IsolationBytesAgent.exe");
+        if (File.Exists(localAppAgent)) return Path.GetFullPath(localAppAgent);
+
+        var launcherDir = Path.GetDirectoryName(Application.ExecutablePath);
+        if (!string.IsNullOrEmpty(launcherDir))
+        {
+            var bundled = Path.Combine(launcherDir, "IsolationBytesAgent.exe");
+            if (File.Exists(bundled)) return Path.GetFullPath(bundled);
+        }
+        return null;
+    }
+
+    private static string? DownloadAgentIfMissing()
+    {
+        var existing = FindInstalledAgentExe();
+        if (!string.IsNullOrEmpty(existing)) return existing;
+
+        try
+        {
+            using var updateResponse = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
+            if (!updateResponse.IsSuccessStatusCode) return null;
+
+            var updateBody = updateResponse.Content.ReadAsStringAsync().Result;
+            var update = JsonNode.Parse(updateBody);
+            if (update is null || update["update_available"]?.GetValue<bool>() != true) return null;
+
+            var downloadUrl = update["download_url"]?.GetValue<string>() ?? "";
+            var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
+            if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var downloadUri)) return null;
+            if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri)) return null;
+            if (!string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase) ||
+                downloadUri.AbsolutePath != "/download/IsolationBytesAgent.exe" ||
+                expectedSha.Length != 64 || expectedSha.Any(c => !Uri.IsHexDigit(c)))
+                return null;
+
+            var targetDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "IsolationBytes");
+            Directory.CreateDirectory(targetDir);
+            var target = Path.Combine(targetDir, "IsolationBytesAgent.exe");
+            var temp = target + ".download";
+
+            var bytes = _http.GetByteArrayAsync(downloadUri).Result;
+            if (bytes.Length < 100_000) return null;
+            var actualSha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase)) return null;
+
+            File.WriteAllBytes(temp, bytes);
+            File.Move(temp, target, true);
+            return File.Exists(target) ? target : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private void StartNetworkAgent()
     {
         try
         {
-            // Do not copy the agent into %LOCALAPPDATA% and do not create a
-            // second hidden install. The agent is run exactly where the user
-            // installed/placed it. Prefer the bundled EXE next to this launcher.
-            var localDir = Path.GetDirectoryName(Application.ExecutablePath);
-            if (string.IsNullOrEmpty(localDir))
-            {
-                return;
-            }
+            // Reuse an existing agent first. If none is installed, download the
+            // server-published agent, verify its SHA-256, then launch that same
+            // LocalAppData copy on subsequent starts.
+            var agentExe = DownloadAgentIfMissing();
+            if (string.IsNullOrEmpty(agentExe)) return;
 
-            var agentExe = Path.Combine(localDir, "IsolationBytesAgent.exe");
-            if (!File.Exists(agentExe))
-            {
-                return;
-            }
-
+            var workingDir = Path.GetDirectoryName(agentExe);
             SafeProcess.StartExe(
                 agentExe,
                 $"--server {Global.SERVER_URL} --key=__CLOUD_API_KEY__ --auto-start",
-                localDir);
+                workingDir);
         }
         catch
         {
