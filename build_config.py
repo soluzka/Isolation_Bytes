@@ -265,6 +265,38 @@ coll = COLLECT(
         f.write(spec)
     print(f'Generated antivirus_server.spec: {spec_path}')
 
+def _stage_start_agent_bat():
+    """Materialize the canonical Windows agent starter into dist/."""
+    source = os.path.join(BASE_DIR, 'cloud', 'cloud_server_original.py')
+    destination = os.path.join(DIST_DIR, 'start_agent.bat')
+    if not os.path.isfile(source):
+        print(f'WARNING: canonical start_agent.bat source not found: {source}')
+        return False
+    try:
+        import ast
+        with open(source, encoding='utf-8') as sf:
+            tree = ast.parse(sf.read(), filename=source)
+        value = None
+        for node in tree.body:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name) and target.id == '_START_AGENT_BAT':
+                        value = ast.literal_eval(node.value)
+                        break
+            if value is not None:
+                break
+        if not isinstance(value, str) or not value.strip():
+            raise RuntimeError('Could not extract _START_AGENT_BAT from cloud_server_original.py')
+        os.makedirs(DIST_DIR, exist_ok=True)
+        with open(destination, 'w', encoding='utf-8', newline='') as df:
+            df.write(value)
+        print(f'Staged Windows agent starter: {destination}')
+        return True
+    except Exception as exc:
+        print(f'WARNING: failed to stage start_agent.bat: {exc}')
+        return False
+
+
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
@@ -928,7 +960,7 @@ print(f'Certificate trusted in LocalMachine\\TrustedPeople')
 # ---------------------------------------------------------------------------
 
 print(f'\n{"="*60}\nCopying installer scripts\n{"="*60}')
-for script in ['install-windows.ps1', 'install-windows.bat',
+_stage_start_agent_bat()\nfor script in ['install-windows.ps1', 'install-windows.bat',
                'install-macos.sh', 'install-linux.sh',
                'install-ios.mobileconfig', 'universal_launcher.py',
                'standalone_agent.py', 'start_agent.bat',
