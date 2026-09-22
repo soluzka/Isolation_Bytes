@@ -720,7 +720,7 @@ public class LoginForm : Form
             downloadUri.AbsolutePath == "/download/IsolationBytesAgent.exe";
     }
 
-    private static (Uri DownloadUri, string Sha256)? GetAgentDownloadInfo()
+    private static JsonNode? GetAgentUpdate()
     {
         using var response = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
         if (!response.IsSuccessStatusCode)
@@ -728,31 +728,35 @@ public class LoginForm : Form
             return null;
         }
 
-        var body = response.Content.ReadAsStringAsync().Result;
-        var update = JsonNode.Parse(body);
-        if (update is null || update["update_available"]?.GetValue<bool>() != true)
+        return JsonNode.Parse(response.Content.ReadAsStringAsync().Result);
+    }
+
+    private static (Uri DownloadUri, string Sha256)? ParseAgentDownloadInfo(JsonNode update)
+    {
+        if (update["update_available"]?.GetValue<bool>() != true)
         {
             return null;
         }
 
         var downloadUrl = update["download_url"]?.GetValue<string>() ?? "";
-        var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
         if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var downloadUri))
         {
             return null;
         }
 
-        if (!IsTrustedAgentDownloadUri(downloadUri))
-        {
-            return null;
-        }
-
-        if (!IsValidAgentSha256(expectedSha))
+        var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
+        if (!IsTrustedAgentDownloadUri(downloadUri) || !IsValidAgentSha256(expectedSha))
         {
             return null;
         }
 
         return (downloadUri, expectedSha);
+    }
+
+    private static (Uri DownloadUri, string Sha256)? GetAgentDownloadInfo()
+    {
+        var update = GetAgentUpdate();
+        return update is null ? null : ParseAgentDownloadInfo(update);
     }
 
     private static string? DownloadVerifiedAgent((Uri DownloadUri, string Sha256) info)
