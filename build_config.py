@@ -498,7 +498,11 @@ for item in os.listdir(publish_dir):
         shutil.copy2(src, dst)
 
 # Copy the AppxManifest.xml
-shutil.copy2(MANIFEST, os.path.join(stage_dir, 'AppxManifest.xml'))
+staged_manifest = os.path.join(stage_dir, 'AppxManifest.xml')
+shutil.copy2(MANIFEST, staged_manifest)
+# Validate the exact manifest that makeappx will consume. This prevents an
+# older/stale Store identity from ever reaching the generated MSIX.
+_validate_msix_manifest(staged_manifest)
 
 # Embed the antivirus_server onedir inside the MSIX
 server_dst = os.path.join(stage_dir, 'antivirus_server')
@@ -545,6 +549,16 @@ if os.path.isfile(msix_path):
 shutil.copy2(temp_msix, msix_path)
 os.remove(temp_msix)
 print(f'MSIX packed: {msix_path}')
+
+# MakeAppx packages the staged manifest verbatim. Inspect the final archive
+# too, so a future staging/build change cannot silently reintroduce the old
+# soluzka.IsolationBytes identity or publisher.
+with zipfile.ZipFile(msix_path, 'r') as _msix_zip:
+    packaged_manifest = _msix_zip.read('AppxManifest.xml').decode('utf-8-sig')
+packaged_manifest_path = os.path.join(stage_dir, 'AppxManifest.xml')
+with open(packaged_manifest_path, 'w', encoding='utf-8') as _pmf:
+    _pmf.write(packaged_manifest)
+_validate_msix_manifest(packaged_manifest_path)
 
 # ---------------------------------------------------------------------------
 # 6. Sign the MSIX with signtool.exe
@@ -631,6 +645,41 @@ def _sign_msix_from_store(msix_file):
         safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command',
                   f"Remove-Item -Path 'Cert:\\CurrentUser\\My\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
                  cwd=BASE_DIR, check=False)
+
+
+MSIX_IDENTITY_NAME = 'soluzka.moodman'
+MSIX_PUBLISHER = 'CN=911003E9-3151-40FA-9941-AA619C0A80D3'
+MSIX_DISPLAY_NAME = 'Isolation Bytes Antivirus'
+
+
+def _validate_msix_manifest(manifest_path):
+    """Fail the build if the staged MSIX manifest is not the Store identity."""
+    with open(manifest_path, encoding='utf-8') as mf:
+        manifest = mf.read()
+    identity = re.search(r'<Identity\\b([^>]*)>', manifest, re.IGNORECASE | re.DOTALL)
+    display = re.search(r'<DisplayName>([^<]+)</DisplayName>', manifest, re.IGNORECASE)
+    if not identity:
+        raise RuntimeError(f'MSIX manifest has no Identity element: {manifest_path}')
+    attrs = identity.group(1)
+    name_match = re.search(r'\\bName="([^"]+)"', attrs, re.IGNORECASE)
+    publisher_match = re.search(r'\\bPublisher="([^"]+)"', attrs, re.IGNORECASE)
+    actual_name = name_match.group(1).strip() if name_match else None
+    actual_publisher = publisher_match.group(1).strip() if publisher_match else None
+    actual_display = display.group(1).strip() if display else None
+    expected = {
+        'Name': MSIX_IDENTITY_NAME,
+        'Publisher': MSIX_PUBLISHER,
+        'DisplayName': MSIX_DISPLAY_NAME,
+    }
+    actual = {'Name': actual_name, 'Publisher': actual_publisher, 'DisplayName': actual_display}
+    mismatches = [f'{key}: expected {expected[key]!r}, got {actual[key]!r}'
+                  for key in expected if actual[key] != expected[key]]
+    if mismatches:
+        raise RuntimeError('MSIX manifest identity validation failed: ' + '; '.join(mismatches))
+    print('MSIX manifest identity validated:')
+    print(f'  Name:        {actual_name}')
+    print(f'  Publisher:   {actual_publisher}')
+    print(f'  DisplayName: {actual_display}')
 
 
 def _manifest_publisher():
