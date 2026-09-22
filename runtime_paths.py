@@ -248,9 +248,10 @@ def _launcher_candidates():
 
 
 def _is_trusted_executable(executable):
-    configured = _configured_path("ISOLATION_BYTES_AGENT_EXE")
-    if configured is not None and executable == configured.resolve():
-        return True
+    for env_name in ("ISOLATION_BYTES_AGENT_EXE", "ISOLATION_BYTES_LAUNCHER_EXE"):
+        configured = _configured_path(env_name)
+        if configured is not None and executable == configured.resolve():
+            return True
     if executable.parent == Path(__file__).resolve().parent / "dist":
         return True
     if executable.parent == Path(__file__).resolve().parent / "native" / "AntivirusServerLogin" / "bin" / "Release" / "net8.0-windows" / "win-x64":
