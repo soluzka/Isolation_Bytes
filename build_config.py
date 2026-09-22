@@ -950,14 +950,14 @@ if os.path.isfile(cer_path):
 print(f'\n{"="*60}\nTrusting certificate\n{"="*60}')
 trust_cmd = (
     f"Import-Certificate -FilePath '{cer_path}' "
-    f"-CertStoreLocation Cert:\\CurrentUser\\TrustedPeople"
+    f"-CertStoreLocation Cert:\\LocalMachine\\TrustedPeople"
 )
 trust_result = run(
     ['powershell.exe', '-NoProfile', '-Command', trust_cmd],
     check=False,
 )
 if getattr(trust_result, 'returncode', 0) == 0:
-    print(f'Certificate trusted in CurrentUser\\TrustedPeople')
+    print(f'Certificate trusted in LocalMachine\\TrustedPeople')
 else:
     print('WARNING: Could not add the certificate to CurrentUser\\TrustedPeople; '
           'the MSIX build will continue, but sideload trust may need to be installed manually.')
