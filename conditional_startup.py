@@ -1,3 +1,4 @@
+from runtime_paths import ensure_agent_running
 import importlib.util
 import os
 import sys
@@ -2120,6 +2121,8 @@ def _run_conditional_startup_once(open_browser=True, progress_callback=None, cri
     return results
 
 def run_conditional_startup_logic(open_browser=True, progress_callback=None, critical_dirs=None, continuous=False):
+    if not ensure_agent_running():
+        return {'status': 'error', 'error': 'IsolationBytesAgent is not running and could not be started'}
     """Run Conditional Startup once or continuously for the lifetime of the process."""
     # Seed this invocation from the persisted Conditional Startup history.
     # Clicking Run again must continue the existing counters/evidence instead
