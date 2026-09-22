@@ -37,10 +37,11 @@ _YARA_EXTERNALS_DEFAULTS = {
 # Can be overridden with the YARA_LOG_MIN_SEVERITY environment variable.
 YARA_LOG_MIN_SEVERITY = os.environ.get('YARA_LOG_MIN_SEVERITY', 'medium').lower().strip()
 
-# Hard-coded list of noisy/broad YARA rules that are known to false-positive
-# on normal system files and common legitimate software.
-# Hard-coded list of noisy/broad YARA rules that are known to false-positive
-# on normal system files and common legitimate software.
+# Hard-coded list of genuinely broad YARA rules that are known to false-positive
+# on normal system files and common legitimate software.  Concrete malware-family,
+# ransomware, persistence, PowerShell, injection, and suspicious-import rules are
+# intentionally NOT suppressed here; those matches must remain visible to the
+# dashboard and can be evaluated by the reputation/threat-level layers.
 NOISY_RULE_NAMES = {
     # Broad synthetic rules in the main yara_rules.yar / index files
     'AIInferenceAttack',
@@ -59,12 +60,10 @@ NOISY_RULE_NAMES = {
     'AntiDebugCheck',
     'AntiVMCheck',
     'ApiGatewayBypass',
-    'AsyncRAT',
     'BiocomputingExploit',
     'BionicSecurityBypass',
     'BlockchainNodeAttack',
     'BootkitTechniques',
-    'China_Chopper_Webshell',
     'CloudAPIAbuse',
     'CloudConfigTampering',
     'CloudCredentialAccess',
@@ -76,13 +75,10 @@ NOISY_RULE_NAMES = {
     'CryptoSignature',
     'CustomShellcodePatterns',
     'DevOpsToolchainAttack',
-    'Dropper_Indicators',
     'EdgeComputingAttack',
     'EdgeComputingExploit',
     'EventStreamingAttack',
     'FirmwareManipulation',
-    'FormBook_Stealer_Strict',
-    'Generic_Ransomware_Indicators',
     'GraphQLInjection',
     'HardwareManipulation',
     'HardwareSecurityBypass',
@@ -96,7 +92,6 @@ NOISY_RULE_NAMES = {
     'KernelPoolOverflow',
     'KubernetesAttack',
     'MLModelAttack',
-    'Malicious_Office_Macro',
     'Malicious_PDF_JavaScript',
     'MemoryDebuggingAbuse',
     'MemoryDisclosure',
@@ -107,12 +102,9 @@ NOISY_RULE_NAMES = {
     'MolecularComputingExploit',
     'NeuroTechnologyAttack',
     'NeuromorphicExploit',
-    'Office_Macro_Malware',
     'OpticalComputingAttack',
     'PDF_Exploit_Indicators',
-    'PE_Suspicious_Imports',
     'PageTableManipulation',
-    'ProcessInjectionAdvanced',
     'ProtocolManipulation',
     'QuantumChannelAttack',
     'QuantumComputeAttack',
@@ -126,7 +118,6 @@ NOISY_RULE_NAMES = {
     'ServiceMeshAttack',
     'ServiceMeshExploit',
     'ShackAttackIndicators',
-    'Shellcode_Injection_Indicators',
     'SideChannelAttackTools',
     'SmartDustAttack',
     'SpintronicsAttack',
@@ -134,9 +125,6 @@ NOISY_RULE_NAMES = {
     'StackCookieBypasses',
     'StackPivotDetection',
     'SupplyChainAttack',
-    'Suspicious_PE_API_Imports',
-    'Suspicious_PowerShell',
-    'Suspicious_Registry_Persistence',
     'ThreadContextManipulation',
     'TrustedExecutionBypass',
     'UseAfterFreePattern',
