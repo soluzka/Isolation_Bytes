@@ -2059,6 +2059,23 @@ X-GNOME-Autostart-enabled=true
             score = 0.0
             reasons = []
             threat_type = 'ml_suspicious'
+
+            # Use the fitted IsolationForest file model when available.  The
+            # previous standalone path only used handcrafted heuristics, so the
+            # real ML model could silently contribute nothing to file scans.
+            model_confidence = 0.0
+            try:
+                from ml_security import security_ml
+                model_confidence = float(
+                    security_ml.file_anomaly_confidence(filepath, yara_matches=[])
+                )
+                if model_confidence >= float(os.environ.get(
+                    'ML_ANOMALY_CONFIDENCE_THRESHOLD', '0.75'
+                )):
+                    score += 45.0
+                    reasons.append(f'ml_anomaly_confidence={model_confidence:.2f}')
+            except Exception as ml_exc:
+                logging.debug('File ML model unavailable for %s: %s', filepath, ml_exc)
             # --- RANSOMWARE INDICATORS ---
             ransomware_indicators = 0
             # Ransomware-specific APIs
@@ -2138,7 +2155,8 @@ X-GNOME-Autostart-enabled=true
                 if len(data) > 0x40:
                     pe_offset = int.from_bytes(data[0x3c:0x40], 'little')
                     if pe_offset < len(data) - 4 and data[pe_offset:pe_offset+4] == b'PE\x00\x00':
-                        score += 15
+                        # A valid PE header is normal for legitimate Windows
+                        # executables and must not by itself make the file suspicious.
                         reasons.append('pe_executable')
                         lower_data = data[:min(len(data), 8192)].lower()
                         # Check for suspicious imports
@@ -2255,9 +2273,9 @@ X-GNOME-Autostart-enabled=true
             if is_pe and file_size > 100000 and entropy > 7.0:
                 score += 15
                 reasons.append('large_packed_pe')
-            # No digital signature check (simplified)
-            if is_pe and b'Windows Signature' not in data[:1024]:
-                score += 5
+            # Missing signature information is only context, not a standalone
+            # malware verdict.  Do not add score merely because a normal PE lacks
+            # the literal marker in its first 1 KB.
             # --- CLASSIFY THREAT TYPE ---
             # Ransomware: needs ransomware indicators >= 1
             if ransomware_indicators >= 1:
