@@ -11,6 +11,7 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Reflection;
+using System.Security.Cryptography;
 
 namespace AntivirusServerLogin;
 
@@ -681,29 +682,154 @@ public class LoginForm : Form
         return Path.Combine(dir, "credentials.lic");
     }
 
+    private static string? FindInstalledAgentExe()
+    {
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var localAppAgent = Path.Combine(localAppData, "IsolationBytes", "IsolationBytesAgent.exe");
+        if (File.Exists(localAppAgent))
+        {
+            return Path.GetFullPath(localAppAgent);
+        }
+
+        var launcherDir = Path.GetDirectoryName(Application.ExecutablePath);
+        if (!string.IsNullOrEmpty(launcherDir))
+        {
+            var bundled = Path.Combine(launcherDir, "IsolationBytesAgent.exe");
+            if (File.Exists(bundled))
+            {
+                return Path.GetFullPath(bundled);
+            }
+        }
+        return null;
+    }
+
+    private static bool IsValidAgentSha256(string sha256)
+    {
+        return sha256.Length == 64 && sha256.All(Uri.IsHexDigit);
+    }
+
+    private static bool IsTrustedAgentDownloadUri(Uri downloadUri)
+    {
+        if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri))
+        {
+            return false;
+        }
+
+        return string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase) &&
+            downloadUri.AbsolutePath == "/download/IsolationBytesAgent.exe";
+    }
+
+    private static JsonNode? GetAgentUpdate()
+    {
+        using var response = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        return JsonNode.Parse(response.Content.ReadAsStringAsync().Result);
+    }
+
+    private static (Uri DownloadUri, string Sha256)? ParseAgentDownloadInfo(JsonNode update)
+    {
+        if (update["update_available"]?.GetValue<bool>() != true)
+        {
+            return null;
+        }
+
+        var downloadUrl = update["download_url"]?.GetValue<string>() ?? "";
+        if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var downloadUri))
+        {
+            return null;
+        }
+
+        var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
+        if (!IsTrustedAgentDownloadUri(downloadUri) || !IsValidAgentSha256(expectedSha))
+        {
+            return null;
+        }
+
+        return (downloadUri, expectedSha);
+    }
+
+    private static (Uri DownloadUri, string Sha256)? GetAgentDownloadInfo()
+    {
+        var update = GetAgentUpdate();
+        return update is null ? null : ParseAgentDownloadInfo(update);
+    }
+
+    private static string? DownloadVerifiedAgent((Uri DownloadUri, string Sha256) info)
+    {
+        var targetDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "IsolationBytes");
+        Directory.CreateDirectory(targetDir);
+
+        var target = Path.Combine(targetDir, "IsolationBytesAgent.exe");
+        var temp = target + ".download";
+        var bytes = _http.GetByteArrayAsync(info.DownloadUri).Result;
+        if (bytes.Length < 100_000)
+        {
+            return null;
+        }
+
+        var actualSha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (!string.Equals(actualSha, info.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        File.WriteAllBytes(temp, bytes);
+        File.Move(temp, target, true);
+        if (File.Exists(target))
+        {
+            return target;
+        }
+        return null;
+    }
+
+    private static string? DownloadAgentIfMissing()
+    {
+        var existing = FindInstalledAgentExe();
+        if (!string.IsNullOrEmpty(existing))
+        {
+            return existing;
+        }
+
+        try
+        {
+            var info = GetAgentDownloadInfo();
+            if (!info.HasValue)
+            {
+                return null;
+            }
+            return DownloadVerifiedAgent(info.Value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private void StartNetworkAgent()
     {
         try
         {
-            // Do not copy the agent into %LOCALAPPDATA% and do not create a
-            // second hidden install. The agent is run exactly where the user
-            // installed/placed it. Prefer the bundled EXE next to this launcher.
-            var localDir = Path.GetDirectoryName(Application.ExecutablePath);
-            if (string.IsNullOrEmpty(localDir))
+            // Reuse an existing agent first. If none is installed, download the
+            // server-published agent, verify its SHA-256, then launch that same
+            // LocalAppData copy on subsequent starts.
+            var agentExe = DownloadAgentIfMissing();
+            if (string.IsNullOrEmpty(agentExe))
             {
                 return;
             }
 
-            var agentExe = Path.Combine(localDir, "IsolationBytesAgent.exe");
-            if (!File.Exists(agentExe))
-            {
-                return;
-            }
-
+            var workingDir = Path.GetDirectoryName(agentExe);
             SafeProcess.StartExe(
                 agentExe,
                 $"--server {Global.SERVER_URL} --key=__CLOUD_API_KEY__ --auto-start",
-                localDir);
+                workingDir);
         }
         catch
         {
