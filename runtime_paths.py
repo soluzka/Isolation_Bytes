@@ -236,7 +236,12 @@ def _read_agent_status():
 
 def _agent_status_ready(status, pid):
     """Validate registration and heartbeat fields for the current process."""
-    if status is None or int(status.get("pid") or 0) != int(pid):
+    if status is None:
+        return False
+    try:
+        if int(status.get("pid") or 0) != int(pid):
+            return False
+    except (TypeError, ValueError):
         return False
     required = ("running", "registered", "heartbeat_ok")
     return all(bool(status.get(field)) for field in required)
