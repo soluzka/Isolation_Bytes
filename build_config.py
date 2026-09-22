@@ -56,6 +56,55 @@ MAINWINDOW_CS = os.path.join(NATIVE_DIR, 'MainWindow.xaml.cs')
 SW_JS = os.path.join(BASE_DIR, 'static', 'sw.js')
 BG_JS = os.path.join(BASE_DIR, 'browser_extension', 'background.js')
 
+# Store-reserved MSIX identity. These values must match Partner Center.
+MSIX_IDENTITY_NAME = 'soluzka.moodman'
+MSIX_PUBLISHER = 'CN=911003E9-3151-40FA-9941-AA619C0A80D3'
+MSIX_DISPLAY_NAME = 'Isolation Bytes Antivirus'
+
+
+def _validate_msix_manifest(manifest_path):
+    """Fail the build if an MSIX manifest does not use the Store identity."""
+    with open(manifest_path, encoding='utf-8') as mf:
+        manifest = mf.read()
+
+    identity = re.search(r'<Identity\b([^>]*)>', manifest, re.IGNORECASE | re.DOTALL)
+    display = re.search(r'<DisplayName>([^<]+)</DisplayName>', manifest, re.IGNORECASE)
+    if not identity:
+        raise RuntimeError(f'MSIX manifest has no Identity element: {manifest_path}')
+
+    attrs = identity.group(1)
+    name_match = re.search(r'\bName="([^"]+)"', attrs, re.IGNORECASE)
+    publisher_match = re.search(r'\bPublisher="([^"]+)"', attrs, re.IGNORECASE)
+    actual_name = name_match.group(1).strip() if name_match else None
+    actual_publisher = publisher_match.group(1).strip() if publisher_match else None
+    actual_display = display.group(1).strip() if display else None
+
+    expected = {
+        'Name': MSIX_IDENTITY_NAME,
+        'Publisher': MSIX_PUBLISHER,
+        'DisplayName': MSIX_DISPLAY_NAME,
+    }
+    actual = {
+        'Name': actual_name,
+        'Publisher': actual_publisher,
+        'DisplayName': actual_display,
+    }
+    mismatches = [
+        f'{key}: expected {expected[key]!r}, got {actual[key]!r}'
+        for key in expected if actual[key] != expected[key]
+    ]
+    if mismatches:
+        raise RuntimeError(
+            'MSIX manifest identity validation failed: ' + '; '.join(mismatches)
+        )
+
+    print('MSIX manifest identity validated:')
+    print(f'  Name:        {actual_name}')
+    print(f'  Publisher:   {actual_publisher}')
+    print(f'  DisplayName: {actual_display}')
+
+
+
 
 @contextlib.contextmanager
 def _with_secret_injection(file_path, placeholder='__CLOUD_API_KEY__', secret=None):
