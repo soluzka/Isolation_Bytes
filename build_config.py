@@ -947,20 +947,48 @@ if os.path.isfile(cer_path):
 # 7b. Trust the certificate locally so the MSIX can be sideloaded
 # ---------------------------------------------------------------------------
 
-print(f'\n{"="*60}\nTrusting certificate\n{"="*60}')
-trust_cmd = (
+print(f'\n{"=" * 60}\nTrusting certificate\n{"=" * 60}')
+# These certificate stores are only for local sideload testing. Partner Center
+# does not require a CA-trusted developer certificate; Microsoft re-signs
+# Store-distributed MSIX packages after certification.
+trust_user_cmd = (
     f"Import-Certificate -FilePath '{cer_path}' "
     f"-CertStoreLocation Cert:\\CurrentUser\\TrustedPeople"
 )
-trust_result = run(
-    ['powershell.exe', '-NoProfile', '-Command', trust_cmd],
+user_trust = run(
+    ['powershell.exe', '-NoProfile', '-Command', trust_user_cmd],
     check=False,
 )
-if getattr(trust_result, 'returncode', 0) == 0:
-    print(f'Certificate trusted in CurrentUser\\TrustedPeople')
+if getattr(user_trust, 'returncode', 0) == 0:
+    print('Certificate trusted in CurrentUser\\TrustedPeople')
 else:
-    print('WARNING: Could not add the certificate to CurrentUser\\TrustedPeople; '
-          'the MSIX build will continue, but sideload trust may need to be installed manually.')
+    print('WARNING: Could not add the certificate to CurrentUser\\TrustedPeople.')
+
+# MSIX deployment can validate a package outside the interactive user's
+# certificate context. Attempt LocalMachine\\TrustedPeople with UAC elevation
+# so local sideloading works reliably. Declining elevation does not prevent
+# Partner Center submission.
+trust_machine_script = (
+    "$ErrorActionPreference='Stop'; "
+    f"Import-Certificate -FilePath '{cer_path}' "
+    f"-CertStoreLocation 'Cert:\\LocalMachine\\TrustedPeople' | Out-Null"
+)
+elevated_command = (
+    "Start-Process powershell.exe -Verb RunAs -Wait -ArgumentList "
+    + "'-NoProfile -NonInteractive -Command \""
+    + trust_machine_script.replace('"', '`"')
+    + "\"'"
+)
+machine_trust = run(
+    ['powershell.exe', '-NoProfile', '-Command', elevated_command],
+    check=False,
+)
+if getattr(machine_trust, 'returncode', 0) == 0:
+    print('Certificate trusted in LocalMachine\\TrustedPeople')
+else:
+    print('WARNING: LocalMachine\\TrustedPeople trust was not installed. '
+          'The MSIX can still be submitted to Partner Center; local sideload '
+          'may require importing IsolationBytes.cer as administrator.')
 
 # ---------------------------------------------------------------------------
 # 8. Copy universal installer scripts to dist/
