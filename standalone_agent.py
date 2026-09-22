@@ -67,7 +67,7 @@ def _bootstrap_runtime_json_files():
                                 'yara_suspicious': [], 'quarantined_files': []},
         },
         'blocked_files.json': {},
-        'scheduled_scan_state.json': {'status': 'idle', 'scanned_files': 0},
+        'scheduled_scan_state.json': {'enabled': True, 'running': False, 'continuous': True, 'status': 'idle', 'started_at': None, 'last_updated': None, 'last_run': None, 'next_run': None, 'scanned_files': 0, 'quarantined_files': 0, 'errors': 0, 'findings': 0},
         'quarantine_log.json': [],
         'scan_cache.json': {},
     }
@@ -396,6 +396,8 @@ class StandaloneAgent:
         except (OSError, ValueError, TypeError):
             pass
 
+        self._publish_scheduled_scan_state(status='running' if self._scan_status not in ('idle', 'complete', 'stopped', 'error') else self._scan_status, running=self._scan_status not in ('idle', 'complete', 'stopped', 'error'), continuous=True, errors=int(indicator_counts(getattr(self, '_scanner_results', {}) or {}).get('errors', 0)))
+
         scanner_results = ensure_indicator_results(getattr(self, "_scanner_results", {}) or {})
 
         # Keep collection counts authoritative even if a caller recorded an
@@ -517,7 +519,50 @@ class StandaloneAgent:
             datetime.timezone.utc
         ).isoformat()
         self._reset_scan_state()
+        self._publish_scheduled_scan_state(
+            status='running',
+            enabled=True,
+            running=True,
+            continuous=True,
+            started_at=self._scan_started_at,
+            last_run=None,
+            next_run=None,
+        )
         self._publish_all_runtime_json()
+
+    def _ensure_continuous_scan(self):
+        """Keep the scheduled/continuous scan worker alive for the agent lifetime."""
+        if not self._running or not self._continuous_scan_requested:
+            return False
+        thread = self._continuous_scan_thread
+        if thread is not None and thread.is_alive():
+            return True
+        self._scan_status = 'scanning'
+        self._publish_scheduled_scan_state(
+            status='running',
+            running=True,
+            continuous=True,
+            next_run=None,
+        )
+        try:
+            thread = threading.Thread(
+                target=self._scan_cycle,
+                kwargs={'continuous': True},
+                name='agent-continuous-scan',
+                daemon=True,
+            )
+            self._continuous_scan_thread = thread
+            thread.start()
+            return True
+        except Exception as exc:
+            self._last_report_error = f'continuous scan restart failed: {exc}'
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                last_error=self._last_report_error,
+            )
+            return False
 
     def __init__(self, server_url, api_key='', device_id=None, pair_code=None,
                  credential_file=None):
@@ -671,6 +716,10 @@ class StandaloneAgent:
     def _prepare_quarantine_dir(self):
         try:
             os.makedirs(QUARANTINE_DIR, exist_ok=True)
+            quarantine_log = os.path.join(QUARANTINE_DIR, 'quarantine_log.json')
+            if not os.path.isfile(quarantine_log):
+                with open(quarantine_log, 'w', encoding='utf-8') as handle:
+                    json.dump([], handle, indent=2)
             probe = os.path.join(
                 QUARANTINE_DIR,
                 f".isolationbytes_write_test_{os.getpid()}_{time.time_ns()}"
@@ -1175,6 +1224,10 @@ class StandaloneAgent:
                 raise RuntimeError(
                     "runtime JSON bootstrap incomplete: " + ", ".join(missing)
                 )
+            # Scheduled/continuous scan is self-healing. If its worker
+            # thread ended after a pass or crashed, restart it before publishing
+            # heartbeat state so the dashboard never sees a false completion.
+            self._ensure_continuous_scan()
             stats = self._get_live_stats()
             stats["runtime_state_ready"] = True
             stats["runtime_dir"] = runtime_dir
@@ -1283,7 +1336,16 @@ class StandaloneAgent:
                     pass
                 return
             self._continuous_scan_requested = True
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                started_at=self._scan_started_at,
+                last_run=None,
+                next_run=None,
+            )
             if self._scan_lock.locked():
+                self._ensure_continuous_scan()
                 print("[CMD] Scan request accepted: continuous scan is already running")
                 return
             # Publish the active generation BEFORE starting the worker thread.
@@ -1302,6 +1364,7 @@ class StandaloneAgent:
             try:
                 import threading
                 t = threading.Thread(target=self._scan_cycle, kwargs={'continuous': True}, name='agent-continuous-scan', daemon=True)
+                self._continuous_scan_thread = t
                 t.start()
             except Exception as e:
                 print(f"[CMD] Scan trigger failed: {e}")
@@ -1540,14 +1603,14 @@ class StandaloneAgent:
                     # Running as a frozen EXE (IsolationBytesAgent.exe)
                     # The scheduled task runs the EXE directly — no Python needed
                     exe = sys.executable
-                    cmd_str = safe_list2cmdline([exe, '--server', self.server_url, f'--key={self.api_key}'])
+                    cmd_str = safe_list2cmdline([exe, '--server', self.server_url, f'--key={self.api_key}', '--supervise'])
                 else:
                     # Running from source — use pythonw.exe + script
                     exe = sys.executable
                     if exe.lower().endswith('python.exe'):
                         exe = exe.replace('python.exe', 'pythonw.exe')
                     script = os.path.abspath(__file__)
-                    cmd_str = safe_list2cmdline([exe, script, '--server', self.server_url, f'--key={self.api_key}'])
+                    cmd_str = safe_list2cmdline([exe, script, '--server', self.server_url, f'--key={self.api_key}', '--supervise'])
                 if enable:
                     # Create a scheduled task that runs at logon with admin rights
                     # /rl HIGHEST = run with highest privileges (admin)
@@ -1567,7 +1630,7 @@ class StandaloneAgent:
                         os.makedirs(wrapper_dir, exist_ok=True)
                         wrapper_path = os.path.join(wrapper_dir, 'agent_start.bat')
                         with open(wrapper_path, 'w', encoding='utf-8') as wf:
-                            wf.write(f'@echo off\r\n"{exe}" "{script}" --server "{self.server_url}" --key="{self.api_key}"\r\n')
+                            wf.write(f'@echo off\r\n"{exe}" "{script}" --server "{self.server_url}" --key="{self.api_key}" --supervise\r\n')
                         task_cmd = wrapper_path
                     # Create the task with highest privileges
                     result = safe_run(
@@ -1666,9 +1729,9 @@ X-GNOME-Autostart-enabled=true
                     script = os.path.abspath(__file__)
                     plist = {
                         'Label': 'com.isolationbytes.agent',
-                        'ProgramArguments': [exe, script, '--server', self.server_url, f'--key={self.api_key}'],
+                        'ProgramArguments': [exe, script, '--server', self.server_url, f'--key={self.api_key}', '--supervise'],
                         'RunAtLoad': True,
-                        'KeepAlive': False,
+                        'KeepAlive': True,
                     }
                     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
                     with open(plist_path, 'wb') as f:
@@ -2059,6 +2122,23 @@ X-GNOME-Autostart-enabled=true
             score = 0.0
             reasons = []
             threat_type = 'ml_suspicious'
+
+            # Use the fitted IsolationForest file model when available.  The
+            # previous standalone path only used handcrafted heuristics, so the
+            # real ML model could silently contribute nothing to file scans.
+            model_confidence = 0.0
+            try:
+                from ml_security import security_ml
+                model_confidence = float(
+                    security_ml.file_anomaly_confidence(filepath, yara_matches=[])
+                )
+                if model_confidence >= float(os.environ.get(
+                    'ML_ANOMALY_CONFIDENCE_THRESHOLD', '0.75'
+                )):
+                    score += 45.0
+                    reasons.append(f'ml_anomaly_confidence={model_confidence:.2f}')
+            except Exception as ml_exc:
+                logging.debug('File ML model unavailable for %s: %s', filepath, ml_exc)
             # --- RANSOMWARE INDICATORS ---
             ransomware_indicators = 0
             # Ransomware-specific APIs
@@ -2138,7 +2218,8 @@ X-GNOME-Autostart-enabled=true
                 if len(data) > 0x40:
                     pe_offset = int.from_bytes(data[0x3c:0x40], 'little')
                     if pe_offset < len(data) - 4 and data[pe_offset:pe_offset+4] == b'PE\x00\x00':
-                        score += 15
+                        # A valid PE header is normal for legitimate Windows
+                        # executables and must not by itself make the file suspicious.
                         reasons.append('pe_executable')
                         lower_data = data[:min(len(data), 8192)].lower()
                         # Check for suspicious imports
@@ -2255,9 +2336,9 @@ X-GNOME-Autostart-enabled=true
             if is_pe and file_size > 100000 and entropy > 7.0:
                 score += 15
                 reasons.append('large_packed_pe')
-            # No digital signature check (simplified)
-            if is_pe and b'Windows Signature' not in data[:1024]:
-                score += 5
+            # Missing signature information is only context, not a standalone
+            # malware verdict.  Do not add score merely because a normal PE lacks
+            # the literal marker in its first 1 KB.
             # --- CLASSIFY THREAT TYPE ---
             # Ransomware: needs ransomware indicators >= 1
             if ransomware_indicators >= 1:
@@ -3053,6 +3134,9 @@ X-GNOME-Autostart-enabled=true
                 mf.write("quarantined=True\n")
             self._unregister_blocked_file(filepath)
             self._quarantined_count += 1
+            self._write_quarantine_log({'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'original_path': filepath, 'quarantine_path': dest, 'filename': base, 'reason': 'agent_scan', 'success': True})
+            self._publish_scheduled_scan_state(status='running', running=True, continuous=True)
+            self._publish_all_runtime_json()
             return True
         except Exception as exc:
             self._last_quarantine_error = f"Quarantine exception for {filepath}: {exc}"
@@ -3097,6 +3181,88 @@ X-GNOME-Autostart-enabled=true
         except Exception as e:
             print(f"[BLOCK] Rename fallback also failed for {filepath}: {e}")
             return False
+
+    def _read_quarantine_log(self):
+        """Read the agent-owned persistent quarantine audit log."""
+        path = runtime_path('quarantine_log.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                value = json.load(handle)
+            return value if isinstance(value, list) else []
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def _write_quarantine_log(self, entry):
+        """Atomically append a quarantine event to the canonical runtime JSON."""
+        path = runtime_path('quarantine_log.json')
+        events = self._read_quarantine_log()
+        events.append(dict(entry))
+        events = events[-1000:]
+        tmp = path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(events, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            mirror = os.path.join(QUARANTINE_DIR, 'quarantine_log.json')
+            mirror_tmp = mirror + '.tmp'
+            try:
+                with open(mirror_tmp, 'w', encoding='utf-8') as handle:
+                    json.dump(events, handle, ensure_ascii=False, indent=2)
+                os.replace(mirror_tmp, mirror)
+            except (OSError, TypeError, ValueError):
+                try:
+                    if os.path.exists(mirror_tmp):
+                        os.remove(mirror_tmp)
+                except OSError:
+                    pass
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            _startup_log(f'[QUARANTINE] Could not persist quarantine_log.json: {exc}')
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            return False
+
+    def _publish_scheduled_scan_state(self, **updates):
+        """Persist the authoritative continuous scheduled-scan state."""
+        path = runtime_path('scheduled_scan_state.json')
+        state = {
+            'enabled': True, 'running': False, 'continuous': True,
+            'status': 'idle', 'started_at': None, 'last_updated': None,
+            'last_run': None, 'next_run': None,
+            'scanned_files': int(getattr(self, '_files_scanned', 0) or 0),
+            'quarantined_files': int(getattr(self, '_quarantined_count', 0) or 0),
+            'errors': 0, 'findings': int(getattr(self, '_total_findings', 0) or 0),
+        }
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                current = json.load(handle)
+            if isinstance(current, dict):
+                state.update(current)
+        except (OSError, ValueError, TypeError):
+            pass
+        state.update(updates)
+        state['enabled'] = True
+        state['continuous'] = True
+        state['last_updated'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        state['scanned_files'] = int(getattr(self, '_files_scanned', state.get('scanned_files', 0)) or 0)
+        state['quarantined_files'] = int(getattr(self, '_quarantined_count', state.get('quarantined_files', 0)) or 0)
+        state['findings'] = int(getattr(self, '_total_findings', state.get('findings', 0)) or 0)
+        tmp = path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            os.replace(tmp, path)
+        except (OSError, TypeError, ValueError) as exc:
+            _startup_log(f'[SCHEDULED SCAN] Could not persist scheduled_scan_state.json: {exc}')
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        return state
 
     def _list_quarantine(self):
         """Return a list of quarantined files on this agent."""
@@ -3228,21 +3394,39 @@ X-GNOME-Autostart-enabled=true
             # Keep each HTTP request well below the server JSON limit while
             # preserving every finding. The cloud reassembles these parts.
             chunk_size = 40
+            # Preserve the complete normalized scanner evidence alongside
+            # the chunked finding list.  The dashboard previously received only
+            # the final chunk's findings, while errors/ML/YARA collections lived
+            # only in LocalAppData JSON on the agent.
+            scanner_snapshot = {
+                'errors': list(self._scanner_results.get('errors', []) or []),
+                'process_events': list(self._scanner_results.get('process_events', []) or []),
+                'ml_detections': list(self._scanner_results.get('ml_detections', []) or []),
+                'ransomware_indicators': list(self._scanner_results.get('ransomware_indicators', []) or []),
+                'persistence_indicators': dict(self._scanner_results.get('persistence_indicators', {}) or {}),
+                'yara_suspicious': list(self._scanner_results.get('yara_suspicious', []) or []),
+                'quarantined_files': list(self._scanner_results.get('quarantined_files', []) or []),
+            }
             if not findings:
-                payloads = [dict(base, findings=[])]
+                payloads = [dict(base, findings=[], indicator_results=scanner_snapshot)]
             else:
                 scan_id = self._scan_id
                 payloads = []
                 total_parts = (len(findings) + chunk_size - 1) // chunk_size
                 for index in range(total_parts):
-                    payloads.append(dict(
+                    payload = dict(
                         base,
                         findings=findings[index * chunk_size:(index + 1) * chunk_size],
                         scan_id=scan_id,
                         scan_part=index,
                         scan_parts=total_parts,
                         scan_complete=(index == total_parts - 1),
-                    ))
+                    )
+                    # Send the snapshot once, on the final chunk, so large
+                    # scans do not multiply the JSON payload size.
+                    if index == total_parts - 1:
+                        payload['indicator_results'] = scanner_snapshot
+                    payloads.append(payload)
 
             all_ok = True
             for data in payloads:
@@ -3325,9 +3509,18 @@ X-GNOME-Autostart-enabled=true
                     self._scanner_results["errors_count"] = len(self._scanner_results.get("errors", []))
                     self._publish_all_runtime_json()
                     continue
-            # A continuous scan is never marked complete. Finishing a directory
-            # pass only means the next continuous pass begins immediately.
+            # A continuous scheduled scan is never marked complete. Finishing
+            # one directory traversal is only the boundary before the next pass.
             self._scan_status = 'scanning' if (continuous and self._running) else ('complete' if self._running else 'stopped')
+            if continuous and self._running:
+                self._publish_scheduled_scan_state(
+                    status='running',
+                    running=True,
+                    continuous=True,
+                    last_run=None,
+                    next_run=None,
+                    last_updated=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                )
             if all_findings:
                 print(
                     f"[ALERT] Found {len(all_findings)} threat(s)! "
@@ -3791,6 +3984,24 @@ del "{bat_path}" 2>nul
             self._running = False
             return
 
+        # Scheduled scan is persistent continuous protection. Every agent
+        # startup resumes it, and the self-healing worker restarts each pass
+        # instead of ever publishing a completed/finished state.
+        self._continuous_scan_requested = True
+        try:
+            self._begin_scan_generation()
+            self._ensure_continuous_scan()
+        except Exception as exc:
+            self._scan_status = 'scanning'
+            self._last_report_error = f'scheduled scan startup failed: {exc}'
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                last_error=self._last_report_error,
+            )
+            _startup_log(f'[SCHEDULED SCAN] {self._last_report_error}')
+
         # Start heartbeat thread
         hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name='Heartbeat')
         hb_thread.start()
@@ -3809,9 +4020,8 @@ del "{bat_path}" 2>nul
         net_thread = threading.Thread(target=self._network_scan_loop, daemon=True, name='NetScan')
         net_thread.start()
 
-        # Start scan thread
-        scan_thread = threading.Thread(target=self._scan_loop, daemon=True, name='Scanner')
-        scan_thread.start()
+        # The continuous scheduled worker is the single authoritative scanner.
+        # Do not start the legacy interval scanner here.
 
         # Start self-update thread (checks for new agent EXE every hour)
         update_thread = threading.Thread(target=self._update_loop, daemon=True, name='Updater')
@@ -3835,6 +4045,61 @@ del "{bat_path}" 2>nul
     def stop(self):
         self._running = False
         print("Agent stopped.")
+
+
+def _run_supervised_agent(args):
+    """Run the protection agent as a persistent supervisor.
+
+    Windows startup points at this process.  If the worker exits, the supervisor
+    waits briefly and starts it again.  A stable local lock prevents duplicate
+    supervisors from being launched by repeated startup/login triggers.
+    """
+    import tempfile
+    runtime_dir = _RUNTIME_BOOTSTRAP_DIR
+    lock_path = os.path.join(runtime_dir, 'agent_supervisor.lock')
+    lock_handle = None
+    try:
+        lock_handle = open(lock_path, 'a+', encoding='utf-8')
+        if platform.system().lower() == 'windows':
+            import msvcrt
+            try:
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                print('[SUPERVISOR] Agent supervisor already running.')
+                return
+        restart_delay = 3
+        while True:
+            cmd = [sys.executable, os.path.abspath(__file__),
+                   '--server', args.server]
+            if args.key_file:
+                cmd.extend(['--key-file', args.key_file])
+            elif args.key:
+                cmd.extend(['--key', args.key])
+            elif os.path.isfile(_default_api_key_file()):
+                cmd.extend(['--key-file', _default_api_key_file()])
+            if args.pair_code:
+                cmd.extend(['--pair-code', args.pair_code])
+            if args.credential_file:
+                cmd.extend(['--credential-file', args.credential_file])
+            if args.device_id:
+                cmd.extend(['--device-id', args.device_id])
+            cmd.append('--worker')
+            print('[SUPERVISOR] Starting protection worker...')
+            try:
+                proc = safe_popen(cmd, stdout=None, stderr=None)
+                code = proc.wait()
+            except Exception as exc:
+                _startup_log(f'[SUPERVISOR] Worker launch failed: {exc}')
+                code = -1
+            _startup_log(f'[SUPERVISOR] Worker exited with code {code}; restarting in {restart_delay}s')
+            time.sleep(restart_delay)
+            restart_delay = min(restart_delay * 2, 60)
+    finally:
+        try:
+            if lock_handle:
+                lock_handle.close()
+        except Exception:
+            pass
 
 
 def main():
@@ -3862,9 +4127,17 @@ def main():
                         help='Register the agent to start automatically on boot/login')
     parser.add_argument('--background', action='store_true',
                         help='Run the agent in the background (no terminal window)')
+    parser.add_argument('--worker', action='store_true',
+                        help='Internal supervised worker mode')
+    parser.add_argument('--supervise', action='store_true',
+                        help='Run a persistent supervisor that restarts the worker if it exits')
     args = parser.parse_args(argv)
     if uri_pair_code and not args.pair_code:
         args.pair_code = uri_pair_code
+    if args.supervise:
+        _run_supervised_agent(args)
+        return
+
     api_key = _read_api_key_file(args.key_file) if args.key_file else args.key
     if not api_key and not args.pair_code:
         default_key_file = _ensure_api_key_file()
@@ -3917,6 +4190,17 @@ def main():
             kwargs['start_new_session'] = True  # detach from terminal on Linux/macOS
         safe_popen(cmd, **kwargs)
         print("Agent started in background.")
+        return
+
+    if args.worker:
+        agent.start()
+        return
+
+    # Default packaged behavior is now supervised: startup launches one
+    # persistent supervisor, and the supervisor keeps the protection worker
+    # alive whenever it exits.
+    if platform.system().lower() == 'windows':
+        _run_supervised_agent(args)
         return
 
     agent.start()

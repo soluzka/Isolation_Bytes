@@ -3353,8 +3353,14 @@ def agent_report():
             'timestamp': data.get('timestamp'),
             'files_scanned': data.get('files_scanned', existing_agent.get('files_scanned', 0)),
             'quarantined_count': data.get('quarantined_count', existing_agent.get('quarantined_count', 0)),
+            'indicator_results': {},
         }
         pending_scan['parts'][str(part_index)] = data.get('findings') or []
+        # The agent places the complete scanner snapshot on the final chunk.
+        # Keep it in the temporary generation accumulator until all chunks
+        # have been reassembled.
+        if isinstance(data.get('indicator_results'), dict):
+            pending_scan['indicator_results'] = data.get('indicator_results') or {}
         pending_scan['total'] = part_total
         pending[scan_id] = pending_scan
 
@@ -3378,6 +3384,8 @@ def agent_report():
         data['files_scanned'] = pending_scan.get('files_scanned', data.get('files_scanned', 0))
         data['quarantined_count'] = pending_scan.get('quarantined_count', data.get('quarantined_count', 0))
         data['findings'] = merged
+        if isinstance(pending_scan.get('indicator_results'), dict):
+            data['indicator_results'] = pending_scan.get('indicator_results') or {}
         pending.pop(scan_id, None)
         data['_clear_pending_scan_parts'] = True
         # Do not persist the temporary chunk accumulator in the final report.
@@ -3435,6 +3443,12 @@ def agent_report():
 
     data['findings'] = enriched
     data['finding_count'] = len(enriched)
+    # Scanner evidence is already normalized by the agent. Preserve it as a
+    # first-class report field so the dashboard can display errors, ML
+    # detections, YARA matches, and behavioral indicators independently of the
+    # human-readable finding list.
+    if not isinstance(data.get('indicator_results'), dict):
+        data['indicator_results'] = {}
     # Build cumulative counters so clean scans don't zero them out
     existing = _get_agent(device_id) or {}
     prev_findings_count = existing.get('findings_count', 0) or 0

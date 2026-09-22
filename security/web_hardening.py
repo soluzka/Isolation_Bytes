@@ -205,12 +205,21 @@ def init_web_security(
                 return jsonify(error="Malformed JSON request"), 400
 
         now = int(time.time())
-        if session.get("session_created_at") and (
-            now - int(session.get("session_created_at", now)) > session_timeout
-        ):
-            session.clear()
-        if session.get("logged_in") or session.get("user_logged_in"):
-            session["last_seen_at"] = now
+        browser_authenticated = bool(session.get("logged_in") or session.get("user_logged_in"))
+        if browser_authenticated:
+            # Use an inactivity timeout, not an absolute-from-login timeout.
+            # The dashboard polls APIs continuously, so an active user must
+            # not lose authentication after one fixed hour while still using it.
+            last_activity = int(session.get("last_seen_at") or session.get("session_created_at") or now)
+            if now - last_activity > session_timeout:
+                session.clear()
+                browser_authenticated = False
+            else:
+                session["last_seen_at"] = now
+                session.permanent = True
+                # Keep the legacy creation field aligned for older deployments.
+                if not session.get("session_created_at"):
+                    session["session_created_at"] = now
 
         if "csrf_token" not in session:
             session["csrf_token"] = secrets.token_urlsafe(32)

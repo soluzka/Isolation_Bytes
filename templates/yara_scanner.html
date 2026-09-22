@@ -466,8 +466,9 @@
                 </div>
                 
                 <h4>Quarantine Location</h4>
-                <p>All quarantined files are stored in:</p>
-                <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0;">%USERPROFILE%\AppData\Local\Temp\IsolationBytes\Quarantine</code>
+                <p>YARA threats are quarantined in the application's configured quarantine directory:</p>
+                <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0;">{{ yara_quarantine_folder }}</code>
+                <p style="font-size: 0.9em; color: #666;">This path follows <code>ANTIVIRUS_RUNTIME_DIR</code> when configured; otherwise it uses the application's IsolationBytes runtime directory.</p>
                 
                 <div style="background-color: #d1ecf1; padding: 10px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #0c5460;">
                     <p><strong>Enhanced Security:</strong> All quarantined files are now encrypted with a .enc extension. This provides an extra layer of protection to prevent accidental execution of malicious code.</p>
@@ -1055,32 +1056,39 @@
                 return;
             }
             let html = '';
+            const sevColor = {critical: '#dc3545', high: '#fd7e14', medium: '#ffc107', low: '#28a745'};
             for (const ag of agents) {
-                const findings = ag.findings || [];
-                const scanDirs = ag.scan_dirs || [];
-                const sevColor = {critical: '#dc3545', high: '#fd7e14', medium: '#ffc107', low: '#28a745'};
+                const findings = Array.isArray(ag.findings) ? ag.findings : [];
+                const errors = Array.isArray(ag.errors_results) ? ag.errors_results : [];
                 let findingsHtml = '';
                 if (findings.length) {
-                    findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>Quarantined</th></tr></thead><tbody>';
+                    findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Source</th><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>ML Score</th><th>Quarantined</th></tr></thead><tbody>';
                     for (const f of findings) {
-                        const sev = (f.severity || 'low').toLowerCase();
+                        const sev = String(f.severity || (Number(f.ml_score) >= 60 ? 'high' : 'medium')).toLowerCase();
                         const color = sevColor[sev] || '#6c757d';
+                        const source = String(f.rule || '').toLowerCase().startsWith('ml') || f.ml_score != null ? 'ML' : 'YARA';
                         const qIcon = f.quarantined ? '✓ Yes' : (f.quarantine_error ? '✗ Failed' : '—');
-                        findingsHtml += '<tr><td style="word-break:break-all;">' + escapeHtml(f.path || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
+                        findingsHtml += '<tr><td>' + escapeHtml(source) + '</td><td style="word-break:break-all;">' + escapeHtml(f.path || f.file || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(f.ml_score != null ? f.ml_score : '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
                     }
                     findingsHtml += '</tbody></table>';
                 } else {
-                    findingsHtml = '<p style="margin-top:8px;color:#28a745;">No threats found on last scan.</p>';
+                    findingsHtml = '<p style="margin-top:8px;color:#28a745;">No detections found on this scan generation.</p>';
                 }
-                let dirsHtml = '';
-                if (scanDirs.length) {
-                    dirsHtml = '<details style="margin-top:6px;"><summary style="cursor:pointer;font-size:13px;">Scanned areas (' + scanDirs.length + ')</summary><ul style="font-size:12px;color:#555;max-height:200px;overflow:auto;">';
-                    for (const d of scanDirs) {
-                        dirsHtml += '<li>' + escapeHtml(d) + '</li>';
+
+                let errorsHtml = '';
+                if (errors.length) {
+                    errorsHtml = '<details open style="margin-top:10px;"><summary style="cursor:pointer;color:#dc3545;font-weight:bold;">Scanner errors (' + errors.length + ')</summary><table class="table" style="margin-top:6px;"><thead><tr><th>Stage</th><th>File/Path</th><th>Error</th></tr></thead><tbody>';
+                    for (const e of errors) {
+                        errorsHtml += '<tr><td>' + escapeHtml(e.stage || e.type || 'scanner') + '</td><td style="word-break:break-all;">' + escapeHtml(e.filepath || e.file || e.path || '') + '</td><td style="word-break:break-word;">' + escapeHtml(e.error || e.message || e.description || String(e)) + '</td></tr>';
                     }
-                    dirsHtml += '</ul></details>';
+                    errorsHtml += '</tbody></table></details>';
                 }
-                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Status: <strong>' + escapeHtml(ag.scan_status || 'idle') + '</strong> &middot; Findings: <strong style="color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';">' + (ag.finding_count || 0) + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+
+                const findingCount = Number(ag.finding_count) || findings.length;
+                const mlCount = Number(ag.ml_detections) || Number(ag.ml_suspicious) || 0;
+                const yaraCount = Number(ag.yara_suspicious) || 0;
+                const errorCount = Number(ag.errors) || errors.length;
+                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Status: <strong>' + escapeHtml(ag.scan_status || 'idle') + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; YARA: <strong>' + yaraCount + '</strong> &middot; ML: <strong>' + mlCount + '</strong> &middot; Errors: <strong style="color:' + (errorCount ? '#dc3545' : '#28a745') + ';">' + errorCount + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + findingsHtml + errorsHtml + '</div>';
             }
             el.innerHTML = html;
         }

@@ -176,6 +176,13 @@ def _canonical_yara_agent_state():
     agents = _legacy._all_agents()
     findings = []
     seen_findings = set()
+    yara_findings = 0
+    all_errors = []
+    all_process_events = []
+    all_ml_detections = []
+    all_ransomware_indicators = []
+    all_persistence_indicators = {}
+    all_yara_suspicious = []
     scanned_files = 0
     quarantined_files = 0
     ml_detections = 0
@@ -252,16 +259,38 @@ def _canonical_yara_agent_state():
                     agent.get('threats_blocked', report.get('threats_blocked', 0)) or 0
                 ))
                 counters = report.get('scanner_counters') or agent.get('scanner_counters') or {}
-                errors += max(0, int(counters.get('errors', 0) or 0))
-                process_events += max(0, int(counters.get('process_events', 0) or 0))
-                # Prefer authoritative agent counters for the current generation.
-                ml_detections += max(0, int(
+                indicator_results = report.get('indicator_results') or {}
+                if not isinstance(indicator_results, dict):
+                    indicator_results = {}
+                report_errors = indicator_results.get('errors') or []
+                report_process_events = indicator_results.get('process_events') or []
+                report_ml = indicator_results.get('ml_detections') or []
+                report_ransomware = indicator_results.get('ransomware_indicators') or []
+                report_persistence = indicator_results.get('persistence_indicators') or {}
+                report_yara = indicator_results.get('yara_suspicious') or []
+                if isinstance(report_errors, list):
+                    all_errors.extend(report_errors)
+                if isinstance(report_process_events, list):
+                    all_process_events.extend(report_process_events)
+                if isinstance(report_ml, list):
+                    all_ml_detections.extend(report_ml)
+                if isinstance(report_ransomware, list):
+                    all_ransomware_indicators.extend(report_ransomware)
+                if isinstance(report_yara, list):
+                    all_yara_suspicious.extend(report_yara)
+                if isinstance(report_persistence, dict):
+                    all_persistence_indicators.update(report_persistence)
+                errors += max(0, len(report_errors), int(counters.get('errors', 0) or 0))
+                process_events += max(0, len(report_process_events), int(counters.get('process_events', 0) or 0))
+                # Prefer the normalized current-generation collections when
+                # available; counters remain the fallback for older agents.
+                ml_detections += max(0, len(report_ml), int(
                     agent.get('total_ml', report.get('total_ml', counters.get('ml_detections', 0))) or 0
                 ))
-                ransomware_indicators += max(0, int(
+                ransomware_indicators += max(0, len(report_ransomware), int(
                     agent.get('total_ransomware', report.get('total_ransomware', counters.get('ransomware_indicators', 0))) or 0
                 ))
-                persistence_indicators += max(0, int(
+                persistence_indicators += max(0, len(all_persistence_indicators), int(
                     agent.get('total_persistence', report.get('total_persistence', counters.get('persistence_indicators', 0))) or 0
                 ))
             # If the agent has not published this generation's scan_id yet,
@@ -314,10 +343,20 @@ def _canonical_yara_agent_state():
             if generation_started:
                 report_findings = report.get('findings') or report.get('results') or []
         for finding in report_findings:
-            if not isinstance(finding, dict) or not _is_yara_finding(finding):
+            if not isinstance(finding, dict):
                 continue
-            path = finding.get('path') or finding.get('original_path') or ''
-            key = (device_id, _canonical_path(path), str(finding.get('rule') or '').strip().lower())
+            path = finding.get('path') or finding.get('original_path') or finding.get('file') or ''
+            # Keep YARA, ML, ransomware/persistence and other scanner findings.
+            # The previous _is_yara_finding gate silently discarded ML-only
+            # detections from the dashboard.
+            key = (
+                device_id,
+                _canonical_path(path),
+                str(finding.get('rule') or '').strip().lower(),
+                str(finding.get('threat_type') or '').strip().lower(),
+                str(finding.get('ml_score') or finding.get('anomaly_score') or ''),
+                str(finding.get('reason') or finding.get('description') or '').strip(),
+            )
             if key in seen_findings:
                 continue
             seen_findings.add(key)
@@ -328,18 +367,9 @@ def _canonical_yara_agent_state():
             item['hostname'] = agent.get('hostname', device_id)
             item['quarantined'] = bool(finding.get('quarantined'))
             findings.append(item)
-            threat = str(item.get('threat_type') or '').lower()
             rule = str(item.get('rule') or '').lower()
-            # Threat counters are taken from the authoritative generation totals above.
-            # Do not increment them again from the latest report's findings.
-
-        for finding in report_findings:
-            if not isinstance(finding, dict):
-                continue
-            rule = str(finding.get('rule') or '').lower()
-            threat = str(finding.get('threat_type') or '').lower()
-            if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_') or threat == 'ml':
-                ml_detections += 1
+            if rule and not rule.startswith('ml_') and rule not in {'ml', 'ml_heuristic'}:
+                yara_findings += 1
 
     active_started = max(
         (str(v.get('started_at') or '') for v in _agent_scan_state.values()
@@ -372,10 +402,16 @@ def _canonical_yara_agent_state():
         'ml_detections': ml_detections,
         'ransomware_indicators': ransomware_indicators,
         'persistence_indicators': persistence_indicators,
-        'yara_suspicious': len(findings),
+        'yara_suspicious': max(yara_findings, len(all_yara_suspicious)),
         'findings': findings,
+        'errors_results': all_errors,
+        'process_event_results': all_process_events,
+        'ml_detection_results': all_ml_detections,
+        'ransomware_indicator_results': all_ransomware_indicators,
+        'persistence_indicator_results': all_persistence_indicators,
+        'yara_suspicious_results': all_yara_suspicious,
         'ml_models': {},
-        'last_error': '',
+        'last_error': (all_errors[-1] if all_errors else ''),
         'scan_status': current_status,
         'scan_started_at': current_started_at,
     }
@@ -681,6 +717,18 @@ def _complete_agent_scan_results_response():
                 'scan_status': 'scanning' if running else 'idle',
                 'scan_started_at': started,
                 'last_scan': str(conditional.get('last_run') or started),
+                'errors': int(conditional.get('errors') or 0),
+                'process_events': int(conditional.get('process_events') or 0),
+                'ml_detections': int(conditional.get('ml_detections') or 0),
+                'ransomware_indicators': int(conditional.get('ransomware_indicators') or 0),
+                'persistence_indicators': int(conditional.get('persistence_indicators') or 0),
+                'yara_suspicious': int(conditional.get('yara_suspicious') or 0),
+                'errors_results': conditional.get('errors_results') or [],
+                'process_event_results': conditional.get('process_event_results') or [],
+                'ml_detection_results': conditional.get('ml_detection_results') or [],
+                'ransomware_indicator_results': conditional.get('ransomware_indicator_results') or [],
+                'persistence_indicator_results': conditional.get('persistence_indicator_results') or {},
+                'yara_suspicious_results': conditional.get('yara_suspicious_results') or [],
             }],
             'total_files_scanned': scanned,
             'total_findings': len(findings),
@@ -714,6 +762,18 @@ def _complete_agent_scan_results_response():
             'scan_status': state.get('scan_status') or ('scanning' if running else 'idle'),
             'scan_started_at': str(state.get('scan_started_at') or ''),
             'last_scan': str(state.get('last_run') or ''),
+            'errors': int(state.get('errors') or 0),
+            'process_events': int(state.get('process_events') or 0),
+            'ml_detections': int(state.get('ml_detections') or 0),
+            'ransomware_indicators': int(state.get('ransomware_indicators') or 0),
+            'persistence_indicators': int(state.get('persistence_indicators') or 0),
+            'yara_suspicious': int(state.get('yara_suspicious') or 0),
+            'errors_results': state.get('errors_results') or [],
+            'process_event_results': state.get('process_event_results') or [],
+            'ml_detection_results': state.get('ml_detection_results') or [],
+            'ransomware_indicator_results': state.get('ransomware_indicator_results') or [],
+            'persistence_indicator_results': state.get('persistence_indicator_results') or {},
+            'yara_suspicious_results': state.get('yara_suspicious_results') or [],
         }] if (running or state.get('scan_generation')) else [],
         'total_files_scanned': scanned,
         'total_findings': len(findings),

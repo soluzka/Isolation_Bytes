@@ -202,19 +202,31 @@
         const sevColor = {critical: '#dc3545', high: '#fd7e14', medium: '#ffc107', low: '#28a745'};
         for (const ag of agents) {
             const findings = Array.isArray(ag.findings) ? ag.findings : (Array.isArray(ag.results) ? ag.results : []);
+            const errors = Array.isArray(ag.errors_results) ? ag.errors_results : [];
             const scanDirs = Array.isArray(ag.scan_dirs) ? ag.scan_dirs : [];
             let findingsHtml = '';
+
             if (findings.length) {
-                findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>Quarantined</th></tr></thead><tbody>';
+                findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Source</th><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>ML Score</th><th>Quarantined</th></tr></thead><tbody>';
                 for (const f of findings) {
-                    const sev = String(f.severity || 'low').toLowerCase();
+                    const sev = String(f.severity || (Number(f.ml_score) >= 60 ? 'high' : 'medium')).toLowerCase();
                     const color = sevColor[sev] || '#6c757d';
+                    const source = String(f.rule || '').toLowerCase().startsWith('ml') || f.ml_score != null ? 'ML' : 'YARA';
                     const qIcon = f.quarantined ? '✓ Yes' : (f.quarantine_error ? '✗ Failed' : '—');
-                    findingsHtml += '<tr><td style="word-break:break-all;">' + escapeHtml(f.path || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
+                    findingsHtml += '<tr><td>' + escapeHtml(source) + '</td><td style="word-break:break-all;">' + escapeHtml(f.path || f.file || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(f.ml_score != null ? f.ml_score : '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
                 }
                 findingsHtml += '</tbody></table>';
             } else {
-                findingsHtml = '<p style="margin-top:8px;color:#28a745;">No threats found on last scan.</p>';
+                findingsHtml = '<p style="margin-top:8px;color:#28a745;">No detections found on this scan generation.</p>';
+            }
+
+            let errorsHtml = '';
+            if (errors.length) {
+                errorsHtml = '<details open style="margin-top:10px;"><summary style="cursor:pointer;color:#dc3545;font-weight:bold;">Scanner errors (' + errors.length + ')</summary><table class="table" style="margin-top:6px;"><thead><tr><th>Stage</th><th>File/Path</th><th>Error</th></tr></thead><tbody>';
+                for (const e of errors) {
+                    errorsHtml += '<tr><td>' + escapeHtml(e.stage || e.type || 'scanner') + '</td><td style="word-break:break-all;">' + escapeHtml(e.filepath || e.file || e.path || '') + '</td><td style="word-break:break-word;">' + escapeHtml(e.error || e.message || e.description || String(e)) + '</td></tr>';
+                }
+                errorsHtml += '</tbody></table></details>';
             }
 
             let dirsHtml = '';
@@ -226,8 +238,11 @@
 
             const filesScanned = Number(ag.files_scanned) || 0;
             const findingCount = Number(ag.finding_count) || findings.length;
+            const mlCount = Number(ag.ml_detections) || Number(ag.ml_suspicious) || 0;
+            const yaraCount = Number(ag.yara_suspicious) || 0;
             const quarantinedCount = Number(ag.quarantined_count) || 0;
-            html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id || 'Agent') + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + filesScanned + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; Quarantined: <strong>' + quarantinedCount + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+            const errorCount = Number(ag.errors) || errors.length;
+            html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id || 'Agent') + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + filesScanned + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; YARA: <strong>' + yaraCount + '</strong> &middot; ML: <strong>' + mlCount + '</strong> &middot; Errors: <strong style="color:' + (errorCount ? '#dc3545' : '#28a745') + ';">' + errorCount + '</strong> &middot; Quarantined: <strong>' + quarantinedCount + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + errorsHtml + '</div>';
         }
         el.innerHTML = html;
     }
