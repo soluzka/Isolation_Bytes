@@ -11,6 +11,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from runtime_paths import ensure_agent_running
 
 try:
     import psutil
@@ -96,7 +97,6 @@ DEVICE_ID = _get_device_id()
 _AGENT_START_LOCK = threading.Lock()
 _AGENT_RUNTIME_STARTED = False
 _AGENT_RUNTIME_THREADS = []
-
 
 def ensure_agent_runtime():
     """Start the detector runtime once and reuse it for subsequent detections."""
@@ -203,6 +203,8 @@ def scan_target(target):
     # A code-scanner invocation may happen before the long-running agent was
     # explicitly launched. Start the shared detector runtime once, then reuse
     # those same threads for later detections instead of spawning duplicates.
+    if not ensure_agent_running():
+        return [{'error': 'IsolationBytesAgent.exe is not running and could not be launched', 'target': target}]
     ensure_agent_runtime()
     if not target or not os.path.exists(target):
         return [{'error': f'target not found: {target}'}]

@@ -1,3 +1,4 @@
+from runtime_paths import ensure_agent_running
 import yara as yara_module
 import os
 import logging
@@ -462,6 +463,8 @@ def load_yara_rules():
         return []
 
 def scan_file_with_yara(filepath, timeout=None):
+    if not ensure_agent_running():
+        raise RuntimeError('IsolationBytesAgent is not running and could not be started')
     """
     Scan a file using all available YARA rules. 
     Returns a list of match objects if suspicious, or an empty list if not suspicious.
@@ -869,6 +872,8 @@ def _categorize_threat(rule_name):
 
 
 def scan_all_folders_with_yara(monitored_folders, rules_path=None):
+    if not ensure_agent_running():
+        raise RuntimeError('IsolationBytesAgent is not running and could not be started')
     """
     YARA-based scanning utilities for security module.
     
