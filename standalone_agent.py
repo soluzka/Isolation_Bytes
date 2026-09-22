@@ -517,7 +517,49 @@ class StandaloneAgent:
             datetime.timezone.utc
         ).isoformat()
         self._reset_scan_state()
+        self._publish_scheduled_scan_state(
+            status='running',
+            running=True,
+            continuous=True,
+            started_at=self._scan_started_at,
+            last_run=None,
+            next_run=None,
+        )
         self._publish_all_runtime_json()
+
+    def _ensure_continuous_scan(self):
+        """Keep the scheduled/continuous scan worker alive for the agent lifetime."""
+        if not self._running or not self._continuous_scan_requested:
+            return False
+        thread = self._continuous_scan_thread
+        if thread is not None and thread.is_alive():
+            return True
+        self._scan_status = 'scanning'
+        self._publish_scheduled_scan_state(
+            status='running',
+            running=True,
+            continuous=True,
+            next_run=None,
+        )
+        try:
+            thread = threading.Thread(
+                target=self._scan_cycle,
+                kwargs={'continuous': True},
+                name='agent-continuous-scan',
+                daemon=True,
+            )
+            self._continuous_scan_thread = thread
+            thread.start()
+            return True
+        except Exception as exc:
+            self._last_report_error = f'continuous scan restart failed: {exc}'
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                last_error=self._last_report_error,
+            )
+            return False
 
     def __init__(self, server_url, api_key='', device_id=None, pair_code=None,
                  credential_file=None):
@@ -1175,6 +1217,10 @@ class StandaloneAgent:
                 raise RuntimeError(
                     "runtime JSON bootstrap incomplete: " + ", ".join(missing)
                 )
+            # Scheduled/continuous scan is self-healing. If its worker
+            # thread ended after a pass or crashed, restart it before publishing
+            # heartbeat state so the dashboard never sees a false completion.
+            self._ensure_continuous_scan()
             stats = self._get_live_stats()
             stats["runtime_state_ready"] = True
             stats["runtime_dir"] = runtime_dir
@@ -1283,7 +1329,16 @@ class StandaloneAgent:
                     pass
                 return
             self._continuous_scan_requested = True
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                started_at=self._scan_started_at,
+                last_run=None,
+                next_run=None,
+            )
             if self._scan_lock.locked():
+                self._ensure_continuous_scan()
                 print("[CMD] Scan request accepted: continuous scan is already running")
                 return
             # Publish the active generation BEFORE starting the worker thread.
@@ -1302,6 +1357,7 @@ class StandaloneAgent:
             try:
                 import threading
                 t = threading.Thread(target=self._scan_cycle, kwargs={'continuous': True}, name='agent-continuous-scan', daemon=True)
+                self._continuous_scan_thread = t
                 t.start()
             except Exception as e:
                 print(f"[CMD] Scan trigger failed: {e}")
@@ -3361,9 +3417,18 @@ X-GNOME-Autostart-enabled=true
                     self._scanner_results["errors_count"] = len(self._scanner_results.get("errors", []))
                     self._publish_all_runtime_json()
                     continue
-            # A continuous scan is never marked complete. Finishing a directory
-            # pass only means the next continuous pass begins immediately.
+            # A continuous scheduled scan is never marked complete. Finishing
+            # one directory traversal is only the boundary before the next pass.
             self._scan_status = 'scanning' if (continuous and self._running) else ('complete' if self._running else 'stopped')
+            if continuous and self._running:
+                self._publish_scheduled_scan_state(
+                    status='running',
+                    running=True,
+                    continuous=True,
+                    last_run=None,
+                    next_run=None,
+                    last_updated=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                )
             if all_findings:
                 print(
                     f"[ALERT] Found {len(all_findings)} threat(s)! "
