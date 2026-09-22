@@ -686,13 +686,91 @@ public class LoginForm : Form
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var localAppAgent = Path.Combine(localAppData, "IsolationBytes", "IsolationBytesAgent.exe");
-        if (File.Exists(localAppAgent)) return Path.GetFullPath(localAppAgent);
+        if (File.Exists(localAppAgent))
+        {
+            return Path.GetFullPath(localAppAgent);
+        }
 
         var launcherDir = Path.GetDirectoryName(Application.ExecutablePath);
         if (!string.IsNullOrEmpty(launcherDir))
         {
             var bundled = Path.Combine(launcherDir, "IsolationBytesAgent.exe");
-            if (File.Exists(bundled)) return Path.GetFullPath(bundled);
+            if (File.Exists(bundled))
+            {
+                return Path.GetFullPath(bundled);
+            }
+        }
+        return null;
+    }
+
+    private static (Uri DownloadUri, string Sha256)? GetAgentDownloadInfo()
+    {
+        using var response = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
+        if (!response.IsSuccessStatusCode)
+        {
+            return null;
+        }
+
+        var body = response.Content.ReadAsStringAsync().Result;
+        var update = JsonNode.Parse(body);
+        if (update is null || update["update_available"]?.GetValue<bool>() != true)
+        {
+            return null;
+        }
+
+        var downloadUrl = update["download_url"]?.GetValue<string>() ?? "";
+        var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
+        if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var downloadUri))
+        {
+            return null;
+        }
+        if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri))
+        {
+            return null;
+        }
+        if (!string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+        if (downloadUri.AbsolutePath != "/download/IsolationBytesAgent.exe")
+        {
+            return null;
+        }
+        if (expectedSha.Length != 64 || !expectedSha.All(Uri.IsHexDigit))
+        {
+            return null;
+        }
+
+        return (downloadUri, expectedSha);
+    }
+
+    private static string? DownloadVerifiedAgent((Uri DownloadUri, string Sha256) info)
+    {
+        var targetDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "IsolationBytes");
+        Directory.CreateDirectory(targetDir);
+
+        var target = Path.Combine(targetDir, "IsolationBytesAgent.exe");
+        var temp = target + ".download";
+        var bytes = _http.GetByteArrayAsync(info.DownloadUri).Result;
+        if (bytes.Length < 100_000)
+        {
+            return null;
+        }
+
+        var actualSha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        if (!string.Equals(actualSha, info.Sha256, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        File.WriteAllBytes(temp, bytes);
+        File.Move(temp, target, true);
+        if (File.Exists(target))
+        {
+            return target;
         }
         return null;
     }
@@ -700,42 +778,19 @@ public class LoginForm : Form
     private static string? DownloadAgentIfMissing()
     {
         var existing = FindInstalledAgentExe();
-        if (!string.IsNullOrEmpty(existing)) return existing;
+        if (!string.IsNullOrEmpty(existing))
+        {
+            return existing;
+        }
 
         try
         {
-            using var updateResponse = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
-            if (!updateResponse.IsSuccessStatusCode) return null;
-
-            var updateBody = updateResponse.Content.ReadAsStringAsync().Result;
-            var update = JsonNode.Parse(updateBody);
-            if (update is null || update["update_available"]?.GetValue<bool>() != true) return null;
-
-            var downloadUrl = update["download_url"]?.GetValue<string>() ?? "";
-            var expectedSha = (update["sha256"]?.GetValue<string>() ?? "").Trim().ToLowerInvariant();
-            if (!Uri.TryCreate(downloadUrl, UriKind.Absolute, out var downloadUri)) return null;
-            if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri)) return null;
-            if (!string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
-                !string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase) ||
-                downloadUri.AbsolutePath != "/download/IsolationBytesAgent.exe" ||
-                expectedSha.Length != 64 || expectedSha.Any(c => !Uri.IsHexDigit(c)))
+            var info = GetAgentDownloadInfo();
+            if (!info.HasValue)
+            {
                 return null;
-
-            var targetDir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "IsolationBytes");
-            Directory.CreateDirectory(targetDir);
-            var target = Path.Combine(targetDir, "IsolationBytesAgent.exe");
-            var temp = target + ".download";
-
-            var bytes = _http.GetByteArrayAsync(downloadUri).Result;
-            if (bytes.Length < 100_000) return null;
-            var actualSha = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-            if (!string.Equals(actualSha, expectedSha, StringComparison.OrdinalIgnoreCase)) return null;
-
-            File.WriteAllBytes(temp, bytes);
-            File.Move(temp, target, true);
-            return File.Exists(target) ? target : null;
+            }
+            return DownloadVerifiedAgent(info.Value);
         }
         catch
         {
