@@ -3892,6 +3892,24 @@ del "{bat_path}" 2>nul
             self._running = False
             return
 
+        # Scheduled scan is persistent continuous protection. Every agent
+        # startup resumes it, and the self-healing worker restarts each pass
+        # instead of ever publishing a completed/finished state.
+        self._continuous_scan_requested = True
+        try:
+            self._begin_scan_generation()
+            self._ensure_continuous_scan()
+        except Exception as exc:
+            self._scan_status = 'scanning'
+            self._last_report_error = f'scheduled scan startup failed: {exc}'
+            self._publish_scheduled_scan_state(
+                status='running',
+                running=True,
+                continuous=True,
+                last_error=self._last_report_error,
+            )
+            _startup_log(f'[SCHEDULED SCAN] {self._last_report_error}')
+
         # Start heartbeat thread
         hb_thread = threading.Thread(target=self._heartbeat_loop, daemon=True, name='Heartbeat')
         hb_thread.start()
