@@ -12,6 +12,7 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from runtime_paths import ensure_agent_running
 
 try:
     import psutil
@@ -97,184 +98,6 @@ DEVICE_ID = _get_device_id()
 _AGENT_START_LOCK = threading.Lock()
 _AGENT_RUNTIME_STARTED = False
 _AGENT_RUNTIME_THREADS = []
-
-_AGENT_PROCESS_LOCK = threading.Lock()
-_AGENT_EXE_NAME = 'IsolationBytesAgent.exe'
-_AGENT_LAUNCHER_NAME = 'AntivirusServerLogin.exe'
-_AGENT_READY_TIMEOUT = 15
-
-
-def _agent_process_running():
-    """Return True only when the Windows agent process is actually running."""
-    if psutil is None:
-        return False
-    for proc in psutil.process_iter(['name', 'exe']):
-        try:
-            name = (proc.info.get('name') or '').lower()
-            exe = os.path.basename(proc.info.get('exe') or '').lower()
-            if name == _AGENT_EXE_NAME.lower() or exe == _AGENT_EXE_NAME.lower():
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            continue
-    return False
-
-
-def _agent_candidates():
-    candidates = []
-    configured = os.environ.get('ISOLATION_BYTES_AGENT_EXE', '').strip()
-    if configured:
-        candidates.append(Path(os.path.expandvars(configured)))
-    local_appdata = os.environ.get('LOCALAPPDATA', '')
-    if local_appdata:
-        candidates.append(Path(local_appdata) / 'IsolationBytes' / _AGENT_EXE_NAME)
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    for folder in ('Isolation Bytes', 'Antivirus Server'):
-        candidates.append(Path(program_files) / folder / _AGENT_EXE_NAME)
-    candidates.extend([
-        BASE_DIR.parent / 'dist' / _AGENT_EXE_NAME,
-        BASE_DIR.parent / 'native' / 'AntivirusServerLogin' / 'bin' / 'Release' / 'net8.0-windows' / 'win-x64' / _AGENT_EXE_NAME,
-    ])
-    return candidates
-
-
-def _startup_script_candidates():
-    names = ('start_agent.bat',) if os.name == 'nt' else ('start_agent.sh',)
-    roots = [BASE_DIR.parent, BASE_DIR.parent / 'dist']
-    local_appdata = os.environ.get('LOCALAPPDATA', '')
-    if local_appdata:
-        roots.append(Path(local_appdata) / 'IsolationBytes')
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    roots.extend(Path(program_files) / folder for folder in ('Isolation Bytes', 'Antivirus Server'))
-    return [root / name for root in roots for name in names]
-
-
-def _launcher_candidates():
-    candidates = []
-    configured = os.environ.get('ISOLATION_BYTES_LAUNCHER_EXE', '').strip()
-    if configured:
-        candidates.append(Path(os.path.expandvars(configured)))
-    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
-    for folder in ('Isolation Bytes', 'Antivirus Server'):
-        candidates.append(Path(program_files) / folder / _AGENT_LAUNCHER_NAME)
-    local_appdata = os.environ.get('LOCALAPPDATA', '')
-    if local_appdata:
-        candidates.append(Path(local_appdata) / 'IsolationBytes' / _AGENT_LAUNCHER_NAME)
-    candidates.extend([
-        BASE_DIR.parent / 'dist' / _AGENT_LAUNCHER_NAME,
-        BASE_DIR.parent / 'native' / 'AntivirusServerLogin' / 'bin' / 'Release' / 'net8.0-windows' / 'win-x64' / _AGENT_LAUNCHER_NAME,
-    ])
-    return candidates
-
-
-def _start_agent_executable(agent_exe):
-    args = [str(agent_exe), '--server', CLOUD_URL]
-    if CLOUD_API_KEY:
-        args.append(f'--key={CLOUD_API_KEY}')
-    args.append('--auto-start')
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-    subprocess.Popen(args, cwd=str(agent_exe.parent), creationflags=creationflags)
-
-
-def _start_startup_script(script_path):
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-    if os.name == 'nt':
-        subprocess.Popen(['cmd.exe', '/d', '/c', str(script_path)],
-                         cwd=str(script_path.parent), creationflags=creationflags)
-    else:
-        subprocess.Popen(['/bin/sh', str(script_path)],
-                         cwd=str(script_path.parent), creationflags=creationflags)
-
-
-def _start_agent_launcher(launcher_exe):
-    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-    subprocess.Popen([str(launcher_exe)], cwd=str(launcher_exe.parent), creationflags=creationflags)
-
-
-def _download_agent_executable():
-    if os.name != 'nt':
-        return None
-    try:
-        update = requests.get(f'{CLOUD_URL}/agent/update-check', timeout=15, verify=True)
-        update.raise_for_status()
-        metadata = update.json()
-        download_url = metadata.get('download_url', '')
-        expected_sha = str(metadata.get('sha256', '')).strip().lower()
-        parsed = urlparse(download_url)
-        server = urlparse(CLOUD_URL)
-        if (
-            parsed.scheme != 'https' or server.scheme != 'https'
-            or parsed.netloc != server.netloc
-            or parsed.path != '/download/IsolationBytesAgent.exe'
-            or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
-        ):
-            return None
-        response = requests.get(download_url, timeout=60, verify=True)
-        response.raise_for_status()
-        data = response.content
-        if hashlib.sha256(data).hexdigest().lower() != expected_sha:
-            return None
-        target_dir = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'IsolationBytes'
-        target_dir.mkdir(parents=True, exist_ok=True)
-        target = target_dir / _AGENT_EXE_NAME
-        temp = target.with_suffix('.download')
-        temp.write_bytes(data)
-        os.replace(temp, target)
-        return target
-    except (OSError, ValueError, requests.RequestException, json.JSONDecodeError):
-        return None
-
-
-def _wait_for_agent(timeout=_AGENT_READY_TIMEOUT):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if _agent_process_running():
-            return True
-        time.sleep(0.25)
-    return _agent_process_running()
-
-
-def ensure_windows_agent_running():
-    """Verify startup assets, launch them, then download if readiness fails."""
-    if os.name != 'nt':
-        script = next((path for path in _startup_script_candidates() if path.is_file()), None)
-        if script is not None:
-            _start_startup_script(script)
-            return _wait_for_agent()
-        return False
-    if _agent_process_running():
-        return True
-
-    with _AGENT_PROCESS_LOCK:
-        if _agent_process_running():
-            return True
-
-        agent_exe = next((path for path in _agent_candidates() if path.is_file()), None)
-        startup_script = next((path for path in _startup_script_candidates() if path.is_file()), None)
-        if startup_script is not None and agent_exe is not None:
-            try:
-                _start_startup_script(startup_script)
-                if _wait_for_agent():
-                    return True
-            except (OSError, ValueError):
-                pass
-
-        launcher_exe = next((path for path in _launcher_candidates() if path.is_file()), None)
-        if launcher_exe is not None:
-            try:
-                _start_agent_launcher(launcher_exe)
-                if _wait_for_agent():
-                    return True
-            except (OSError, ValueError):
-                pass
-
-        downloaded = _download_agent_executable()
-        if downloaded is None:
-            return False
-        try:
-            _start_agent_executable(downloaded)
-        except (OSError, ValueError):
-            return False
-        return _wait_for_agent()
 
 def ensure_agent_runtime():
     """Start the detector runtime once and reuse it for subsequent detections."""
@@ -381,7 +204,7 @@ def scan_target(target):
     # A code-scanner invocation may happen before the long-running agent was
     # explicitly launched. Start the shared detector runtime once, then reuse
     # those same threads for later detections instead of spawning duplicates.
-    if not ensure_windows_agent_running():
+    if not ensure_agent_running():
         return [{'error': 'IsolationBytesAgent.exe is not running and could not be launched', 'target': target}]
     ensure_agent_runtime()
     if not target or not os.path.exists(target):
