@@ -225,22 +225,39 @@ def _agent_process_running():
     return _find_agent_process() is not None
 
 
+def _read_agent_status():
+    """Read the local readiness contract, returning None when it is unavailable."""
+    try:
+        with open(runtime_path("agent_status.json"), "r", encoding="utf-8") as handle:
+            return json.load(handle) or {}
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _agent_status_ready(status, pid):
+    """Validate registration and heartbeat fields for the current process."""
+    if status is None or int(status.get("pid") or 0) != int(pid):
+        return False
+    required = ("running", "registered", "heartbeat_ok")
+    return all(bool(status.get(field)) for field in required)
+
+
+def _agent_heartbeat_fresh(status):
+    """Return True when the agent readiness heartbeat is no more than 30 seconds old."""
+    try:
+        updated = float(status.get("updated_at_epoch") or 0)
+    except (TypeError, ValueError):
+        return False
+    return updated > 0 and (time.time() - updated) <= 30
+
+
 def _agent_verified_running():
-    """Require both a live agent process and a successful registration/heartbeat."""
+    """Require a live process plus successful registration and a fresh heartbeat."""
     pid = _find_agent_process()
     if pid is None:
         return False
-    try:
-        with open(runtime_path("agent_status.json"), "r", encoding="utf-8") as handle:
-            status = json.load(handle) or {}
-        if int(status.get("pid") or 0) != int(pid):
-            return False
-        if not status.get("running") or not status.get("registered") or not status.get("heartbeat_ok"):
-            return False
-        updated = float(status.get("updated_at_epoch") or 0)
-        return updated > 0 and (time.time() - updated) <= 30
-    except (OSError, TypeError, ValueError, json.JSONDecodeError):
-        return False
+    status = _read_agent_status()
+    return _agent_status_ready(status, pid) and _agent_heartbeat_fresh(status)
 
 
 def _configured_path(name):
