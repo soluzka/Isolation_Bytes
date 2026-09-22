@@ -67,7 +67,7 @@ def _bootstrap_runtime_json_files():
                                 'yara_suspicious': [], 'quarantined_files': []},
         },
         'blocked_files.json': {},
-        'scheduled_scan_state.json': {'status': 'idle', 'scanned_files': 0},
+        'scheduled_scan_state.json': {'enabled': True, 'running': False, 'continuous': True, 'status': 'idle', 'started_at': None, 'last_updated': None, 'last_run': None, 'next_run': None, 'scanned_files': 0, 'quarantined_files': 0, 'errors': 0, 'findings': 0},
         'quarantine_log.json': [],
         'scan_cache.json': {},
     }
@@ -396,6 +396,8 @@ class StandaloneAgent:
         except (OSError, ValueError, TypeError):
             pass
 
+        self._publish_scheduled_scan_state(status='running' if self._scan_status not in ('idle', 'complete', 'stopped', 'error') else self._scan_status, running=self._scan_status not in ('idle', 'complete', 'stopped', 'error'), continuous=True, errors=int(indicator_counts(getattr(self, '_scanner_results', {}) or {}).get('errors', 0)))
+
         scanner_results = ensure_indicator_results(getattr(self, "_scanner_results", {}) or {})
 
         # Keep collection counts authoritative even if a caller recorded an
@@ -519,6 +521,7 @@ class StandaloneAgent:
         self._reset_scan_state()
         self._publish_scheduled_scan_state(
             status='running',
+            enabled=True,
             running=True,
             continuous=True,
             started_at=self._scan_started_at,
@@ -3127,6 +3130,9 @@ X-GNOME-Autostart-enabled=true
                 mf.write("quarantined=True\n")
             self._unregister_blocked_file(filepath)
             self._quarantined_count += 1
+            self._write_quarantine_log({'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(), 'original_path': filepath, 'quarantine_path': dest, 'filename': base, 'reason': 'agent_scan', 'success': True})
+            self._publish_scheduled_scan_state(status='running', running=True, continuous=True)
+            self._publish_all_runtime_json()
             return True
         except Exception as exc:
             self._last_quarantine_error = f"Quarantine exception for {filepath}: {exc}"
@@ -3171,6 +3177,76 @@ X-GNOME-Autostart-enabled=true
         except Exception as e:
             print(f"[BLOCK] Rename fallback also failed for {filepath}: {e}")
             return False
+
+    def _read_quarantine_log(self):
+        """Read the agent-owned persistent quarantine audit log."""
+        path = runtime_path('quarantine_log.json')
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                value = json.load(handle)
+            return value if isinstance(value, list) else []
+        except (OSError, ValueError, TypeError):
+            return []
+
+    def _write_quarantine_log(self, entry):
+        """Atomically append a quarantine event to the canonical runtime JSON."""
+        path = runtime_path('quarantine_log.json')
+        events = self._read_quarantine_log()
+        events.append(dict(entry))
+        events = events[-1000:]
+        tmp = path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(events, handle, ensure_ascii=False, indent=2)
+            os.replace(tmp, path)
+            return True
+        except (OSError, TypeError, ValueError) as exc:
+            _startup_log(f'[QUARANTINE] Could not persist quarantine_log.json: {exc}')
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+            return False
+
+    def _publish_scheduled_scan_state(self, **updates):
+        """Persist the authoritative continuous scheduled-scan state."""
+        path = runtime_path('scheduled_scan_state.json')
+        state = {
+            'enabled': True, 'running': False, 'continuous': True,
+            'status': 'idle', 'started_at': None, 'last_updated': None,
+            'last_run': None, 'next_run': None,
+            'scanned_files': int(getattr(self, '_files_scanned', 0) or 0),
+            'quarantined_files': int(getattr(self, '_quarantined_count', 0) or 0),
+            'errors': 0, 'findings': int(getattr(self, '_total_findings', 0) or 0),
+        }
+        try:
+            with open(path, 'r', encoding='utf-8') as handle:
+                current = json.load(handle)
+            if isinstance(current, dict):
+                state.update(current)
+        except (OSError, ValueError, TypeError):
+            pass
+        state.update(updates)
+        state['enabled'] = True
+        state['continuous'] = True
+        state['last_updated'] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        state['scanned_files'] = int(getattr(self, '_files_scanned', state.get('scanned_files', 0)) or 0)
+        state['quarantined_files'] = int(getattr(self, '_quarantined_count', state.get('quarantined_files', 0)) or 0)
+        state['findings'] = int(getattr(self, '_total_findings', state.get('findings', 0)) or 0)
+        tmp = path + '.tmp'
+        try:
+            with open(tmp, 'w', encoding='utf-8') as handle:
+                json.dump(state, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            os.replace(tmp, path)
+        except (OSError, TypeError, ValueError) as exc:
+            _startup_log(f'[SCHEDULED SCAN] Could not persist scheduled_scan_state.json: {exc}')
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+        return state
 
     def _list_quarantine(self):
         """Return a list of quarantined files on this agent."""
@@ -3928,9 +4004,8 @@ del "{bat_path}" 2>nul
         net_thread = threading.Thread(target=self._network_scan_loop, daemon=True, name='NetScan')
         net_thread.start()
 
-        # Start scan thread
-        scan_thread = threading.Thread(target=self._scan_loop, daemon=True, name='Scanner')
-        scan_thread.start()
+        # The continuous scheduled worker is the single authoritative scanner.
+        # Do not start the legacy interval scanner here.
 
         # Start self-update thread (checks for new agent EXE every hour)
         update_thread = threading.Thread(target=self._update_loop, daemon=True, name='Updater')
