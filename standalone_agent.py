@@ -716,6 +716,10 @@ class StandaloneAgent:
     def _prepare_quarantine_dir(self):
         try:
             os.makedirs(QUARANTINE_DIR, exist_ok=True)
+            quarantine_log = os.path.join(QUARANTINE_DIR, 'quarantine_log.json')
+            if not os.path.isfile(quarantine_log):
+                with open(quarantine_log, 'w', encoding='utf-8') as handle:
+                    json.dump([], handle, indent=2)
             probe = os.path.join(
                 QUARANTINE_DIR,
                 f".isolationbytes_write_test_{os.getpid()}_{time.time_ns()}"
@@ -3199,6 +3203,18 @@ X-GNOME-Autostart-enabled=true
             with open(tmp, 'w', encoding='utf-8') as handle:
                 json.dump(events, handle, ensure_ascii=False, indent=2)
             os.replace(tmp, path)
+            mirror = os.path.join(QUARANTINE_DIR, 'quarantine_log.json')
+            mirror_tmp = mirror + '.tmp'
+            try:
+                with open(mirror_tmp, 'w', encoding='utf-8') as handle:
+                    json.dump(events, handle, ensure_ascii=False, indent=2)
+                os.replace(mirror_tmp, mirror)
+            except (OSError, TypeError, ValueError):
+                try:
+                    if os.path.exists(mirror_tmp):
+                        os.remove(mirror_tmp)
+                except OSError:
+                    pass
             return True
         except (OSError, TypeError, ValueError) as exc:
             _startup_log(f'[QUARANTINE] Could not persist quarantine_log.json: {exc}')
