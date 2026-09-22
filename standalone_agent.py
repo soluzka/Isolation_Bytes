@@ -1540,14 +1540,14 @@ class StandaloneAgent:
                     # Running as a frozen EXE (IsolationBytesAgent.exe)
                     # The scheduled task runs the EXE directly — no Python needed
                     exe = sys.executable
-                    cmd_str = safe_list2cmdline([exe, '--server', self.server_url, f'--key={self.api_key}'])
+                    cmd_str = safe_list2cmdline([exe, '--server', self.server_url, f'--key={self.api_key}', '--supervise'])
                 else:
                     # Running from source — use pythonw.exe + script
                     exe = sys.executable
                     if exe.lower().endswith('python.exe'):
                         exe = exe.replace('python.exe', 'pythonw.exe')
                     script = os.path.abspath(__file__)
-                    cmd_str = safe_list2cmdline([exe, script, '--server', self.server_url, f'--key={self.api_key}'])
+                    cmd_str = safe_list2cmdline([exe, script, '--server', self.server_url, f'--key={self.api_key}', '--supervise'])
                 if enable:
                     # Create a scheduled task that runs at logon with admin rights
                     # /rl HIGHEST = run with highest privileges (admin)
@@ -1567,7 +1567,7 @@ class StandaloneAgent:
                         os.makedirs(wrapper_dir, exist_ok=True)
                         wrapper_path = os.path.join(wrapper_dir, 'agent_start.bat')
                         with open(wrapper_path, 'w', encoding='utf-8') as wf:
-                            wf.write(f'@echo off\r\n"{exe}" "{script}" --server "{self.server_url}" --key="{self.api_key}"\r\n')
+                            wf.write(f'@echo off\r\n"{exe}" "{script}" --server "{self.server_url}" --key="{self.api_key}" --supervise\r\n')
                         task_cmd = wrapper_path
                     # Create the task with highest privileges
                     result = safe_run(
@@ -1666,9 +1666,9 @@ X-GNOME-Autostart-enabled=true
                     script = os.path.abspath(__file__)
                     plist = {
                         'Label': 'com.isolationbytes.agent',
-                        'ProgramArguments': [exe, script, '--server', self.server_url, f'--key={self.api_key}'],
+                        'ProgramArguments': [exe, script, '--server', self.server_url, f'--key={self.api_key}', '--supervise'],
                         'RunAtLoad': True,
-                        'KeepAlive': False,
+                        'KeepAlive': True,
                     }
                     os.makedirs(os.path.dirname(plist_path), exist_ok=True)
                     with open(plist_path, 'wb') as f:
