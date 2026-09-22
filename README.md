@@ -178,6 +178,20 @@ Auto-detects the OS, installs the appropriate components, and launches the app. 
 - No embedded server, no embedded secrets
 - All authentication is server-side
 
+## ChatGPT
+
+Use **ChatGPT** at [https://chatgpt.com/](https://chatgpt.com/) as an optional assistant for understanding and working with Isolation Bytes.
+
+### How to use ChatGPT with Isolation Bytes
+
+1. Open [https://chatgpt.com/](https://chatgpt.com/) and sign in to your ChatGPT account.
+2. Describe what you want help with, such as understanding scan results, troubleshooting an error, reviewing configuration, or explaining project code.
+3. When you need ChatGPT to inspect project material, provide the relevant code, logs, screenshots, or documentation in the conversation. Do not share passwords, API keys, private keys, .env files, or other sensitive information.
+4. Ask focused questions and include the error message or relevant context so ChatGPT can give a more accurate answer.
+5. For Isolation Bytes development, you can use ChatGPT to help explain code, identify likely bugs, draft fixes, and document configuration or usage steps. Review and test generated changes before deploying them.
+
+**ChatGPT:** https://chatgpt.com/
+
 ## Building from Source
 
 ### Prerequisites
