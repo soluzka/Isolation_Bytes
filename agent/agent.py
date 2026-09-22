@@ -137,6 +137,17 @@ def _agent_candidates():
     return candidates
 
 
+def _startup_script_candidates():
+    names = ('start_agent.bat',) if os.name == 'nt' else ('start_agent.sh',)
+    roots = [BASE_DIR.parent, BASE_DIR.parent / 'dist']
+    local_appdata = os.environ.get('LOCALAPPDATA', '')
+    if local_appdata:
+        roots.append(Path(local_appdata) / 'IsolationBytes')
+    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
+    roots.extend(Path(program_files) / folder for folder in ('Isolation Bytes', 'Antivirus Server'))
+    return [root / name for root in roots for name in names]
+
+
 def _launcher_candidates():
     candidates = []
     configured = os.environ.get('ISOLATION_BYTES_LAUNCHER_EXE', '').strip()
@@ -164,9 +175,53 @@ def _start_agent_executable(agent_exe):
     subprocess.Popen(args, cwd=str(agent_exe.parent), creationflags=creationflags)
 
 
+def _start_startup_script(script_path):
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    if os.name == 'nt':
+        subprocess.Popen(['cmd.exe', '/d', '/c', str(script_path)],
+                         cwd=str(script_path.parent), creationflags=creationflags)
+    else:
+        subprocess.Popen(['/bin/sh', str(script_path)],
+                         cwd=str(script_path.parent), creationflags=creationflags)
+
+
 def _start_agent_launcher(launcher_exe):
     creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
     subprocess.Popen([str(launcher_exe)], cwd=str(launcher_exe.parent), creationflags=creationflags)
+
+
+def _download_agent_executable():
+    if os.name != 'nt':
+        return None
+    try:
+        update = requests.get(f'{CLOUD_URL}/agent/update-check', timeout=15, verify=True)
+        update.raise_for_status()
+        metadata = update.json()
+        download_url = metadata.get('download_url', '')
+        expected_sha = str(metadata.get('sha256', '')).strip().lower()
+        parsed = urlparse(download_url)
+        server = urlparse(CLOUD_URL)
+        if (
+            parsed.scheme != 'https' or server.scheme != 'https'
+            or parsed.netloc != server.netloc
+            or parsed.path != '/download/IsolationBytesAgent.exe'
+            or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
+        ):
+            return None
+        response = requests.get(download_url, timeout=60, verify=True)
+        response.raise_for_status()
+        data = response.content
+        if hashlib.sha256(data).hexdigest().lower() != expected_sha:
+            return None
+        target_dir = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local')) / 'IsolationBytes'
+        target_dir.mkdir(parents=True, exist_ok=True)
+        target = target_dir / _AGENT_EXE_NAME
+        temp = target.with_suffix('.download')
+        temp.write_bytes(data)
+        os.replace(temp, target)
+        return target
+    except (OSError, ValueError, requests.RequestException, json.JSONDecodeError):
+        return None
 
 
 def _wait_for_agent(timeout=_AGENT_READY_TIMEOUT):
@@ -179,29 +234,47 @@ def _wait_for_agent(timeout=_AGENT_READY_TIMEOUT):
 
 
 def ensure_windows_agent_running():
-    """Verify the Windows agent and launch the agent/launcher when it is absent."""
+    """Verify startup assets, launch them, then download if readiness fails."""
     if os.name != 'nt':
-        return True
+        script = next((path for path in _startup_script_candidates() if path.is_file()), None)
+        if script is not None:
+            _start_startup_script(script)
+            return _wait_for_agent()
+        return False
     if _agent_process_running():
         return True
 
     with _AGENT_PROCESS_LOCK:
         if _agent_process_running():
             return True
+
         agent_exe = next((path for path in _agent_candidates() if path.is_file()), None)
-        try:
-            if agent_exe is not None:
-                _start_agent_executable(agent_exe)
-            else:
-                launcher_exe = next((path for path in _launcher_candidates() if path.is_file()), None)
-                if launcher_exe is None:
-                    return False
+        startup_script = next((path for path in _startup_script_candidates() if path.is_file()), None)
+        if startup_script is not None and agent_exe is not None:
+            try:
+                _start_startup_script(startup_script)
+                if _wait_for_agent():
+                    return True
+            except (OSError, ValueError):
+                pass
+
+        launcher_exe = next((path for path in _launcher_candidates() if path.is_file()), None)
+        if launcher_exe is not None:
+            try:
                 _start_agent_launcher(launcher_exe)
-        except (OSError, ValueError) as exc:
-            print(f'Could not launch Windows agent: {exc}')
+                if _wait_for_agent():
+                    return True
+            except (OSError, ValueError):
+                pass
+
+        downloaded = _download_agent_executable()
+        if downloaded is None:
+            return False
+        try:
+            _start_agent_executable(downloaded)
+        except (OSError, ValueError):
             return False
         return _wait_for_agent()
-
 
 def ensure_agent_runtime():
     """Start the detector runtime once and reuse it for subsequent detections."""
