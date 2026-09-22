@@ -3873,6 +3873,61 @@ del "{bat_path}" 2>nul
         print("Agent stopped.")
 
 
+def _run_supervised_agent(args):
+    """Run the protection agent as a persistent supervisor.
+
+    Windows startup points at this process.  If the worker exits, the supervisor
+    waits briefly and starts it again.  A stable local lock prevents duplicate
+    supervisors from being launched by repeated startup/login triggers.
+    """
+    import tempfile
+    runtime_dir = _RUNTIME_BOOTSTRAP_DIR
+    lock_path = os.path.join(runtime_dir, 'agent_supervisor.lock')
+    lock_handle = None
+    try:
+        lock_handle = open(lock_path, 'a+', encoding='utf-8')
+        if platform.system().lower() == 'windows':
+            import msvcrt
+            try:
+                msvcrt.locking(lock_handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                print('[SUPERVISOR] Agent supervisor already running.')
+                return
+        restart_delay = 3
+        while True:
+            cmd = [sys.executable, os.path.abspath(__file__),
+                   '--server', args.server]
+            if args.key_file:
+                cmd.extend(['--key-file', args.key_file])
+            elif args.key:
+                cmd.extend(['--key', args.key])
+            elif os.path.isfile(_default_api_key_file()):
+                cmd.extend(['--key-file', _default_api_key_file()])
+            if args.pair_code:
+                cmd.extend(['--pair-code', args.pair_code])
+            if args.credential_file:
+                cmd.extend(['--credential-file', args.credential_file])
+            if args.device_id:
+                cmd.extend(['--device-id', args.device_id])
+            cmd.append('--worker')
+            print('[SUPERVISOR] Starting protection worker...')
+            try:
+                proc = safe_popen(cmd, stdout=None, stderr=None)
+                code = proc.wait()
+            except Exception as exc:
+                _startup_log(f'[SUPERVISOR] Worker launch failed: {exc}')
+                code = -1
+            _startup_log(f'[SUPERVISOR] Worker exited with code {code}; restarting in {restart_delay}s')
+            time.sleep(restart_delay)
+            restart_delay = min(restart_delay * 2, 60)
+    finally:
+        try:
+            if lock_handle:
+                lock_handle.close()
+        except Exception:
+            pass
+
+
 def main():
     _register_windows_uri_handler()
     uri_pair_code = ''
@@ -3898,9 +3953,17 @@ def main():
                         help='Register the agent to start automatically on boot/login')
     parser.add_argument('--background', action='store_true',
                         help='Run the agent in the background (no terminal window)')
+    parser.add_argument('--worker', action='store_true',
+                        help='Internal supervised worker mode')
+    parser.add_argument('--supervise', action='store_true',
+                        help='Run a persistent supervisor that restarts the worker if it exits')
     args = parser.parse_args(argv)
     if uri_pair_code and not args.pair_code:
         args.pair_code = uri_pair_code
+    if args.supervise:
+        _run_supervised_agent(args)
+        return
+
     api_key = _read_api_key_file(args.key_file) if args.key_file else args.key
     if not api_key and not args.pair_code:
         default_key_file = _ensure_api_key_file()
@@ -3953,6 +4016,17 @@ def main():
             kwargs['start_new_session'] = True  # detach from terminal on Linux/macOS
         safe_popen(cmd, **kwargs)
         print("Agent started in background.")
+        return
+
+    if args.worker:
+        agent.start()
+        return
+
+    # Default packaged behavior is now supervised: startup launches one
+    # persistent supervisor, and the supervisor keeps the protection worker
+    # alive whenever it exits.
+    if platform.system().lower() == 'windows':
+        _run_supervised_agent(args)
         return
 
     agent.start()
