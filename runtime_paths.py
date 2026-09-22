@@ -6,6 +6,7 @@ source checkout, service, or environment override cannot redirect scan state
 or quarantine data into the project/install directory.
 """
 import os
+import json
 
 _DEFAULT_RUNTIME = os.path.join(
     os.environ.get("LOCALAPPDATA") or os.path.join(os.path.expanduser("~"), "AppData", "Local"),
