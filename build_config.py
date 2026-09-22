@@ -960,7 +960,8 @@ print(f'Certificate trusted in LocalMachine\\TrustedPeople')
 # ---------------------------------------------------------------------------
 
 print(f'\n{"="*60}\nCopying installer scripts\n{"="*60}')
-_stage_start_agent_bat()\nfor script in ['install-windows.ps1', 'install-windows.bat',
+_stage_start_agent_bat()
+for script in ['install-windows.ps1', 'install-windows.bat',
                'install-macos.sh', 'install-linux.sh',
                'install-ios.mobileconfig', 'universal_launcher.py',
                'standalone_agent.py', 'start_agent.bat',
