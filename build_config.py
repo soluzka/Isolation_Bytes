@@ -640,7 +640,7 @@ def _manifest_publisher():
             manifest = mf.read()
     except OSError:
         return None
-    match = re.search(r'<Identity\\b[^>]*\\bPublisher="([^"]+)"', manifest)
+    match = re.search(r'<Identity\b[^>]*\bPublisher="([^"]+)"', manifest)
     return match.group(1).strip() if match else None
 
 
