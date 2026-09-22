@@ -607,7 +607,7 @@ def _sign_msix_from_store(msix_file):
     safe_pfx = PFX.replace("'", "''")
     ps = ("$ErrorActionPreference='Stop'; "
           f"$pwd=ConvertTo-SecureString '{safe_password}' -AsPlainText -Force; "
-          f"$c=Import-PfxCertificate -FilePath '{safe_pfx}' -CertStoreLocation 'Cert:\\\\CurrentUser\\\\My' -Password $pwd -Exportable; "
+          f"$c=Import-PfxCertificate -FilePath '{safe_pfx}' -CertStoreLocation 'Cert:\\CurrentUser\\My' -Password $pwd -Exportable; "
           "if (-not $c.HasPrivateKey) { throw 'Certificate has no private key' }; $c.Thumbprint")
     imported = safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command', ps],
                         cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -629,7 +629,7 @@ def _sign_msix_from_store(msix_file):
         return result.returncode == 0
     finally:
         safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command',
-                  f"Remove-Item -Path 'Cert:\\\\CurrentUser\\\\My\\\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
+                  f"Remove-Item -Path 'Cert:\\CurrentUser\\My\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
                  cwd=BASE_DIR, check=False)
 
 
@@ -687,12 +687,12 @@ def _repair_msix_signing_pfx():
         "-KeySpec Signature "
         "-KeyExportPolicy Exportable "
         "-Provider 'Microsoft Enhanced RSA and AES Cryptographic Provider' "
-        "-CertStoreLocation 'Cert:\\\\CurrentUser\\\\My' "
+        "-CertStoreLocation 'Cert:\\CurrentUser\\My' "
         "-NotAfter (Get-Date).AddYears(5); "
         "if (-not $cert.HasPrivateKey) { throw 'Generated certificate has no private key' }; "
         "Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd -Force | Out-Null; "
         "$thumb=$cert.Thumbprint; "
-        "Remove-Item -Path ('Cert:\\\\CurrentUser\\\\My\\\\' + $thumb) -Force -ErrorAction SilentlyContinue; "
+        "Remove-Item -Path ('Cert:\\CurrentUser\\My\\' + $thumb) -Force -ErrorAction SilentlyContinue; "
         "$thumb"
     )
     repaired = safe_run(
