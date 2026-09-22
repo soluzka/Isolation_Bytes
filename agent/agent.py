@@ -93,6 +93,37 @@ def _get_device_id():
 
 DEVICE_ID = _get_device_id()
 
+_AGENT_START_LOCK = threading.Lock()
+_AGENT_RUNTIME_STARTED = False
+_AGENT_RUNTIME_THREADS = []
+
+
+def ensure_agent_runtime():
+    """Start the detector runtime once and reuse it for subsequent detections."""
+    global _AGENT_RUNTIME_STARTED
+    with _AGENT_START_LOCK:
+        if _AGENT_RUNTIME_STARTED:
+            return True
+        if not CLOUD_API_KEY:
+            # Local code scanning can still run without cloud credentials.
+            return False
+        try:
+            register()
+            targets = [
+                (process_scan_loop, 'CodeScannerProcessMonitor'),
+                (network_monitor_loop, 'CodeScannerNetworkMonitor'),
+                (voice_command_loop, 'CodeScannerVoiceCommands'),
+            ]
+            for target, name in targets:
+                thread = threading.Thread(target=target, name=name, daemon=True)
+                thread.start()
+                _AGENT_RUNTIME_THREADS.append(thread)
+            _AGENT_RUNTIME_STARTED = True
+            return True
+        except Exception as exc:
+            print(f'Could not start detector agent runtime: {exc}')
+            return False
+
 
 def _post(endpoint, payload):
     try:
@@ -168,7 +199,11 @@ def _assess(entity_id, *, yara_matches=None, ml_confidence=0.0, behavioral_signa
 
 
 def scan_target(target):
-    """Route file and recursive directory scans through the hardened pipeline."""
+    """Route scans through the hardened pipeline and ensure detector runtime availability."""
+    # A code-scanner invocation may happen before the long-running agent was
+    # explicitly launched. Start the shared detector runtime once, then reuse
+    # those same threads for later detections instead of spawning duplicates.
+    ensure_agent_runtime()
     if not target or not os.path.exists(target):
         return [{'error': f'target not found: {target}'}]
     if hardened_scan_target is None:
@@ -460,10 +495,7 @@ def monitoring_snapshot():
 def main():
     if not CLOUD_API_KEY:
         raise RuntimeError('CLOUD_API_KEY not set in agent/.env')
-    register()
-    threading.Thread(target=process_scan_loop, daemon=True).start()
-    threading.Thread(target=network_monitor_loop, daemon=True).start()
-    threading.Thread(target=voice_command_loop, daemon=True).start()
+    ensure_agent_runtime()
     while True:
         try:
             for cmd in send_heartbeat():
