@@ -168,7 +168,7 @@ import requests
 _AGENT_PROCESS_LOCK = threading.Lock()
 _AGENT_EXE_NAME = "IsolationBytesAgent.exe"
 _AGENT_LAUNCHER_NAME = "AntivirusServerLogin.exe"
-_AGENT_READY_TIMEOUT = 15
+_AGENT_READY_TIMEOUT = 45
 _AGENT_ALLOWED_FOLDERS = ("IsolationBytes", "Isolation Bytes", "Antivirus Server")
 _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
@@ -191,20 +191,43 @@ def _process_matches_agent(info, names):
     return False
 
 
-def _agent_process_running():
-    """Return True when the agent process is running anywhere on the system."""
+def _find_agent_process():
+    """Return the running agent PID, or None when no agent process is found."""
     try:
         import psutil
     except Exception:
-        return False
+        return None
     names = _agent_process_names()
-    for proc in psutil.process_iter(["name", "exe", "cmdline"]):
+    for proc in psutil.process_iter(["pid", "name", "exe", "cmdline"]):
         try:
             if _process_matches_agent(proc.info, names):
-                return True
+                return proc.info.get("pid")
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
-    return False
+    return None
+
+
+def _agent_process_running():
+    """Return True when the agent process is running anywhere on the system."""
+    return _find_agent_process() is not None
+
+
+def _agent_verified_running():
+    """Require both a live agent process and a successful registration/heartbeat."""
+    pid = _find_agent_process()
+    if pid is None:
+        return False
+    try:
+        with open(runtime_path("agent_status.json"), "r", encoding="utf-8") as handle:
+            status = json.load(handle) or {}
+        if int(status.get("pid") or 0) != int(pid):
+            return False
+        if not status.get("running") or not status.get("registered") or not status.get("heartbeat_ok"):
+            return False
+        updated = float(status.get("updated_at_epoch") or 0)
+        return updated > 0 and (time.time() - updated) <= 30
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
 
 
 def _configured_path(name):
@@ -327,10 +350,10 @@ def _download_agent_executable():
 def _wait_for_agent(timeout=_AGENT_READY_TIMEOUT):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if _agent_process_running():
+        if _agent_verified_running():
             return True
         time.sleep(0.25)
-    return _agent_process_running()
+    return _agent_verified_running()
 
 
 def _try_start_script_with_agent(script, agent_exe):
@@ -392,10 +415,10 @@ def _ensure_agent_windows():
 
 def ensure_agent_running():
     """Shared prerequisite for Code Scanner, YARA, and Conditional Startup."""
-    if _agent_process_running():
+    if _agent_verified_running():
         return True
     with _AGENT_PROCESS_LOCK:
-        if _agent_process_running():
+        if _agent_verified_running():
             return True
         if os.name != "nt":
             return _ensure_agent_non_windows()
