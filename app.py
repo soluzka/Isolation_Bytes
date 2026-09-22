@@ -796,9 +796,19 @@ def yara_scanner_page():
     # Get monitored folders
     monitored_folders = DEFAULT_MONITORED_DIRECTORIES
     
-    return render_template('yara_scanner.html', 
+    try:
+        from quarantine_utils import QUARANTINE_FOLDER as yara_quarantine_folder
+    except Exception:
+        yara_quarantine_folder = os.path.join(
+            os.environ.get('ANTIVIRUS_RUNTIME_DIR',
+                           os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'IsolationBytes')),
+            'Quarantine'
+        )
+
+    return render_template('yara_scanner.html',
                            rules_info=rules_info,
-                           monitored_folders=monitored_folders)
+                           monitored_folders=monitored_folders,
+                           yara_quarantine_folder=os.path.abspath(yara_quarantine_folder))
 
 @app.route('/api/scan-directories', methods=['GET'])
 @login_required
