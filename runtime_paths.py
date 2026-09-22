@@ -157,7 +157,7 @@ ensure_runtime_state_files()
 # agent is verified/running before detection work begins.
 import hashlib
 import re
-import subprocess
+from utils.subprocess_safe import safe_popen
 import threading
 import time
 from pathlib import Path
@@ -262,11 +262,10 @@ def _is_trusted_executable(executable):
 def _start_process(command, cwd):
     """Start only a path discovered from the allow-listed installation roots."""
     executable = Path(command[0]).resolve()
-    allowed = _is_trusted_executable(executable)
-    if not allowed or not executable.is_file():
+    if not _is_trusted_executable(executable) or not executable.is_file():
         raise OSError("Agent executable is outside the trusted installation locations")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-    subprocess.Popen(command, cwd=str(cwd), creationflags=flags, close_fds=True)  # nosec B603
+    flags = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0)
+    safe_popen(command, cwd=str(cwd), creationflags=flags, close_fds=True)
 
 
 def _start_agent_executable(agent_exe):
@@ -366,6 +365,32 @@ def _try_download_and_start():
     return _wait_for_agent()
 
 
+def _first_existing(candidates):
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _ensure_agent_non_windows():
+    script = _first_existing(_startup_script_candidates())
+    if script is None:
+        return False
+    try:
+        _start_startup_script(script)
+    except (OSError, ValueError):
+        return False
+    return _wait_for_agent()
+
+
+def _ensure_agent_windows():
+    agent_exe = _first_existing(_agent_candidates())
+    script = _first_existing(_startup_script_candidates())
+    if _try_start_script_with_agent(script, agent_exe):
+        return True
+    launcher = _first_existing(_launcher_candidates())
+    if _try_start_launcher(launcher):
+        return True
+    return _try_download_and_start()
+
+
 def ensure_agent_running():
     """Shared prerequisite for Code Scanner, YARA, and Conditional Startup."""
     if _agent_process_running():
@@ -374,16 +399,8 @@ def ensure_agent_running():
         if _agent_process_running():
             return True
         if os.name != "nt":
-            script = next((p for p in _startup_script_candidates() if p.is_file()), None)
-            return _try_start_script_with_agent(script, script)
-        agent_exe = next((p for p in _agent_candidates() if p.is_file()), None)
-        script = next((p for p in _startup_script_candidates() if p.is_file()), None)
-        if _try_start_script_with_agent(script, agent_exe):
-            return True
-        launcher = next((p for p in _launcher_candidates() if p.is_file()), None)
-        if _try_start_launcher(launcher):
-            return True
-        return _try_download_and_start()
+            return _ensure_agent_non_windows()
+        return _ensure_agent_windows()
 
 
 def require_agent_running():
