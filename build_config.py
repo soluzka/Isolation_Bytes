@@ -557,7 +557,7 @@ def _signing_identity_diagnostics():
     try:
         with open(MANIFEST, encoding='utf-8') as mf:
             manifest = mf.read()
-        match = re.search(r'<Identity\\b[^>]*\\bPublisher="([^"]+)"', manifest)
+        match = re.search(r'<Identity\b[^>]*\bPublisher="([^"]+)"', manifest)
         if match:
             expected = match.group(1).strip()
     except OSError as exc:
@@ -625,7 +625,7 @@ def _sign_msix_from_store(msix_file):
         result = safe_run([SIGNTOOL, 'sign', '/debug', '/v', '/sha1', thumbprint, '/fd', 'sha256', msix_file],
                           cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, encoding='utf-8', errors='replace', check=False)
-        print(result.stdout or '', end='' if (result.stdout or '').endswith('\\n') else '\\n')
+        print(result.stdout or '', end='' if (result.stdout or '').endswith('\n') else '\\n')
         return result.returncode == 0
     finally:
         safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command',
