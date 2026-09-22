@@ -70,6 +70,11 @@ def _bootstrap_runtime_json_files():
         'scheduled_scan_state.json': {'enabled': True, 'running': False, 'continuous': True, 'status': 'idle', 'started_at': None, 'last_updated': None, 'last_run': None, 'next_run': None, 'scanned_files': 0, 'quarantined_files': 0, 'errors': 0, 'findings': 0},
         'quarantine_log.json': [],
         'scan_cache.json': {},
+        'agent_status.json': {
+            'running': False, 'registered': False, 'heartbeat_ok': False,
+            'pid': 0, 'device_id': '', 'agent_version': '',
+            'updated_at': None, 'updated_at_epoch': 0,
+        },
     }
     for filename, payload in defaults.items():
         path = os.path.join(runtime_dir, filename)
@@ -86,6 +91,29 @@ def _bootstrap_runtime_json_files():
     return runtime_dir
 
 _RUNTIME_BOOTSTRAP_DIR = _bootstrap_runtime_json_files()
+
+
+def _write_agent_status(*, running, registered, heartbeat_ok, error=None):
+    """Publish the local readiness contract used by scanner startup gates."""
+    status = {
+        "running": bool(running),
+        "registered": bool(registered),
+        "heartbeat_ok": bool(heartbeat_ok),
+        "pid": os.getpid() if running else 0,
+        "device_id": "",
+        "agent_version": "",
+        "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "updated_at_epoch": time.time(),
+        "error": error,
+    }
+    try:
+        tmp = os.path.join(_RUNTIME_BOOTSTRAP_DIR, "agent_status.json.tmp")
+        path = os.path.join(_RUNTIME_BOOTSTRAP_DIR, "agent_status.json")
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(status, handle, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except OSError:
+        pass
 
 try:
     import psutil
@@ -1261,6 +1289,11 @@ class StandaloneAgent:
                               json=stats, headers=self._headers,
                               verify=True, timeout=10)
             if r.status_code == 200:
+                _write_agent_status(
+                    running=True,
+                    registered=True,
+                    heartbeat_ok=True,
+                )
                 # Process any pending commands from the server
                 try:
                     resp = r.json()
@@ -3934,6 +3967,7 @@ del "{bat_path}" 2>nul
 
     def start(self):
         self._running = True
+        _write_agent_status(running=True, registered=False, heartbeat_ok=False)
         if not (self.device_token or self.api_key):
             if not self._pair():
                 message = "No device credential. Use --pair-code from the website or configure --key."
@@ -3982,7 +4016,10 @@ del "{bat_path}" 2>nul
             print(f"[ERROR] {message}")
             _startup_log(f"[ERROR] {message}")
             self._running = False
+            _write_agent_status(running=False, registered=False, heartbeat_ok=False, error=message)
             return
+
+        _write_agent_status(running=True, registered=True, heartbeat_ok=False)
 
         # Scheduled scan is persistent continuous protection. Every agent
         # startup resumes it, and the self-healing worker restarts each pass
@@ -4044,6 +4081,7 @@ del "{bat_path}" 2>nul
 
     def stop(self):
         self._running = False
+        _write_agent_status(running=False, registered=False, heartbeat_ok=False)
         print("Agent stopped.")
 
 
