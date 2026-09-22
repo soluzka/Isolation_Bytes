@@ -703,6 +703,23 @@ public class LoginForm : Form
         return null;
     }
 
+    private static bool IsValidAgentSha256(string sha256)
+    {
+        return sha256.Length == 64 && sha256.All(Uri.IsHexDigit);
+    }
+
+    private static bool IsTrustedAgentDownloadUri(Uri downloadUri)
+    {
+        if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri))
+        {
+            return false;
+        }
+
+        return string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase) &&
+            downloadUri.AbsolutePath == "/download/IsolationBytesAgent.exe";
+    }
+
     private static (Uri DownloadUri, string Sha256)? GetAgentDownloadInfo()
     {
         using var response = _http.GetAsync($"{Global.SERVER_URL}/agent/update-check").Result;
@@ -724,20 +741,13 @@ public class LoginForm : Form
         {
             return null;
         }
-        if (!Uri.TryCreate(Global.SERVER_URL, UriKind.Absolute, out var serverUri))
+
+        if (!IsTrustedAgentDownloadUri(downloadUri))
         {
             return null;
         }
-        if (!string.Equals(downloadUri.Scheme, serverUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(downloadUri.Host, serverUri.Host, StringComparison.OrdinalIgnoreCase))
-        {
-            return null;
-        }
-        if (downloadUri.AbsolutePath != "/download/IsolationBytesAgent.exe")
-        {
-            return null;
-        }
-        if (expectedSha.Length != 64 || !expectedSha.All(Uri.IsHexDigit))
+
+        if (!IsValidAgentSha256(expectedSha))
         {
             return null;
         }
@@ -806,7 +816,10 @@ public class LoginForm : Form
             // server-published agent, verify its SHA-256, then launch that same
             // LocalAppData copy on subsequent starts.
             var agentExe = DownloadAgentIfMissing();
-            if (string.IsNullOrEmpty(agentExe)) return;
+            if (string.IsNullOrEmpty(agentExe))
+            {
+                return;
+            }
 
             var workingDir = Path.GetDirectoryName(agentExe);
             SafeProcess.StartExe(
