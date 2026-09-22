@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import socket
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -96,6 +97,110 @@ DEVICE_ID = _get_device_id()
 _AGENT_START_LOCK = threading.Lock()
 _AGENT_RUNTIME_STARTED = False
 _AGENT_RUNTIME_THREADS = []
+
+_AGENT_PROCESS_LOCK = threading.Lock()
+_AGENT_EXE_NAME = 'IsolationBytesAgent.exe'
+_AGENT_LAUNCHER_NAME = 'AntivirusServerLogin.exe'
+_AGENT_READY_TIMEOUT = 15
+
+
+def _agent_process_running():
+    """Return True only when the Windows agent process is actually running."""
+    if psutil is None:
+        return False
+    for proc in psutil.process_iter(['name', 'exe']):
+        try:
+            name = (proc.info.get('name') or '').lower()
+            exe = os.path.basename(proc.info.get('exe') or '').lower()
+            if name == _AGENT_EXE_NAME.lower() or exe == _AGENT_EXE_NAME.lower():
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+
+def _agent_candidates():
+    candidates = []
+    configured = os.environ.get('ISOLATION_BYTES_AGENT_EXE', '').strip()
+    if configured:
+        candidates.append(Path(os.path.expandvars(configured)))
+    local_appdata = os.environ.get('LOCALAPPDATA', '')
+    if local_appdata:
+        candidates.append(Path(local_appdata) / 'IsolationBytes' / _AGENT_EXE_NAME)
+    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
+    for folder in ('Isolation Bytes', 'Antivirus Server'):
+        candidates.append(Path(program_files) / folder / _AGENT_EXE_NAME)
+    candidates.extend([
+        BASE_DIR.parent / 'dist' / _AGENT_EXE_NAME,
+        BASE_DIR.parent / 'native' / 'AntivirusServerLogin' / 'bin' / 'Release' / 'net8.0-windows' / 'win-x64' / _AGENT_EXE_NAME,
+    ])
+    return candidates
+
+
+def _launcher_candidates():
+    candidates = []
+    configured = os.environ.get('ISOLATION_BYTES_LAUNCHER_EXE', '').strip()
+    if configured:
+        candidates.append(Path(os.path.expandvars(configured)))
+    program_files = os.environ.get('ProgramFiles', r'C:\Program Files')
+    for folder in ('Isolation Bytes', 'Antivirus Server'):
+        candidates.append(Path(program_files) / folder / _AGENT_LAUNCHER_NAME)
+    local_appdata = os.environ.get('LOCALAPPDATA', '')
+    if local_appdata:
+        candidates.append(Path(local_appdata) / 'IsolationBytes' / _AGENT_LAUNCHER_NAME)
+    candidates.extend([
+        BASE_DIR.parent / 'dist' / _AGENT_LAUNCHER_NAME,
+        BASE_DIR.parent / 'native' / 'AntivirusServerLogin' / 'bin' / 'Release' / 'net8.0-windows' / 'win-x64' / _AGENT_LAUNCHER_NAME,
+    ])
+    return candidates
+
+
+def _start_agent_executable(agent_exe):
+    args = [str(agent_exe), '--server', CLOUD_URL]
+    if CLOUD_API_KEY:
+        args.append(f'--key={CLOUD_API_KEY}')
+    args.append('--auto-start')
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    subprocess.Popen(args, cwd=str(agent_exe.parent), creationflags=creationflags)
+
+
+def _start_agent_launcher(launcher_exe):
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    subprocess.Popen([str(launcher_exe)], cwd=str(launcher_exe.parent), creationflags=creationflags)
+
+
+def _wait_for_agent(timeout=_AGENT_READY_TIMEOUT):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _agent_process_running():
+            return True
+        time.sleep(0.25)
+    return _agent_process_running()
+
+
+def ensure_windows_agent_running():
+    """Verify the Windows agent and launch the agent/launcher when it is absent."""
+    if os.name != 'nt':
+        return True
+    if _agent_process_running():
+        return True
+
+    with _AGENT_PROCESS_LOCK:
+        if _agent_process_running():
+            return True
+        agent_exe = next((path for path in _agent_candidates() if path.is_file()), None)
+        try:
+            if agent_exe is not None:
+                _start_agent_executable(agent_exe)
+            else:
+                launcher_exe = next((path for path in _launcher_candidates() if path.is_file()), None)
+                if launcher_exe is None:
+                    return False
+                _start_agent_launcher(launcher_exe)
+        except (OSError, ValueError) as exc:
+            print(f'Could not launch Windows agent: {exc}')
+            return False
+        return _wait_for_agent()
 
 
 def ensure_agent_runtime():
@@ -203,6 +308,8 @@ def scan_target(target):
     # A code-scanner invocation may happen before the long-running agent was
     # explicitly launched. Start the shared detector runtime once, then reuse
     # those same threads for later detections instead of spawning duplicates.
+    if not ensure_windows_agent_running():
+        return [{'error': 'IsolationBytesAgent.exe is not running and could not be launched', 'target': target}]
     ensure_agent_runtime()
     if not target or not os.path.exists(target):
         return [{'error': f'target not found: {target}'}]
