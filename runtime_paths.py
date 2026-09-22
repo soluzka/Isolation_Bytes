@@ -170,6 +170,7 @@ _AGENT_EXE_NAME = "IsolationBytesAgent.exe"
 _AGENT_LAUNCHER_NAME = "AntivirusServerLogin.exe"
 _AGENT_READY_TIMEOUT = 15
 _AGENT_ALLOWED_FOLDERS = ("IsolationBytes", "Isolation Bytes", "Antivirus Server")
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 
 def _agent_process_names():
@@ -264,8 +265,7 @@ def _start_process(command, cwd):
     executable = Path(command[0]).resolve()
     if not _is_trusted_executable(executable) or not executable.is_file():
         raise OSError("Agent executable is outside the trusted installation locations")
-    flags = getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0)
-    safe_popen(command, cwd=str(cwd), creationflags=flags, close_fds=True)
+    safe_popen(command, cwd=str(cwd), creationflags=_CREATE_NO_WINDOW, close_fds=True)
 
 
 def _start_agent_executable(agent_exe):
@@ -281,12 +281,11 @@ def _start_startup_script(script_path):
     script = script_path.resolve()
     if not script.is_file() or script.name.lower() != ("start_agent.bat" if os.name == "nt" else "start_agent.sh"):
         raise OSError("Untrusted startup script")
-    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     if os.name == "nt":
         command = [r"C:\\Windows\\System32\\cmd.exe", "/d", "/c", str(script)]
     else:
         command = ["/bin/sh", str(script)]
-    subprocess.Popen(command, cwd=str(script.parent), creationflags=flags, close_fds=True)  # nosec B603 B607
+    safe_popen(command, cwd=str(script.parent), creationflags=_CREATE_NO_WINDOW, close_fds=True)
 
 
 def _start_agent_launcher(launcher_exe):
