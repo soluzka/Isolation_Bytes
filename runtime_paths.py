@@ -243,14 +243,25 @@ def _launcher_candidates():
     candidates = [configured] if configured else []
     for root in _install_roots():
         candidates.extend(root / folder / _AGENT_LAUNCHER_NAME for folder in _AGENT_ALLOWED_FOLDERS)
+    candidates.append(Path(__file__).resolve().parent / "native" / "AntivirusServerLogin" / "bin" / "Release" / "net8.0-windows" / "win-x64" / _AGENT_LAUNCHER_NAME)
     return candidates
+
+
+def _is_trusted_executable(executable):
+    configured = _configured_path("ISOLATION_BYTES_AGENT_EXE")
+    if configured is not None and executable == configured.resolve():
+        return True
+    if executable.parent == Path(__file__).resolve().parent / "dist":
+        return True
+    if executable.parent == Path(__file__).resolve().parent / "native" / "AntivirusServerLogin" / "bin" / "Release" / "net8.0-windows" / "win-x64":
+        return True
+    return executable.parent.name.lower() in {folder.lower() for folder in _AGENT_ALLOWED_FOLDERS}
 
 
 def _start_process(command, cwd):
     """Start only a path discovered from the allow-listed installation roots."""
     executable = Path(command[0]).resolve()
-    allowed = any(executable.parent.name.lower() == folder.lower() for folder in _AGENT_ALLOWED_FOLDERS)
-    allowed = allowed or executable.parent == Path(__file__).resolve().parent / "dist"
+    allowed = _is_trusted_executable(executable)
     if not allowed or not executable.is_file():
         raise OSError("Agent executable is outside the trusted installation locations")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
