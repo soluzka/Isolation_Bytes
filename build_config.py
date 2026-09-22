@@ -712,6 +712,7 @@ def _repair_msix_signing_pfx():
 
     safe_subject = publisher.replace("'", "''")
     safe_pfx = PFX.replace("'", "''")
+    safe_password = PFX_PASSWORD.replace("'", "''")
     backup = PFX + '.provider-failure.bak'
     try:
         if os.path.isfile(backup):
@@ -726,7 +727,7 @@ def _repair_msix_signing_pfx():
         "$ErrorActionPreference='Stop'; "
         f"$subject='{safe_subject}'; "
         f"$pfx='{safe_pfx}'; "
-        f"$pwd=ConvertTo-SecureString '{PFX_PASSWORD.replace(\"'\", \"''\")}' -AsPlainText -Force; "
+        f"$pwd=ConvertTo-SecureString '{safe_password}' -AsPlainText -Force; "
         "$cert=New-SelfSignedCertificate "
         "-Type CodeSigningCert "
         "-Subject $subject "
