@@ -607,7 +607,7 @@ def _sign_msix_from_store(msix_file):
     safe_pfx = PFX.replace("'", "''")
     ps = ("$ErrorActionPreference='Stop'; "
           f"$pwd=ConvertTo-SecureString '{safe_password}' -AsPlainText -Force; "
-          f"$c=Import-PfxCertificate -FilePath '{safe_pfx}' -CertStoreLocation 'Cert:\\CurrentUser\\My' -Password $pwd -Exportable; "
+          f"$c=Import-PfxCertificate -FilePath '{safe_pfx}' -CertStoreLocation 'Cert:\\\\CurrentUser\\\\My' -Password $pwd -Exportable; "
           "if (-not $c.HasPrivateKey) { throw 'Certificate has no private key' }; $c.Thumbprint")
     imported = safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command', ps],
                         cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -629,17 +629,104 @@ def _sign_msix_from_store(msix_file):
         return result.returncode == 0
     finally:
         safe_run([powershell, '-NoProfile', '-NonInteractive', '-Command',
-                  f"Remove-Item -Path 'Cert:\\CurrentUser\\My\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
+                  f"Remove-Item -Path 'Cert:\\\\CurrentUser\\\\My\\\\{thumbprint}' -Force -ErrorAction SilentlyContinue"],
                  cwd=BASE_DIR, check=False)
 
+
+def _manifest_publisher():
+    """Return the exact Publisher required by the MSIX manifest."""
+    try:
+        with open(MANIFEST, encoding='utf-8') as mf:
+            manifest = mf.read()
+    except OSError:
+        return None
+    match = re.search(r'<Identity\\b[^>]*\\bPublisher="([^"]+)"', manifest)
+    return match.group(1).strip() if match else None
+
+
+def _repair_msix_signing_pfx():
+    """Replace an unusable PFX with a SignTool-compatible RSA code-signing PFX.
+
+    This is only used after SignTool reports a private-key/provider failure.
+    The certificate subject is taken from Package.appxmanifest so repairing the
+    private key cannot silently change the package Publisher identity.
+    """
+    powershell = shutil.which('powershell.exe') or shutil.which('powershell')
+    if not powershell:
+        print('WARNING: PowerShell is unavailable; cannot repair the signing PFX.')
+        return False
+
+    publisher = _manifest_publisher()
+    if not publisher:
+        print('WARNING: MSIX Publisher could not be read from Package.appxmanifest.')
+        return False
+
+    safe_subject = publisher.replace("'", "''")
+    safe_pfx = PFX.replace("'", "''")
+    backup = PFX + '.provider-failure.bak'
+    try:
+        if os.path.isfile(backup):
+            os.remove(backup)
+        shutil.copy2(PFX, backup)
+    except OSError as exc:
+        print(f'WARNING: could not back up the existing PFX: {exc}')
+        return False
+
+    print('Repairing MSIX signing certificate with a compatible RSA/CSP private key...')
+    ps = (
+        "$ErrorActionPreference='Stop'; "
+        f"$subject='{safe_subject}'; "
+        f"$pfx='{safe_pfx}'; "
+        f"$pwd=ConvertTo-SecureString '{PFX_PASSWORD.replace(\"'\", \"''\")}' -AsPlainText -Force; "
+        "$cert=New-SelfSignedCertificate "
+        "-Type CodeSigningCert "
+        "-Subject $subject "
+        "-KeyAlgorithm RSA "
+        "-KeyLength 2048 "
+        "-HashAlgorithm SHA256 "
+        "-KeySpec Signature "
+        "-KeyExportPolicy Exportable "
+        "-Provider 'Microsoft Enhanced RSA and AES Cryptographic Provider' "
+        "-CertStoreLocation 'Cert:\\\\CurrentUser\\\\My' "
+        "-NotAfter (Get-Date).AddYears(5); "
+        "if (-not $cert.HasPrivateKey) { throw 'Generated certificate has no private key' }; "
+        "Export-PfxCertificate -Cert $cert -FilePath $pfx -Password $pwd -Force | Out-Null; "
+        "$thumb=$cert.Thumbprint; "
+        "Remove-Item -Path ('Cert:\\\\CurrentUser\\\\My\\\\' + $thumb) -Force -ErrorAction SilentlyContinue; "
+        "$thumb"
+    )
+    repaired = safe_run(
+        [powershell, '-NoProfile', '-NonInteractive', '-Command', ps],
+        cwd=BASE_DIR,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding='utf-8',
+        errors='replace',
+        check=False,
+    )
+    print(repaired.stdout or '', end='' if (repaired.stdout or '').endswith('\\n') else '\\n')
+    if repaired.returncode != 0 or not os.path.isfile(PFX):
+        print('ERROR: signing PFX repair failed; restoring the previous PFX.')
+        try:
+            shutil.copy2(backup, PFX)
+        except OSError:
+            pass
+        return False
+
+    print(f'Repaired signing PFX created with Publisher: {publisher}')
+    print(f'Previous PFX preserved at: {backup}')
+    return True
+
+
 def _sign_msix(msix_file):
-    """Sign the MSIX with the configured PFX and expose useful diagnostics."""
+    """Sign the MSIX, repairing an incompatible private-key provider when needed."""
     if not os.path.isfile(SIGNTOOL):
         raise RuntimeError(f'SignTool not found: {SIGNTOOL}')
     if not os.path.isfile(PFX):
         raise RuntimeError(f'MSIX signing certificate not found: {PFX}')
     if not PFX_PASSWORD:
-        raise RuntimeError('ISOLATION_BYTES_PFX_PASSWORD is empty. Set it before signing.')
+        raise RuntimeError('Configured MSIX PFX password is empty.')
 
     certutil = shutil.which('certutil.exe') or shutil.which('certutil')
     if certutil:
@@ -658,70 +745,52 @@ def _sign_msix(msix_file):
             print(probe.stdout or '')
             raise RuntimeError(
                 f'Windows could not open the signing PFX (certutil exit {probe.returncode}). '
-                'Check the PFX password, certificate, and private-key provider.'
+                'Check the configured PFX password.'
             )
-        cert_output = probe.stdout or ''
-        if 'Private key' not in cert_output and 'Private key:' not in cert_output:
-            print('WARNING: certutil did not report a private key in the PFX.')
 
-    primary = [
-        SIGNTOOL, 'sign', '/debug', '/v',
-        '/f', PFX, '/p', PFX_PASSWORD,
-        '/fd', 'sha256', msix_file,
-    ]
+    def _try_direct():
+        result = safe_run(
+            [SIGNTOOL, 'sign', '/debug', '/v',
+             '/f', PFX, '/p', PFX_PASSWORD,
+             '/fd', 'sha256', msix_file],
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            check=False,
+        )
+        output = result.stdout or ''
+        print(output, end='' if output.endswith('\\n') else '\\n')
+        return result.returncode == 0, output
+
     print('Signing MSIX with the configured PFX...')
-    result = safe_run(
-        [str(x) for x in primary],
-        cwd=BASE_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        check=False,
-    )
-    output = result.stdout or ''
-    print(output, end='' if output.endswith('\n') else '\n')
-    if result.returncode == 0:
+    ok, output = _try_direct()
+    if ok:
         return
 
     print('Direct PFX signing failed; trying the certificate-store private key path...')
     if _sign_msix_from_store(msix_file):
         return
 
-    print('Certificate-store signing failed; retrying with certificate auto-selection...')
-    retry = [
-        SIGNTOOL, 'sign', '/debug', '/v', '/a',
-        '/f', PFX, '/p', PFX_PASSWORD,
-        '/fd', 'sha256', msix_file,
-    ]
-    retry_result = safe_run(
-        [str(x) for x in retry],
-        cwd=BASE_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding='utf-8',
-        errors='replace',
-        check=False,
-    )
-    retry_output = retry_result.stdout or ''
-    print(retry_output, end='' if retry_output.endswith('\n') else '\n')
-    if retry_result.returncode == 0:
-        return
+    combined = output
+    if '0x8007000b' in combined or 'SignerSign() failed' in combined:
+        _signing_identity_diagnostics()
+        if _repair_msix_signing_pfx():
+            print('Retrying MSIX signing with the repaired RSA signing PFX...')
+            ok, repaired_output = _try_direct()
+            combined += '\\n' + repaired_output
+            if ok:
+                return
+            if _sign_msix_from_store(msix_file):
+                return
 
-    diagnostics = output + '\n' + retry_output
     _signing_identity_diagnostics()
-    if '0x8007000b' in diagnostics or 'SignerSign() failed' in diagnostics:
-        raise RuntimeError(
-            'SignTool could not use the configured PFX private key. '
-            'This usually indicates an incompatible/corrupt private-key provider '
-            'or a PFX/certificate mismatch. The build did not replace the signing identity. '
-            f'PFX: {PFX}'
-        )
     raise RuntimeError(
-        f'SignTool failed with exit code {retry_result.returncode}. '
-        'See the verbose SignTool output above.'
+        'SignTool could not sign the MSIX. The configured private-key provider '
+        'was unusable and the compatibility repair did not produce a working key. '
+        f'PFX: {PFX}'
     )
 
 print(f'\n{"="*60}\nSigning MSIX\n{"="*60}')
