@@ -466,8 +466,9 @@
                 </div>
                 
                 <h4>Quarantine Location</h4>
-                <p>All quarantined files are stored in:</p>
-                <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0;">%USERPROFILE%\AppData\Local\Temp\IsolationBytes\Quarantine</code>
+                <p>YARA threats are quarantined in the application's configured quarantine directory:</p>
+                <code style="display: block; background: #f5f5f5; padding: 10px; border-radius: 3px; margin: 10px 0;">{{ yara_quarantine_folder }}</code>
+                <p style="font-size: 0.9em; color: #666;">This path follows <code>ANTIVIRUS_RUNTIME_DIR</code> when configured; otherwise it uses the application's IsolationBytes runtime directory.</p>
                 
                 <div style="background-color: #d1ecf1; padding: 10px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #0c5460;">
                     <p><strong>Enhanced Security:</strong> All quarantined files are now encrypted with a .enc extension. This provides an extra layer of protection to prevent accidental execution of malicious code.</p>
