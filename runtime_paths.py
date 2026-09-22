@@ -146,6 +146,19 @@ def ensure_runtime_state_files():
     )
     _create_json_if_missing("quarantine_log.json", [])
     _create_json_if_missing("scan_cache.json", {})
+    _create_json_if_missing(
+        "agent_status.json",
+        {
+            "running": False,
+            "registered": False,
+            "heartbeat_ok": False,
+            "pid": 0,
+            "device_id": "",
+            "agent_version": "",
+            "updated_at": None,
+            "updated_at_epoch": 0,
+        },
+    )
     return RUNTIME_DIR
 
 
