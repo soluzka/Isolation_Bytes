@@ -3228,21 +3228,39 @@ X-GNOME-Autostart-enabled=true
             # Keep each HTTP request well below the server JSON limit while
             # preserving every finding. The cloud reassembles these parts.
             chunk_size = 40
+            # Preserve the complete normalized scanner evidence alongside
+            # the chunked finding list.  The dashboard previously received only
+            # the final chunk's findings, while errors/ML/YARA collections lived
+            # only in LocalAppData JSON on the agent.
+            scanner_snapshot = {
+                'errors': list(self._scanner_results.get('errors', []) or []),
+                'process_events': list(self._scanner_results.get('process_events', []) or []),
+                'ml_detections': list(self._scanner_results.get('ml_detections', []) or []),
+                'ransomware_indicators': list(self._scanner_results.get('ransomware_indicators', []) or []),
+                'persistence_indicators': dict(self._scanner_results.get('persistence_indicators', {}) or {}),
+                'yara_suspicious': list(self._scanner_results.get('yara_suspicious', []) or []),
+                'quarantined_files': list(self._scanner_results.get('quarantined_files', []) or []),
+            }
             if not findings:
-                payloads = [dict(base, findings=[])]
+                payloads = [dict(base, findings=[], indicator_results=scanner_snapshot)]
             else:
                 scan_id = self._scan_id
                 payloads = []
                 total_parts = (len(findings) + chunk_size - 1) // chunk_size
                 for index in range(total_parts):
-                    payloads.append(dict(
+                    payload = dict(
                         base,
                         findings=findings[index * chunk_size:(index + 1) * chunk_size],
                         scan_id=scan_id,
                         scan_part=index,
                         scan_parts=total_parts,
                         scan_complete=(index == total_parts - 1),
-                    ))
+                    )
+                    # Send the snapshot once, on the final chunk, so large
+                    # scans do not multiply the JSON payload size.
+                    if index == total_parts - 1:
+                        payload['indicator_results'] = scanner_snapshot
+                    payloads.append(payload)
 
             all_ok = True
             for data in payloads:
