@@ -18,14 +18,12 @@ a = Analysis(
     pathex=[_BASE],
     binaries=[],
     datas=_security_datas + [
-        # Include folder_watcher and scan_directories config
         (os.path.join(_BASE, 'folder_watcher.py'), '.'),
         (os.path.join(_BASE, 'scan_directories.txt'), '.'),
         (os.path.join(_BASE, 'scan_utils.py'), '.'),
         (os.path.join(_BASE, 'quarantine_utils.py'), '.'),
         (os.path.join(_BASE, 'config.py'), '.'),
         (os.path.join(_BASE, 'utils'), 'utils'),
-        # Compiled YARA rules at repo root
         (os.path.join(_BASE, 'compiled_rules.yarc'), '.'),
     ],
     hiddenimports=['psutil', 'requests', 'urllib3', 'socket', 'platform',
@@ -35,7 +33,8 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tensorflow', 'torch', 'torchvision', 'torchaudio', 'h5py', 'numba',
+    excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*',
+              'tensorflow', 'torch', 'torchvision', 'torchaudio', 'h5py', 'numba',
               'IPython', 'ipykernel', 'notebook', 'pytest',
               'nltk', 'transformers', 'accelerate', 'cv2', 'redis', 'onnxruntime',
               'pyssdeep', 'ssdeep', 'tlsh', 'lief', 'lightgbm', 'pefile',
@@ -58,7 +57,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window — runs silently
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
