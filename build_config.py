@@ -223,8 +223,15 @@ if not args.skip_exe:
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
+         '--clean',
          '--distpath', DIST_DIR,
-         '--workpath', BUILD_DIR])
+         '--workpath', BUILD_DIR,
+         # This project uses cryptography, not the legacy Crypto/Cryptodome
+         # namespaces.  Explicitly exclude them here as well as in generated
+         # specs so a stray/broken Crypto installation cannot load
+         # pyinstaller-hooks-contrib's hook-Crypto.py during Analysis.
+         '--exclude-module', 'Crypto',
+         '--exclude-module', 'Cryptodome'])
     print('antivirus_server.exe build complete.')
 
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
