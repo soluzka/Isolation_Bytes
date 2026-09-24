@@ -83,6 +83,27 @@ parser.add_argument('--skip-exe', action='store_true',
 args = parser.parse_args()
 
 
+def _patch_pyinstaller_spec_excludes(spec_path):
+    """Add legacy Crypto exclusions directly to an existing PyInstaller spec."""
+    with open(spec_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    if "'Crypto'" in content or '"Crypto"' in content:
+        return
+    if 'excludes=' in content:
+        content = re.sub(
+            r'excludes\s*=\s*\[',
+            "excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*', ",
+            content, count=1)
+    else:
+        content = content.replace(
+            'hookspath=[]',
+            "hookspath=[],\n    excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*'],",
+            1)
+    with open(spec_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print('Patched PyInstaller spec: excluded legacy Crypto/Cryptodome namespaces')
+
+
 def run(cmd, **kw):
     print(f'>>> {" ".join(cmd)}')
     kw.setdefault('check', True)
@@ -221,17 +242,15 @@ if not args.skip_exe:
         sys.exit(1)
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
+    # PyInstaller rejects --exclude-module when an existing .spec is supplied.
+    # Put the exclusion in Analysis(excludes=...) inside the spec instead.
+    _patch_pyinstaller_spec_excludes(spec)
+
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
          '--clean',
          '--distpath', DIST_DIR,
-         '--workpath', BUILD_DIR,
-         # This project uses cryptography, not the legacy Crypto/Cryptodome
-         # namespaces.  Explicitly exclude them here as well as in generated
-         # specs so a stray/broken Crypto installation cannot load
-         # pyinstaller-hooks-contrib's hook-Crypto.py during Analysis.
-         '--exclude-module', 'Crypto',
-         '--exclude-module', 'Cryptodome'])
+         '--workpath', BUILD_DIR])
     print('antivirus_server.exe build complete.')
 
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
