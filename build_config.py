@@ -283,6 +283,7 @@ if not args.skip_exe:
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
     if os.path.isfile(launcher_spec):
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
+        _patch_pyinstaller_spec_excludes(launcher_spec)
         run([sys.executable, '-m', 'PyInstaller', launcher_spec,
              '--noconfirm',
              '--distpath', DIST_DIR,
@@ -298,6 +299,7 @@ if not args.skip_exe:
     if os.path.isfile(agent_spec):
         print(f'\n{"="*60}\nBuilding standalone agent EXE\n{"="*60}')
         _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent.exe'))
+        _patch_pyinstaller_spec_excludes(agent_spec)
         run([sys.executable, '-m', 'PyInstaller', agent_spec,
              '--noconfirm',
              '--distpath', DIST_DIR,
