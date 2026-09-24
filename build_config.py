@@ -123,6 +123,22 @@ def _patch_pyinstaller_spec_excludes(spec_path):
     print('Patched PyInstaller spec: Crypto/Cryptodome excluded; Pydantic compatibility hook enabled')
 
 
+def _prepare_pyinstaller_compatibility():
+    """Prepare a temporary compatibility shim for old third-party hooks."""
+    shim_dir = os.path.join(BUILD_DIR, '_pyinstaller_compat')
+    os.makedirs(shim_dir, exist_ok=True)
+    shim_path = os.path.join(shim_dir, 'sitecustomize.py')
+    with open(shim_path, 'w', encoding='utf-8') as f:
+        f.write(
+            "try:\\n"
+            "    import pydantic\\n"
+            "    if not hasattr(pydantic, 'compiled'):\\n"
+            "        pydantic.compiled = False\\n"
+            "except Exception:\\n"
+            "    pass\\n"
+        )
+    return shim_dir
+
 def run(cmd, **kw):
     print(f'>>> {" ".join(cmd)}')
     kw.setdefault('check', True)
@@ -264,12 +280,15 @@ if not args.skip_exe:
     # PyInstaller rejects --exclude-module when an existing .spec is supplied.
     # Put the exclusion in Analysis(excludes=...) inside the spec instead.
     _patch_pyinstaller_spec_excludes(spec)
+    compat_dir = _prepare_pyinstaller_compatibility()
+    build_env = os.environ.copy()
+    build_env['PYTHONPATH'] = compat_dir + os.pathsep + build_env.get('PYTHONPATH', '')
 
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
          '--clean',
          '--distpath', DIST_DIR,
-         '--workpath', BUILD_DIR])
+         '--workpath', BUILD_DIR], env=build_env)
     print('antivirus_server.exe build complete.')
 
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
