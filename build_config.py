@@ -84,24 +84,43 @@ args = parser.parse_args()
 
 
 def _patch_pyinstaller_spec_excludes(spec_path):
-    """Add legacy Crypto exclusions directly to an existing PyInstaller spec."""
+    """Patch a local spec for compatibility with current dependency hook versions."""
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
-    if "'Crypto'" in content or '"Crypto"' in content:
-        return
-    if 'excludes=' in content:
-        content = re.sub(
-            r'excludes\s*=\s*\[',
-            "excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*', ",
-            content, count=1)
-    else:
-        content = content.replace(
-            'hookspath=[]',
-            "hookspath=[],\n    excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*'],",
-            1)
+
+    # The project uses cryptography, not the legacy Crypto/Cryptodome namespaces.
+    if "'Crypto'" not in content and '"Crypto"' not in content:
+        if 'excludes=' in content:
+            content = re.sub(
+                r'excludes\s*=\s*\[',
+                "excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*', ",
+                content, count=1)
+        else:
+            content = content.replace(
+                'hookspath=[]',
+                "hookspath=[],\n    excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*'],",
+                1)
+
+    # Pydantic 2.13 removed pydantic.compiled. Older pyinstaller-hooks-contrib
+    # hook-pydantic.py versions still probe that attribute and crash analysis.
+    # Force our compatibility hook ahead of the contributed hook.
+    hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\', '/')
+    hook_literal = repr(hook_dir)
+    if 'hook-pydantic.py' in os.path.join(BASE_DIR, 'pyinstaller_hooks'):
+        if 'hookspath=' in content:
+            content = re.sub(
+                r'hookspath\s*=\s*\[',
+                f"hookspath=[{hook_literal}, ",
+                content, count=1)
+        else:
+            content = content.replace(
+                'excludes=',
+                f"hookspath=[{hook_literal}],\n    excludes=",
+                1)
+
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(content)
-    print('Patched PyInstaller spec: excluded legacy Crypto/Cryptodome namespaces')
+    print('Patched PyInstaller spec: Crypto/Cryptodome excluded; Pydantic compatibility hook enabled')
 
 
 def run(cmd, **kw):
