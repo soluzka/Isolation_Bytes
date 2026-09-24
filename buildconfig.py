@@ -102,6 +102,10 @@ HIDDEN_IMPORTS = [
 
 EXCLUDED_IMPORTS = [
     "tensorflow", "torch", "torchvision",
+    # This project uses cryptography, not the legacy Crypto/Cryptodome namespaces.
+    # Excluding them prevents a stray/broken Crypto installation from triggering
+    # pyinstaller-hooks-contrib hook-Crypto.py during Analysis.
+    "Crypto", "Crypto.*", "Cryptodome", "Cryptodome.*",
     "matplotlib", "IPython", "ipykernel", "notebook", "pytest",
 ]
 
