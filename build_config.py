@@ -106,7 +106,8 @@ def _patch_pyinstaller_spec_excludes(spec_path):
     # Force our compatibility hook ahead of the contributed hook.
     hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\', '/')
     hook_literal = repr(hook_dir)
-    if 'hook-pydantic.py' in os.path.join(BASE_DIR, 'pyinstaller_hooks'):
+    custom_pydantic_hook = os.path.join(hook_dir, 'hook-pydantic.py')
+    if os.path.isfile(custom_pydantic_hook):
         if 'hookspath=' in content:
             content = re.sub(
                 r'hookspath\s*=\s*\[',
@@ -122,28 +123,6 @@ def _patch_pyinstaller_spec_excludes(spec_path):
         f.write(content)
     print('Patched PyInstaller spec: Crypto/Cryptodome excluded; Pydantic compatibility hook enabled')
 
-
-def _patch_pydantic_spec_compatibility(spec_path):
-    """Inject the Pydantic compatibility attribute before PyInstaller Analysis."""
-    with open(spec_path, 'r', encoding='utf-8') as f:
-        content = f.read()
-
-    marker = 'a = Analysis('
-    shim_marker = '# ISOLATION_BYTES_PYDANTIC_HOOK_COMPAT'
-    if marker in content and shim_marker not in content:
-        shim = (
-            f"{shim_marker}\n"
-            "try:\n"
-            "    import pydantic as _pydantic\n"
-            "    if not hasattr(_pydantic, 'compiled'):\n"
-            "        _pydantic.compiled = False\n"
-            "except Exception:\n"
-            "    pass\n\n"
-        )
-        content = content.replace(marker, shim + marker, 1)
-
-    with open(spec_path, 'w', encoding='utf-8') as f:
-        f.write(content)
 
 def run(cmd, **kw):
     print(f'>>> {" ".join(cmd)}')
@@ -286,7 +265,6 @@ if not args.skip_exe:
     # PyInstaller rejects --exclude-module when an existing .spec is supplied.
     # Put the exclusion in Analysis(excludes=...) inside the spec instead.
     _patch_pyinstaller_spec_excludes(spec)
-    _patch_pydantic_spec_compatibility(spec)
 
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
