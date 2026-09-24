@@ -23,6 +23,10 @@ import contextlib
 
 from utils.subprocess_safe import safe_run
 
+# ---------------------------------------------------------------------------
+# Paths and version
+# ---------------------------------------------------------------------------
+
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
 BUILD_DIR = os.path.join(BASE_DIR, 'build')
@@ -32,6 +36,7 @@ MANIFEST = os.path.join(NATIVE_DIR, 'Package.appxmanifest')
 PFX = os.path.join(NATIVE_DIR, 'IsolationBytes.pfx')
 PFX_PASSWORD = os.environ.get('ISOLATION_BYTES_PFX_PASSWORD', 'IsolationBytes2026')
 
+# Windows SDK tools
 SDK_BIN = r'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64'
 MAKEAPPX = os.path.join(SDK_BIN, 'makeappx.exe')
 SIGNTOOL = os.path.join(SDK_BIN, 'signtool.exe')
@@ -44,6 +49,7 @@ if len(parts) == 3:
     parts.append(0)
 APP_VERSION = '.'.join(str(p) for p in parts)
 
+# Secure API key injection for build-time secrets (source stays clean)
 CLOUD_API_KEY = os.environ.get('CLOUD_API_KEY', '')
 PROGRAM_CS = os.path.join(BASE_DIR, 'native', 'AntivirusServerLogin', 'Program.cs')
 MAINWINDOW_CS = os.path.join(NATIVE_DIR, 'MainWindow.xaml.cs')
@@ -78,7 +84,7 @@ args = parser.parse_args()
 
 
 def _patch_pyinstaller_spec_excludes(spec_path):
-    """Patch the local spec for dependency-hook compatibility."""
+    """Patch a local spec for compatibility with current dependency hook versions."""
     with open(spec_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
@@ -95,27 +101,33 @@ def _patch_pyinstaller_spec_excludes(spec_path):
                 "hookspath=[],\n    excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*'],",
                 1)
 
-    # Keep the project hook available for current Pydantic versions.
+    # Pydantic 2.13 removed pydantic.compiled. Older pyinstaller-hooks-contrib
+    # hook-pydantic.py versions still probe that attribute and crash analysis.
+    # Force our compatibility hook ahead of the contributed hook.
     hook_dir = os.path.join(BASE_DIR, 'pyinstaller_hooks').replace('\\', '/')
     hook_literal = repr(hook_dir)
-    if 'hookspath=' in content:
-        if hook_literal not in content:
+    if 'hook-pydantic.py' in os.path.join(BASE_DIR, 'pyinstaller_hooks'):
+        if 'hookspath=' in content:
             content = re.sub(
                 r'hookspath\s*=\s*\[',
                 f"hookspath=[{hook_literal}, ",
                 content, count=1)
-    else:
-        content = content.replace(
-            'excludes=',
-            f"hookspath=[{hook_literal}],\n    excludes=",
-            1)
+        else:
+            content = content.replace(
+                'excludes=',
+                f"hookspath=[{hook_literal}],\n    excludes=",
+                1)
 
-    # Critical compatibility fix: old pyinstaller-hooks-contrib versions call
-    # get_module_attribute('pydantic', 'compiled'), but Pydantic 2.13 removed
-    # that attribute.  Setting it in the spec itself is reliable because the
-    # spec is executed in the same Python process as PyInstaller's Analysis.
-    # This is deliberately done before Analysis() so the contributed hook sees
-    # the compatibility attribute when it is imported.
+    with open(spec_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print('Patched PyInstaller spec: Crypto/Cryptodome excluded; Pydantic compatibility hook enabled')
+
+
+def _patch_pydantic_spec_compatibility(spec_path):
+    """Inject the Pydantic compatibility attribute before PyInstaller Analysis."""
+    with open(spec_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+
     marker = 'a = Analysis('
     shim_marker = '# ISOLATION_BYTES_PYDANTIC_HOOK_COMPAT'
     if marker in content and shim_marker not in content:
@@ -132,8 +144,6 @@ def _patch_pyinstaller_spec_excludes(spec_path):
 
     with open(spec_path, 'w', encoding='utf-8') as f:
         f.write(content)
-    print('Patched PyInstaller spec: Crypto/Cryptodome excluded; Pydantic hook compatibility enabled')
-
 
 def run(cmd, **kw):
     print(f'>>> {" ".join(cmd)}')
@@ -233,6 +243,12 @@ def update_version(version):
     print(f'Updated version to {version}')
 
 
+# ---------------------------------------------------------------------------
+# 1. Build cloud_server.exe + IsolationBytesLogin.exe (via buildconfig.py)
+#    This builds the cloud server, embeds resources, then builds the login
+#    launcher EXE with cloud_server.exe embedded inside it.
+# ---------------------------------------------------------------------------
+
 if not args.skip_exe:
     buildconfig = os.path.join(BASE_DIR, 'buildconfig.py')
     if os.path.isfile(buildconfig):
@@ -248,7 +264,12 @@ if not args.skip_exe:
     else:
         print('NOTE: buildconfig.py not found — skipping cloud server + login exe build.')
 
+# ---------------------------------------------------------------------------
+# 2. Build antivirus_server.exe from .spec (PyInstaller onedir)
+# ---------------------------------------------------------------------------
+
 if not args.skip_exe:
+    # Clean previous output
     for stale in ['antivirus_server']:
         p = os.path.join(DIST_DIR, stale)
         if os.path.isdir(p):
@@ -262,11 +283,11 @@ if not args.skip_exe:
         sys.exit(1)
 
     print(f'\n{"="*60}\nBuilding antivirus_server.exe (PyInstaller)\n{"="*60}')
+    # PyInstaller rejects --exclude-module when an existing .spec is supplied.
+    # Put the exclusion in Analysis(excludes=...) inside the spec instead.
     _patch_pyinstaller_spec_excludes(spec)
+    _patch_pydantic_spec_compatibility(spec)
 
-    # No PYTHONPATH/sitecustomize shim is needed. The compatibility attribute
-    # is injected directly into the spec before Analysis(), which is the same
-    # interpreter/module cache used by PyInstaller's hooks.
     run([sys.executable, '-m', 'PyInstaller', spec,
          '--noconfirm',
          '--clean',
@@ -280,6 +301,7 @@ if not args.skip_exe:
         sys.exit(1)
     print(f'Onedir: {onedir}')
 
+    # ── Build the universal launcher as a single standalone EXE ──
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
     if os.path.isfile(launcher_spec):
         print(f'\n{"="*60}\nBuilding universal launcher EXE\n{"="*60}')
@@ -293,6 +315,7 @@ if not args.skip_exe:
         else:
             print('WARNING: Universal launcher EXE not found.')
 
+    # ── Build the standalone agent as a single EXE ──
     agent_spec = os.path.join(BASE_DIR, 'standalone_agent.spec')
     if os.path.isfile(agent_spec):
         print(f'\n{"="*60}\nBuilding standalone agent EXE\n{"="*60}')
@@ -307,7 +330,6 @@ if not args.skip_exe:
             print(f'Standalone agent: {agent_exe} ({agent_size:.1f} MB)')
         else:
             print('WARNING: Standalone agent EXE not found.')
-
 else:
     print('Skipping PyInstaller build (--skip-exe)')
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
@@ -315,10 +337,19 @@ else:
         print(f'ERROR: {onedir} not found. Run without --skip-exe first.')
         sys.exit(1)
 
+# ---------------------------------------------------------------------------
+# 2. Update version
+# ---------------------------------------------------------------------------
+
 update_version(APP_VERSION)
+
+# ---------------------------------------------------------------------------
+# 3. dotnet publish — compile the IsolationBytes WPF WebView2 app
+# ---------------------------------------------------------------------------
 
 dotnet = find_dotnet()
 
+# Clean previous .NET outputs
 for d in ['msix', 'bin', 'obj']:
     p = os.path.join(NATIVE_DIR, d)
     if os.path.isdir(p):
@@ -338,12 +369,17 @@ if not os.path.isdir(publish_dir):
     print(f'ERROR: publish output not found at {publish_dir}')
     sys.exit(1)
 
+# ---------------------------------------------------------------------------
+# 4. Stage the MSIX contents (WPF app + antivirus_server onedir)
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nStaging MSIX contents\n{"="*60}')
 stage_dir = os.path.join(NATIVE_DIR, 'staging')
 if os.path.isdir(stage_dir):
     shutil.rmtree(stage_dir, ignore_errors=True)
 os.makedirs(stage_dir)
 
+# Copy the WPF app files
 for item in os.listdir(publish_dir):
     src = os.path.join(publish_dir, item)
     dst = os.path.join(stage_dir, item)
@@ -352,12 +388,15 @@ for item in os.listdir(publish_dir):
     else:
         shutil.copy2(src, dst)
 
+# Copy the AppxManifest.xml
 shutil.copy2(MANIFEST, os.path.join(stage_dir, 'AppxManifest.xml'))
 
+# Embed the antivirus_server onedir inside the MSIX
 server_dst = os.path.join(stage_dir, 'antivirus_server')
 shutil.copytree(onedir, server_dst, dirs_exist_ok=True)
 print(f'Embedded antivirus_server onedir ({len(os.listdir(server_dst))} items) into MSIX staging')
 
+# Embed the standalone agent EXE inside the MSIX
 agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
 if os.path.isfile(agent_exe):
     shutil.copy2(agent_exe, os.path.join(stage_dir, 'IsolationBytesAgent.exe'))
@@ -368,9 +407,16 @@ else:
 total_items = sum(len(files) for _, _, files in os.walk(stage_dir))
 print(f'Staged {total_items} total files in {stage_dir}')
 
+# ---------------------------------------------------------------------------
+# 5. Pack the MSIX with makeappx.exe
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nPacking IsolationBytes MSIX v{APP_VERSION}\n{"="*60}')
+
 os.makedirs(DIST_DIR, exist_ok=True)
 msix_path = os.path.join(DIST_DIR, 'IsolationBytes.msix')
+
+# Build in temp to avoid OneDrive sync issues, then copy
 temp_msix = os.path.join(os.environ.get('TEMP', os.path.expanduser('~')),
                          'IsolationBytes.msix')
 if os.path.isfile(temp_msix):
@@ -378,6 +424,7 @@ if os.path.isfile(temp_msix):
 
 run([MAKEAPPX, 'pack', '/d', stage_dir, '/p', temp_msix, '/nv', '/o'])
 
+# OneDrive/cloud-only files can reject an in-place overwrite; remove first.
 if os.path.isfile(msix_path):
     try:
         os.remove(msix_path)
@@ -388,10 +435,18 @@ shutil.copy2(temp_msix, msix_path)
 os.remove(temp_msix)
 print(f'MSIX packed: {msix_path}')
 
+# ---------------------------------------------------------------------------
+# 6. Sign the MSIX with signtool.exe
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nSigning MSIX\n{"="*60}')
 run([SIGNTOOL, 'sign', '/f', PFX, '/p', PFX_PASSWORD,
      '/fd', 'sha256', msix_path])
 print('MSIX signed.')
+
+# ---------------------------------------------------------------------------
+# 7. Export the public certificate for sideload installation
+# ---------------------------------------------------------------------------
 
 cer_path = os.path.join(DIST_DIR, 'IsolationBytes.cer')
 ps_cmd = (
@@ -404,6 +459,10 @@ run(['powershell.exe', '-NoProfile', '-Command', ps_cmd], check=False)
 if os.path.isfile(cer_path):
     print(f'Certificate exported: {cer_path}')
 
+# ---------------------------------------------------------------------------
+# 7b. Trust the certificate locally so the MSIX can be sideloaded
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nTrusting certificate\n{"="*60}')
 trust_cmd = (
     f"Import-Certificate -FilePath '{cer_path}' "
@@ -412,6 +471,10 @@ trust_cmd = (
 run(['powershell.exe', '-NoProfile', '-Command', trust_cmd], check=False)
 print(f'Certificate trusted in LocalMachine\\TrustedPeople')
 
+# ---------------------------------------------------------------------------
+# 8. Copy universal installer scripts to dist/
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nCopying installer scripts\n{"="*60}')
 for script in ['install-windows.ps1', 'install-windows.bat',
                'install-macos.sh', 'install-linux.sh',
@@ -419,6 +482,7 @@ for script in ['install-windows.ps1', 'install-windows.bat',
                'standalone_agent.py', 'start_agent.bat',
                'install-universal.bat', 'install-universal.sh',
                'install-android.sh', 'install-chromeos.sh']:
+    # Check dist/ first (install scripts live there now), then BASE_DIR as fallback
     src = os.path.join(DIST_DIR, script)
     if not os.path.isfile(src):
         src = os.path.join(BASE_DIR, script)
@@ -429,6 +493,10 @@ for script in ['install-windows.ps1', 'install-windows.bat',
             print(f'Copied {script} to dist/')
         else:
             print(f'{script} already in dist/')
+
+# ---------------------------------------------------------------------------
+# 8b. Generate the .appinstaller file so Windows can sideload & auto-update
+# ---------------------------------------------------------------------------
 
 print(f'\n{"="*60}\nGenerating IsolationBytes.appinstaller v{APP_VERSION}\n{"="*60}')
 appinstaller_path = os.path.join(DIST_DIR, 'IsolationBytes.appinstaller')
@@ -459,6 +527,10 @@ with open(appinstaller_path, 'w', encoding='utf-8') as f:
     f.write(appinstaller_xml)
 print(f'AppInstaller generated: {appinstaller_path}')
 
+# ---------------------------------------------------------------------------
+# 9. Package PWA and Chrome extension
+# ---------------------------------------------------------------------------
+
 pwa_zip = os.path.join(DIST_DIR, f'IsolationBytesPWA-v{APP_VERSION}.zip')
 ext_zip = os.path.join(DIST_DIR, f'IsolationBytesChrome-v{APP_VERSION}.zip')
 
@@ -485,11 +557,16 @@ if os.path.isdir(ext_dir):
                     src = os.path.join(root, file)
                     arc = os.path.relpath(src, ext_dir)
                     zf.write(src, arc)
-    print(f'Chrome zip: {ext_zip}')
+    print(f'Chrome extension packaged: {ext_zip}')
 else:
     print('WARNING: browser_extension/ not found — Chrome zip skipped')
 
+# ---------------------------------------------------------------------------
+# 10. Build Android APK
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nBuilding Android APK\n{"="*60}')
+
 apk_dst = os.path.join(DIST_DIR, f'IsolationBytes-v{APP_VERSION}.apk')
 gradlew = os.path.join(BASE_DIR, 'android', 'gradlew.bat')
 if os.path.isfile(gradlew):
@@ -508,10 +585,17 @@ if os.path.isfile(gradlew):
 else:
     print(f'WARNING: gradlew.bat not found — Android APK build skipped')
 
+# ---------------------------------------------------------------------------
+# 11. Build WinRAR self-extracting installer (SFX)
+# ---------------------------------------------------------------------------
+
 print(f'\n{"="*60}\nBuilding SFX installer\n{"="*60}')
 sfx_builder = os.path.join(BASE_DIR, 'tools', 'build_installer_exe.py')
 if os.path.isfile(sfx_builder):
-    sfx_result = safe_run([sys.executable, sfx_builder], cwd=BASE_DIR)
+    sfx_result = safe_run(
+        [sys.executable, sfx_builder],
+        cwd=BASE_DIR,
+    )
     if sfx_result.returncode != 0:
         print('WARNING: SFX installer build failed or skipped (see errors above).')
     else:
@@ -520,15 +604,20 @@ if os.path.isfile(sfx_builder):
             sfx_size = os.path.getsize(sfx_path) / (1024 * 1024)
             print(f'SFX installer: {sfx_path} ({sfx_size:.1f} MB)')
 else:
-    print(f'WARNING: {sfx_builder} not found — SFX installer build skipped.')
+    print(f'WARNING: {sfx_builder} not found — SFX build skipped.')
+
+# ---------------------------------------------------------------------------
+# Done
+# ---------------------------------------------------------------------------
 
 msix_size_mb = os.path.getsize(msix_path) / (1024 * 1024)
 print(f'\n{"="*60}')
-print('Build complete!')
+print(f'Build complete!')
 print(f'  Version: {APP_VERSION}')
 print(f'  MSIX:    {msix_path} ({msix_size_mb:.1f} MB)')
 print(f'  Cert:    {cer_path}')
 print(f'  AppInstaller: {appinstaller_path}')
+# Show login exe if it was built
 login_exe = os.path.join(DIST_DIR, 'IsolationBytesLogin.exe')
 if os.path.isfile(login_exe):
     login_size = os.path.getsize(login_exe) / (1024 * 1024)
