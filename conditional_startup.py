@@ -147,6 +147,7 @@ def routine_maintenance_and_system_recovery():
         try:
             yara_scanner_path = os.path.join(basedir, 'security', 'yara_scanner.py')
             yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)
+            from scan_pipeline import scan_file_yara
             
             # Scan critical system directories (or use provided override)
             critical_dirs = critical_dirs if critical_dirs else _resolve_critical_directories()
@@ -159,7 +160,7 @@ def routine_maintenance_and_system_recovery():
                             filepath = os.path.join(root, file)
                             time.sleep(0)  # yield so the Flask server stays responsive
                             try:
-                                yara_result = yara_scanner.scan_file_with_yara(filepath)
+                                yara_result = scan_file_yara(filepath, yara_scanner.scan_file_with_yara)[0]
                                 if yara_result:
                                     recovery_results["yara_scans"].append({
                                         "file": filepath,
@@ -545,7 +546,7 @@ def routine_maintenance_and_system_recovery():
                                 if is_suspicious:
                                     # Perform YARA scan on suspicious game files
                                     try:
-                                        yara_result = yara_scanner.scan_file_with_yara(filepath)
+                                        yara_result = scan_file_yara(filepath, yara_scanner.scan_file_with_yara)[0]
                                         if yara_result:
                                             recovery_results["game_malware_scans"].append({
                                                 "file": filepath,
@@ -1540,7 +1541,7 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
         yara_result = None
         try:
             with scanner_lock:
-                yara_result = yara_scanner.scan_file_with_yara(filepath)
+                yara_result = scan_file_yara(filepath, yara_scanner.scan_file_with_yara)[0]
             with results_lock:
                 output.write(f"[conditional_startup] Yara Scan result for {filepath}: {yara_result}\n")
                 if yara_result:
@@ -1620,10 +1621,13 @@ def _scan_file_and_record(filepath, scan_utils, yara_scanner, quarantine_utils, 
         if malware_found:
             with results_lock:
                 try:
-                    quarantine_utils.quarantine_file(filepath)
-                    output.write(f"[conditional_startup] File {filepath} quarantined.\n")
-                    results["quarantined_files"].append(filepath)
-                    scanned_file_status[filepath]["quarantined"] = True
+                    quarantine_ok = quarantine_utils.quarantine_file(filepath)
+                    if quarantine_ok:
+                        output.write(f"[conditional_startup] File {filepath} quarantined and verified.\n")
+                        results["quarantined_files"].append(filepath)
+                        scanned_file_status[filepath]["quarantined"] = True
+                    else:
+                        raise RuntimeError("quarantine verification/remediation failed")
                 except Exception as quarantine_exc:
                     # Malware was detected but could not be removed (e.g. permission
                     # denied on a protected system file). Previously this was only
