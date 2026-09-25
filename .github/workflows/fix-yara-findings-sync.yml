@@ -60,10 +60,29 @@ jobs:
       - name: Validate Python
         run: python -m py_compile cloud/cloud_server.py
 
-      - name: Commit patch
+      - name: Commit patch through PR branch contents API
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: fix-yara-findings-sync-2026-09-25
+        shell: python
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add cloud/cloud_server.py templates/yara_scanner.html
-          git commit -m "Keep YARA findings synchronized with dashboard count" || exit 0
-          git push origin HEAD:fix-yara-findings-sync-2026-09-25
+          import base64, json, os, urllib.request
+          repo = os.environ['GITHUB_REPOSITORY']
+          branch = os.environ['BRANCH']
+          token = os.environ['GH_TOKEN']
+          for path in ('cloud/cloud_server.py', 'templates/yara_scanner.html'):
+              content = open(path, 'rb').read()
+              url = f'https://api.github.com/repos/{repo}/contents/{path}'
+              req = urllib.request.Request(url + '?ref=' + branch, headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'})
+              with urllib.request.urlopen(req) as r:
+                  current = json.load(r)
+              payload = json.dumps({
+                  'message': 'Synchronize YARA findings with dashboard counts',
+                  'content': base64.b64encode(content).decode(),
+                  'sha': current['sha'],
+                  'branch': branch,
+              }).encode()
+              put = urllib.request.Request(url, data=payload, method='PUT', headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json', 'Content-Type': 'application/json'})
+              with urllib.request.urlopen(put) as r:
+                  result = json.load(r)
+              print(path, result.get('commit', {}).get('sha'))
