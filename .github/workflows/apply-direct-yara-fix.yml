@@ -1,0 +1,73 @@
+name: Apply direct YARA findings synchronization fix
+
+on:
+  push:
+    branches: [fix-yara-findings-direct-2026-09-25]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix-yara-findings-direct-2026-09-25
+          fetch-depth: 0
+
+      - name: Apply source changes
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          p = Path('cloud/cloud_server.py')
+          s = p.read_text(encoding='utf-8')
+
+          old = "'findings': findings[:100],"
+          new = "'findings': ag.get('yara_findings', []),"
+          if old not in s:
+              raise SystemExit("cloud_server.py: expected findings[:100] marker not found")
+          s = s.replace(old, new, 1)
+
+          marker = "    update_fields = {\n"
+          if marker not in s:
+              raise SystemExit("cloud_server.py: update_fields marker not found")
+          block = '''    # Persist the exact YARA findings represented by this report.\n    # The dashboard and findings view must use this same collection so their\n    # YARA counts cannot diverge from the displayed YARA matches.\n    existing_yara_findings = existing.get('yara_findings')\n    if not isinstance(existing_yara_findings, list):\n        existing_yara_findings = []\n    report_yara_findings = []\n    for _finding in enriched:\n        _ttype = str(_finding.get('type') or _finding.get('finding_type') or '').lower()\n        _reason = str(_finding.get('reason') or '').lower()\n        _rule = str(_finding.get('rule') or '').lower()\n        _blob = json.dumps(_finding, sort_keys=True, default=str).lower()\n        if (_ttype == 'yara_match' or 'yara' in _blob or 'yara' in _reason\n                or bool(_finding.get('rule'))):\n            report_yara_findings.append(_finding)\n    cumulative_yara_findings = existing_yara_findings + report_yara_findings\n\n'''
+          s = s.replace(marker, block + marker, 1)
+
+          # Make the persisted YARA total derive from the exact persisted findings.
+          old_total = "'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,"
+          new_total = "'total_yara': len(cumulative_yara_findings),"
+          if old_total not in s:
+              raise SystemExit("cloud_server.py: total_yara marker not found")
+          s = s.replace(old_total, new_total, 1)
+
+          # Store the same records used by the findings endpoint.
+          old_update = "        'last_report': last_report,\n"
+          new_update = "        'last_report': last_report,\n        'yara_findings': cumulative_yara_findings,\n"
+          if old_update not in s:
+              raise SystemExit("cloud_server.py: last_report update marker not found")
+          s = s.replace(old_update, new_update, 1)
+
+          p.write_text(s, encoding='utf-8')
+
+          t = Path('templates/yara_scanner.html')
+          if t.exists():
+              ts = t.read_text(encoding='utf-8')
+              # Remove client-side display truncation when it is present.
+              ts2 = ts.replace('.slice(0, 50)', '').replace('.slice(0, 100)', '')
+              t.write_text(ts2, encoding='utf-8')
+
+      - name: Validate
+        run: python -m py_compile cloud/cloud_server.py
+
+      - name: Commit actual source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add cloud/cloud_server.py templates/yara_scanner.html
+          git diff --cached --quiet && { echo "No source changes produced"; exit 1; } || true
+          git commit -m "Synchronize YARA findings with dashboard"
+          git push origin HEAD:fix-yara-findings-direct-2026-09-25
