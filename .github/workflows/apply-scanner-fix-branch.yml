@@ -71,8 +71,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          rm -f .github/workflows/apply-scanner-fix-branch.yml .github/workflows/apply-scanner-pipeline-fix.yml .scanner-fix-trigger .scanner-fix-trigger-branch
+          rm -f .github/workflows/apply-scanner-fix-branch.yml .github/workflows/apply-scanner-pipeline-fix.yml .scanner-fix-trigger .scanner-fix-trigger-branch .scanner-fix-trigger-branch2 .scanner-fix-trigger-branch3
           git add -A
           git status --short
           git commit -m "Remove scanner limits and unify YARA quarantine pipeline"
-          git push origin HEAD:scanner-pipeline-fix
+          git push --force origin HEAD:scanner-pipeline-fix
