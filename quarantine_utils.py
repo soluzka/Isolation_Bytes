@@ -6,6 +6,32 @@ import hashlib
 import json
 import time
 
+# Load the persisted per-install environment before quarantine_file() reads
+# FERNET_KEY. The standalone scanner can run without quick_start.py.
+try:
+    from dotenv import load_dotenv
+    import sys as _quarantine_sys
+    _local_appdata = os.environ.get('LOCALAPPDATA', os.path.expanduser('~'))
+    _env_candidates = []
+    if getattr(_quarantine_sys, 'frozen', False):
+        _env_candidates.extend([
+            os.path.join(os.path.dirname(_quarantine_sys.executable), '.env'),
+            os.path.join(_local_appdata, 'antivirus_server', '.env'),
+        ])
+    else:
+        _env_candidates.extend([
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'),
+            os.path.join(_local_appdata, 'antivirus_server', '.env'),
+            os.path.join(os.getcwd(), '.env'),
+        ])
+    for _env_path in _env_candidates:
+        if os.path.exists(_env_path):
+            load_dotenv(_env_path, override=False)
+            if len(os.environ.get('FERNET_KEY', '')) == 44:
+                break
+except Exception as _env_error:
+    logging.debug('Unable to load quarantine environment: %s', _env_error)
+
 ICACLS_PATH = shutil.which('icacls') or 'icacls'
 from cryptography.fernet import Fernet
 from security.secure_memory import SecureBuffer
@@ -245,6 +271,7 @@ def quarantine_file(filepath, reason=''):
     if isinstance(FERNET_KEY, str):
         FERNET_KEY = FERNET_KEY.encode()
     if not FERNET_KEY or len(FERNET_KEY) != 44 or not os.path.isfile(filepath):
+        logging.error('Quarantine unavailable: FERNET_KEY is missing/invalid or file is unavailable: %s', filepath)
         return False
 
     secure_key = SecureBuffer(FERNET_KEY)
