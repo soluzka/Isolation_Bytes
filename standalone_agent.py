@@ -204,9 +204,6 @@ def _is_protected_path(filepath):
             return True
     return False
 SCAN_INTERVAL = 600        # seconds between scans
-MAX_FILES_PER_SCAN = 50      # cap files per directory to keep CPU free for voice
-MAX_SCAN_CYCLE_SECONDS = 60  # hard cap per scan cycle
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 AGENT_VERSION = "1.8.950.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
@@ -269,7 +266,7 @@ class StandaloneAgent:
         # AppData, system directories, and mounted media on macOS/Linux.
         self._scan_dirs = self._discover_full_scan_dirs()
         # Count existing quarantined files so the counter survives restarts
-        self._quarantined_count = self._count_existing_quarantined()
+        self._quarantined_count = len(self._list_quarantine())
         # Load persisted blocked-files registry so unblock works after restart
         self._blocked_files = self._load_blocked_registry()
 
@@ -1565,7 +1562,7 @@ X-GNOME-Autostart-enabled=true
             if ext not in ml_extensions:
                 return False, 0.0, '', 'ml_suspicious'
             file_size = os.path.getsize(filepath)
-            if file_size == 0 or file_size > MAX_FILE_SIZE:
+            if file_size == 0:
                 return False, 0.0, '', 'ml_suspicious'
             # Read file data (cap at 1MB for entropy calc)
             with open(filepath, 'rb') as f:
@@ -1850,8 +1847,9 @@ X-GNOME-Autostart-enabled=true
             base_dir = os.path.dirname(os.path.abspath(__file__))
             if base_dir not in sys.path:
                 sys.path.insert(0, base_dir)
-            from security.yara_scanner import scan_file_with_yara
-            return scan_file_with_yara(filepath)
+            from scan_pipeline import scan_file_yara
+            matches, _normalized = scan_file_yara(filepath)
+            return matches
         except Exception:
             pass
         # Fallback: load compiled rules directly with the yara module
@@ -1962,31 +1960,14 @@ X-GNOME-Autostart-enabled=true
         findings = []
         if not os.path.isdir(dirpath):
             return findings
-        if not hasattr(self, '_skipped_files'):
-            self._skipped_files = set()
         for root, dirs, files in os.walk(dirpath):
-            # Stop scanning this directory tree if the overall cycle is over budget
-            if cycle_start and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
-                break
             for filename in files:
                 if not self._running:
                     dirs[:] = []
                     break
-                # Global per-cycle file budget (shared across all directories)
-                if getattr(self, '_scan_cycle_remaining', 0) <= 0:
-                    dirs[:] = []
-                    break
-                # Per-file time budget guard
-                if cycle_start and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
-                    dirs[:] = []
-                    break
                 filepath = os.path.join(root, filename)
-                # Skip files we've already failed to access (persists across scan cycles)
-                if filepath in self._skipped_files:
-                    continue
+                self._files_scanned += 1
                 try:
-                    if os.path.getsize(filepath) > MAX_FILE_SIZE:
-                        continue
                     # Skip files we can't read (locked, permission denied)
                     # BUT don't skip files we blocked ourselves — they're
                     # still threats and need to stay in the findings list
@@ -2017,7 +1998,6 @@ X-GNOME-Autostart-enabled=true
                                 'blocked': True,
                             })
                             continue
-                        self._skipped_files.add(filepath)
                         continue
                     matches = self._scan_file_yara(filepath)
                     if matches:
@@ -2193,12 +2173,8 @@ X-GNOME-Autostart-enabled=true
                                 print(f"[AUTO-QUARANTINE] {filepath} moved to Defender_Quarantine (YARA+ML)")
                         except Exception as e:
                             print(f"[AUTO-QUARANTINE] Failed {filepath}: {e}")
-                    self._scan_cycle_remaining -= 1
-                    self._files_scanned += 1
                 except Exception:
                     continue
-            if getattr(self, '_scan_cycle_remaining', 0) <= 0:
-                break
         return findings
 
     def _block_file_in_place(self, filepath):
@@ -2300,72 +2276,70 @@ X-GNOME-Autostart-enabled=true
             return False
 
     def _quarantine_file(self, filepath):
-        """Move a malicious file into quarantine.
-        If the file was blocked in place (NTFS permissions denied), first
-        restore permissions so it can be moved. If quarantine fails, try
-        copy+delete, then rename with .blocked extension as fallback."""
+        """Quarantine only after the artifact is verified and the active source is removed."""
         try:
             filepath = _resolve_local_path(filepath)
-            if _is_protected_path(filepath):
-                print(f"[QUARANTINE] Refusing to quarantine protected system file: {filepath}")
+            if _is_protected_path(filepath) or not os.path.isfile(filepath):
                 return False
             os.makedirs(QUARANTINE_DIR, exist_ok=True)
-            if not os.path.exists(filepath):
-                return False
-            # If the file is already blocked (permissions denied), unblock
-            # it first so we can move it to quarantine.
-            is_blocked = False
-            if isinstance(self._blocked_files, dict):
-                if filepath in self._blocked_files:
-                    is_blocked = True
-            elif filepath in self._blocked_files:
-                is_blocked = True
-            if is_blocked:
-                # Restore permissions so we can move the file
-                # Use the full _unblock_file method which removes all deny ACEs
+            if isinstance(self._blocked_files, dict) and filepath in self._blocked_files:
                 self._unblock_file(filepath)
-                # Brief pause to let NTFS permission changes propagate
-                import time as _time
-                _time.sleep(0.5)
-            # Try to clear read-only attribute before moving (common on Windows)
+                time.sleep(0.5)
+            elif filepath in self._blocked_files:
+                self._unblock_file(filepath)
+                time.sleep(0.5)
             try:
                 os.chmod(filepath, 0o777)
             except Exception:
                 pass
-            import hashlib
             h = hashlib.sha256(filepath.encode('utf-8', 'replace')).hexdigest()[:16]
             base = os.path.basename(filepath)
             dest = os.path.join(QUARANTINE_DIR, f"{h}_{base}.enc")
-            # Try shutil.move first
+            if os.path.exists(dest):
+                dest = os.path.join(QUARANTINE_DIR, f"{h}_{int(time.time() * 1000)}_{base}.enc")
+            tmp_dest = dest + '.tmp'
             try:
-                shutil.move(filepath, dest)
-            except (PermissionError, OSError) as move_err:
-                print(f"[QUARANTINE] shutil.move failed for {filepath}: {move_err} — trying copy+delete")
-                # Fallback: copy then delete (works when move fails due to locks)
-                try:
-                    shutil.copy2(filepath, dest)
-                    os.remove(filepath)
-                except Exception as copy_err:
-                    print(f"[QUARANTINE] copy+delete also failed: {copy_err} — trying direct rename to quarantine")
+                with open(filepath, 'rb') as source:
+                    data = source.read()
+                with open(tmp_dest, 'wb') as target:
+                    target.write(data); target.flush(); os.fsync(target.fileno())
+                os.replace(tmp_dest, dest)
+                if not os.path.isfile(dest) or os.path.getsize(dest) != len(data):
+                    raise IOError('quarantine artifact verification failed')
+            except Exception as exc:
+                for candidate in (tmp_dest, dest):
                     try:
-                        os.rename(filepath, dest)
-                    except Exception:
-                        # Could not quarantine — leave the file unblocked in place.
-                        return False
-            # Write a metadata sidecar so files can be restored later.
-            meta = dest + '.meta'
-            with open(meta, 'w', encoding='utf-8') as mf:
-                mf.write(f"original_path={filepath}\n")
-                mf.write(f"quarantined_at={datetime.datetime.now().isoformat()}\n")
-                mf.write(f"blocked_in_place=False\n")
-                mf.write(f"quarantined=True\n")
-            # Unregister from blocked files since it's now in quarantine
+                        if os.path.exists(candidate): os.remove(candidate)
+                    except OSError:
+                        pass
+                print(f"[QUARANTINE] Artifact creation failed for {filepath}: {exc}")
+                return False
+            try:
+                os.remove(filepath)
+            except PermissionError:
+                self._unblock_file(filepath)
+                try: os.remove(filepath)
+                except Exception: pass
+            except OSError:
+                pass
+            if os.path.exists(filepath):
+                try: os.remove(dest)
+                except OSError: pass
+                print(f"[QUARANTINE] Source removal failed; finding remains active: {filepath}")
+                return False
+            try:
+                with open(dest + '.meta', 'w', encoding='utf-8') as mf:
+                    mf.write(f"original_path={filepath}\n")
+                    mf.write(f"quarantined_at={datetime.datetime.now().isoformat()}\n")
+                    mf.write("quarantined=True\n")
+            except Exception as meta_exc:
+                print(f"[QUARANTINE] Metadata write failed for {filepath}: {meta_exc}")
             self._unregister_blocked_file(filepath)
-            self._quarantined_count += 1
+            self._quarantined_count = len(self._list_quarantine())
             return True
         except Exception as e:
-            print(f"[QUARANTINE] Failed to quarantine {filepath}: {e} — trying rename fallback")
-            return self._rename_block_fallback(filepath)
+            print(f"[QUARANTINE] Failed to quarantine {filepath}: {e}")
+            return False
 
     def _rename_block_fallback(self, filepath):
         """Last-resort fallback: rename the file with a .blocked extension
@@ -2439,6 +2413,8 @@ X-GNOME-Autostart-enabled=true
 
     def _report(self, findings, report_type='scan'):
         try:
+            # Derive quarantine count from this agent's actual quarantine store; never use Defender history.
+            self._quarantined_count = len(self._list_quarantine())
             # Count findings by type for cumulative counters
             for f in findings:
                 ttype = (f.get('threat_type') or '').lower()
@@ -2476,14 +2452,9 @@ X-GNOME-Autostart-enabled=true
 
     def _scan_cycle(self):
         cycle_start = time.time()
-        self._scan_cycle_remaining = MAX_FILES_PER_SCAN
         all_findings = []
         for dirpath in self._scan_dirs:
             if not self._running:
-                break
-            if time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:
-                break
-            if self._scan_cycle_remaining <= 0:
                 break
             if os.path.isdir(dirpath):
                 try:

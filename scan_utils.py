@@ -29,14 +29,15 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
     Scan all files in all monitored folders (recursively) with YARA.
     Returns a list of results (matches and errors).
     """
-    from security.yara_scanner import scan_file_with_yara
+    from scan_pipeline import scan_file_yara
     results = []
     for folder in monitored_folders:
         for root, dirs, files in os.walk(folder):
             for filename in files:
                 filepath = os.path.join(root, filename)
                 try:
-                    if scan_file_with_yara(filepath, rules_path):
+                    matches, _normalized = scan_file_yara(filepath)
+                    if matches:
                         results.append(f"YARA match: {filepath}")
                 except Exception as e:
                     results.append(f"Error scanning {filepath}: {e}")

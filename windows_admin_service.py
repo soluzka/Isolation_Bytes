@@ -26,8 +26,6 @@ PIPE_NAME = r"\\.\pipe\AntivirusProtectedAdmin"
 PROTOCOL_VERSION = 1
 MAX_REQUEST_BYTES = 64 * 1024
 MAX_RESPONSE_BYTES = 256 * 1024
-MAX_SCAN_FILES = 100
-MAX_SCAN_RESULTS = 50
 MAX_LIST_ITEMS = 500
 CONFIRMATION_TOKEN = "CONFIRM"
 KILL_SWITCH_RULE_NAME = "AntivirusServer_KillSwitch"
@@ -195,10 +193,15 @@ def _trim_items(items: Any, key: str) -> list[Any]:
 
 
 def _scan_paths(paths: list[Path]) -> dict[str, Any]:
+    """Traverse every requested path without an artificial file/result cap.
+
+    The response contains every detection for this explicit admin operation;
+    dashboard presentation can paginate independently.
+    """
     try:
-        from security.yara_scanner import scan_file_with_yara
+        from scan_pipeline import scan_file_yara
     except Exception:
-        return {"ok": False, "error": "YARA scanner is unavailable"}
+        return {"ok": False, "error": "shared scan pipeline is unavailable"}
     scanned = 0
     detections: list[dict[str, Any]] = []
     errors = 0
@@ -207,16 +210,14 @@ def _scan_paths(paths: list[Path]) -> dict[str, Any]:
             path for path in requested.rglob("*") if path.is_file() and not path.is_symlink()
         )
         for path in candidates:
-            if scanned >= MAX_SCAN_FILES:
-                break
             try:
-                matches = scan_file_with_yara(str(path))
-                if matches and len(detections) < MAX_SCAN_RESULTS:
-                    detections.append({"path": str(path), "matches": [str(getattr(m, "rule", m))[:128] for m in matches[:20]]})
+                matches, normalized = scan_file_yara(str(path))
+                if matches:
+                    detections.extend(normalized)
             except Exception:
                 errors += 1
             scanned += 1
-    return {"ok": True, "action": "scan.protected", "scanned": scanned, "detections": detections, "errors": min(errors, MAX_SCAN_FILES), "bounded": True}
+    return {"ok": True, "action": "scan.protected", "scanned": scanned, "detections": detections, "errors": errors, "bounded": False}
 
 
 def _dispatch(request: dict[str, Any]) -> dict[str, Any]:
