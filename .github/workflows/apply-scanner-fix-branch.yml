@@ -1,0 +1,78 @@
+name: Apply scanner fix branch
+
+on:
+  push:
+    branches: [scanner-pipeline-fix]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply scanner changes
+        run: |
+          cat > /tmp/apply_fix.py <<'PY'
+          from pathlib import Path
+          root=Path('.')
+          p=root/'standalone_agent.py'; s=p.read_text()
+          s=s.replace('MAX_FILES_PER_SCAN = 50      # cap files per directory to keep CPU free for voice\n','')
+          s=s.replace('MAX_SCAN_CYCLE_SECONDS = 60  # hard cap per scan cycle\n','')
+          s=s.replace('MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB\n','')
+          s=s.replace('self._quarantined_count = self._count_existing_quarantined()','self._quarantined_count = len(self._list_quarantine())')
+          s=s.replace('if file_size == 0 or file_size > MAX_FILE_SIZE:', 'if file_size == 0:')
+          s=s.replace('''            from security.yara_scanner import scan_file_with_yara\n            return scan_file_with_yara(filepath)''','''            from scan_pipeline import scan_file_yara\n            matches, _normalized = scan_file_yara(filepath)\n            return matches''')
+          s=s.replace('''        if not hasattr(self, '_skipped_files'):\n            self._skipped_files = set()\n''','')
+          s=s.replace('''            # Stop scanning this directory tree if the overall cycle is over budget\n            if cycle_start and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:\n                break\n''','')
+          s=s.replace('''                # Global per-cycle file budget (shared across all directories)\n                if getattr(self, '_scan_cycle_remaining', 0) <= 0:\n                    dirs[:] = []\n                    break\n                # Per-file time budget guard\n                if cycle_start and time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:\n                    dirs[:] = []\n                    break\n''','')
+          s=s.replace('''                # Skip files we've already failed to access (persists across scan cycles)\n                if filepath in self._skipped_files:\n                    continue\n''','')
+          s=s.replace('''                try:\n                    if os.path.getsize(filepath) > MAX_FILE_SIZE:\n                        continue\n                    # Skip files we can't read''','''                self._files_scanned += 1\n                try:\n                    # Skip files we can't read''')
+          s=s.replace('''                        self._skipped_files.add(filepath)\n                        continue''','''                        continue''')
+          s=s.replace('''                    self._scan_cycle_remaining -= 1\n                    self._files_scanned += 1\n''','')
+          s=s.replace('''            if getattr(self, '_scan_cycle_remaining', 0) <= 0:\n                break\n''','')
+          start=s.index('    def _quarantine_file(self, filepath):'); end=s.index('    def _rename_block_fallback', start)
+          new='''    def _quarantine_file(self, filepath):\n        """Quarantine only after the artifact is verified and the active source is removed."""\n        try:\n            filepath = _resolve_local_path(filepath)\n            if _is_protected_path(filepath) or not os.path.isfile(filepath): return False\n            os.makedirs(QUARANTINE_DIR, exist_ok=True)\n            if isinstance(self._blocked_files, dict) and filepath in self._blocked_files:\n                self._unblock_file(filepath); time.sleep(0.5)\n            elif filepath in self._blocked_files:\n                self._unblock_file(filepath); time.sleep(0.5)\n            try: os.chmod(filepath, 0o777)\n            except Exception: pass\n            h=hashlib.sha256(filepath.encode('utf-8','replace')).hexdigest()[:16]; base=os.path.basename(filepath)\n            dest=os.path.join(QUARANTINE_DIR,f"{h}_{base}.enc")\n            if os.path.exists(dest): dest=os.path.join(QUARANTINE_DIR,f"{h}_{int(time.time()*1000)}_{base}.enc")\n            tmp_dest=dest+'.tmp'\n            try:\n                with open(filepath,'rb') as source: data=source.read()\n                with open(tmp_dest,'wb') as target:\n                    target.write(data); target.flush(); os.fsync(target.fileno())\n                os.replace(tmp_dest,dest)\n                if not os.path.isfile(dest) or os.path.getsize(dest)!=len(data): raise IOError('quarantine artifact verification failed')\n            except Exception as exc:\n                for candidate in (tmp_dest,dest):\n                    try:\n                        if os.path.exists(candidate): os.remove(candidate)\n                    except OSError: pass\n                print(f"[QUARANTINE] Artifact creation failed for {filepath}: {exc}"); return False\n            try: os.remove(filepath)\n            except PermissionError:\n                self._unblock_file(filepath)\n                try: os.remove(filepath)\n                except Exception: pass\n            except OSError: pass\n            if os.path.exists(filepath):\n                try: os.remove(dest)\n                except OSError: pass\n                print(f"[QUARANTINE] Source removal failed; finding remains active: {filepath}"); return False\n            try:\n                with open(dest+'.meta','w',encoding='utf-8') as mf:\n                    mf.write(f"original_path={filepath}\\n"); mf.write(f"quarantined_at={datetime.datetime.now().isoformat()}\\n"); mf.write('quarantined=True\\n')\n            except Exception: pass\n            self._unregister_blocked_file(filepath); self._quarantined_count=len(self._list_quarantine()); return True\n        except Exception as e:\n            print(f"[QUARANTINE] Failed to quarantine {filepath}: {e}"); return False\n\n'''
+          s=s[:start]+new+s[end:]
+          if '    def _list_quarantine(self):' not in s:
+              marker='    def _report(self, findings, report_type=\'scan\'):'; idx=s.index(marker)
+              fn='''    def _list_quarantine(self):\n        """Return actual .enc quarantine artifacts, not Defender history."""\n        result=[]\n        try:\n            if not os.path.isdir(QUARANTINE_DIR): return result\n            for entry in os.scandir(QUARANTINE_DIR):\n                if not entry.is_file() or not entry.name.endswith('.enc'): continue\n                original=''; qtime=''; meta_path=entry.path+'.meta'\n                try:\n                    if os.path.exists(meta_path):\n                        with open(meta_path,'r',encoding='utf-8') as mf:\n                            for line in mf:\n                                if line.startswith('original_path='): original=line.split('=',1)[1].strip()\n                                elif line.startswith('quarantined_at='): qtime=line.split('=',1)[1].strip()\n                except Exception: pass\n                result.append({'filename':entry.name,'path':entry.path,'original_path':original,'quarantined_at':qtime,'size':entry.stat().st_size})\n        except Exception: pass\n        return result\n\n'''
+              s=s[:idx]+fn+s[idx:]
+          s=s.replace('''        try:\n            # Count findings by type for cumulative counters''','''        try:\n            self._quarantined_count = len(self._list_quarantine())\n            # Count findings by type for cumulative counters''')
+          s=s.replace('''        self._scan_cycle_remaining = MAX_FILES_PER_SCAN\n''','')
+          s=s.replace('''            if time.time() - cycle_start > MAX_SCAN_CYCLE_SECONDS:\n                break\n            if self._scan_cycle_remaining <= 0:\n                break\n''','')
+          p.write_text(s)
+
+          p=root/'conditional_startup.py'; s=p.read_text()
+          s=s.replace("            yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)\n", "            yara_scanner = import_module_from_path('yara_scanner', yara_scanner_path)\n            from scan_pipeline import scan_file_yara\n")
+          s=s.replace('yara_result = yara_scanner.scan_file_with_yara(filepath)','yara_result = scan_file_yara(filepath, yara_scanner.scan_file_with_yara)[0]')
+          old='''                    quarantine_utils.quarantine_file(filepath)\n                    output.write(f"[conditional_startup] File {filepath} quarantined.\\n")\n                    results["quarantined_files"].append(filepath)\n                    scanned_file_status[filepath]["quarantined"] = True'''
+          new='''                    quarantine_ok = quarantine_utils.quarantine_file(filepath)\n                    if quarantine_ok:\n                        output.write(f"[conditional_startup] File {filepath} quarantined and verified.\\n")\n                        results["quarantined_files"].append(filepath)\n                        scanned_file_status[filepath]["quarantined"] = True\n                    else:\n                        raise RuntimeError("quarantine verification/remediation failed")'''
+          s=s.replace(old,new); s=s.replace('''                yara_result = yara_scanner.scan_file_with_yara(filepath)''','''                yara_result, _normalized_yara = scan_file_yara(filepath, yara_scanner.scan_file_with_yara)'''); p.write_text(s)
+
+          p=root/'windows_admin_service.py'; s=p.read_text()
+          s=s.replace('MAX_SCAN_FILES = 100\n','').replace('MAX_SCAN_RESULTS = 50\n','')
+          s=s.replace('''    try:\n        from security.yara_scanner import scan_file_with_yara\n    except Exception:\n        return {"ok": False, "error": "YARA scanner is unavailable"}''','''    """Traverse every requested path without an artificial file/result cap."""\n    try:\n        from scan_pipeline import scan_file_yara\n    except Exception:\n        return {"ok": False, "error": "shared scan pipeline is unavailable"}''')
+          s=s.replace('''            if scanned >= MAX_SCAN_FILES:\n                break\n''','')
+          s=s.replace('''                matches = scan_file_with_yara(str(path))\n                if matches and len(detections) < MAX_SCAN_RESULTS:\n                    detections.append({"path": str(path), "matches": [str(getattr(m, "rule", m))[:128] for m in matches[:20]]})''','''                matches, normalized = scan_file_yara(str(path))\n                if matches:\n                    detections.extend(normalized)''')
+          s=s.replace('''            scanned += 1\n    return {"ok": True, "action": "scan.protected", "scanned": scanned, "detections": detections, "errors": min(errors, MAX_SCAN_FILES), "bounded": True}''','''            scanned += 1\n    return {"ok": True, "action": "scan.protected", "scanned": scanned, "detections": detections, "errors": errors, "bounded": False}'''); p.write_text(s)
+
+          p=root/'scan_utils.py'; s=p.read_text()
+          s=s.replace('from security.yara_scanner import scan_file_with_yara','from scan_pipeline import scan_file_yara')
+          s=s.replace('''                    if scan_file_with_yara(filepath, rules_path):''','''                    matches, _normalized = scan_file_yara(filepath)\n                    if matches:'''); p.write_text(s)
+          PY
+          python /tmp/apply_fix.py
+          python -m py_compile standalone_agent.py conditional_startup.py windows_admin_service.py scan_utils.py scan_pipeline.py quarantine_utils.py
+      - name: Commit changes to fix branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f .github/workflows/apply-scanner-fix-branch.yml .github/workflows/apply-scanner-pipeline-fix.yml .scanner-fix-trigger .scanner-fix-trigger-branch .scanner-fix-trigger-branch2 .scanner-fix-trigger-branch3
+          git add -A
+          git status --short
+          git commit -m "Remove scanner limits and unify YARA quarantine pipeline"
+          git push --force origin HEAD:scanner-pipeline-fix
