@@ -1,9 +1,10 @@
 name: Apply YARA findings synchronization fix
 
 on:
-  push:
+  pull_request:
     branches:
-      - fix-yara-findings-sync-2026-09-25
+      - security-v2
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: write
@@ -11,7 +12,7 @@ permissions:
 jobs:
   patch:
     runs-on: ubuntu-latest
-    if: github.actor != 'github-actions[bot]'
+    if: github.event.pull_request.head.ref == 'fix-yara-findings-sync-2026-09-25'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,41 +23,33 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-
           p = Path('cloud/cloud_server.py')
           s = p.read_text(encoding='utf-8')
-
           old = """    # Count threat types from this report's findings for cumulative counters\n    report_ransomware = 0\n    report_persistence = 0\n    report_yara = 0\n    report_ml = 0\n"""
           new = """    # Count threat types from this report's findings for cumulative counters.\n    # YARA findings are persisted individually so the YARA dashboard and the\n    # cumulative YARA counter always come from the same source of truth.\n    report_ransomware = 0\n    report_persistence = 0\n    report_yara = 0\n    report_ml = 0\n\n    existing_yara_findings = existing.get('yara_findings') or []\n    if not isinstance(existing_yara_findings, list):\n        existing_yara_findings = []\n    report_yara_findings = []\n"""
           if old not in s: raise SystemExit('block 1 not found')
           s = s.replace(old, new, 1)
-
           old = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n"""
-          new = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n            # Preserve every actual YARA match as a finding. Do not cap or\n            # replace these with a generic summary.\n            yara_finding = dict(f)\n            yara_finding['yara_match'] = True\n            report_yara_findings.append(yara_finding)\n"""
+          new = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n            yara_finding = dict(f)\n            yara_finding['yara_match'] = True\n            report_yara_findings.append(yara_finding)\n"""
           if old not in s: raise SystemExit('block 2 not found')
           s = s.replace(old, new, 1)
-
           old = """        'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n    }\n"""
-          new = """        # YARA count is derived from the exact cumulative YARA finding list,\n        # so the dashboard count and YARA findings cannot drift apart.\n        'yara_findings': existing_yara_findings + report_yara_findings,\n        'total_yara': len(existing_yara_findings) + len(report_yara_findings),\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n    }\n"""
+          new = """        'yara_findings': existing_yara_findings + report_yara_findings,\n        'total_yara': len(existing_yara_findings) + len(report_yara_findings),\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n    }\n"""
           if old not in s: raise SystemExit('block 3 not found')
           s = s.replace(old, new, 1)
-
           old = """        # Collect agent scan findings\n        last_report = ag.get('last_report') or {}\n        findings = last_report.get('findings') or []\n        agent_scan_results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),\n            'finding_count': len(findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': findings[:50],  # cap at 50 per agent\n        })\n"""
-          new = """        # YARA findings are the authoritative cumulative finding list.\n        # Never substitute the latest report or cap the list here.\n        yara_findings = ag.get('yara_findings') or []\n        if not isinstance(yara_findings, list):\n            yara_findings = []\n        agent_scan_results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': ag.get('files_scanned', 0),\n            'finding_count': len(yara_findings),\n            'yara_count': len(yara_findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': yara_findings,\n        })\n"""
+          new = """        yara_findings = ag.get('yara_findings') or []\n        if not isinstance(yara_findings, list):\n            yara_findings = []\n        agent_scan_results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': ag.get('files_scanned', 0),\n            'finding_count': len(yara_findings),\n            'yara_count': len(yara_findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': yara_findings,\n        })\n"""
           if old not in s: raise SystemExit('block 4 not found')
           s = s.replace(old, new, 1)
-
           old = """        last_report = ag.get('last_report') or {}\n        findings = last_report.get('findings') or []\n        results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),\n            'finding_count': len(findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': findings[:100],\n            'scan_dirs': ag.get('scan_dirs') or [],\n            'quarantined_count': ag.get('quarantined_count', 0) or 0,\n        })\n"""
           new = """        yara_findings = ag.get('yara_findings') or []\n        if not isinstance(yara_findings, list):\n            yara_findings = []\n        results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': ag.get('files_scanned', 0),\n            'finding_count': len(yara_findings),\n            'yara_count': len(yara_findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': yara_findings,\n            'scan_dirs': ag.get('scan_dirs') or [],\n            'quarantined_count': ag.get('quarantined_count', 0) or 0,\n        })\n"""
           if old not in s: raise SystemExit('block 5 not found')
           s = s.replace(old, new, 1)
-
           old = """            'total_yara': agent.get('total_yara', 0) or 0,\n"""
           new = """            'total_yara': len(agent.get('yara_findings') or []) if isinstance(agent.get('yara_findings') or [], list) else 0,\n"""
           if old not in s: raise SystemExit('block 6 not found')
           s = s.replace(old, new, 1)
           p.write_text(s, encoding='utf-8')
-
           p = Path('templates/yara_scanner.html')
           s = p.read_text(encoding='utf-8')
           old = "<strong style=\"color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';\">' + (ag.finding_count || 0) + '</strong>"
