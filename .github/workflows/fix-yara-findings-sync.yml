@@ -30,7 +30,7 @@ jobs:
           if old not in s: raise SystemExit('block 1 not found')
           s = s.replace(old, new, 1)
           old = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n"""
-          new = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n            yara_finding = dict(f)\n            yara_finding['yara_match'] = True\n            report_yara_findings.append(yara_finding)\n"""
+          new = """        if ttype == 'yara_match' or bool(f.get('yara_match')) or bool(f.get('rule')):\n            report_yara += 1\n            yara_finding = dict(f)\n            yara_finding['yara_match'] = True\n            report_yara_findings.append(yara_finding)\n"""
           if old not in s: raise SystemExit('block 2 not found')
           s = s.replace(old, new, 1)
           old = """        'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n    }\n"""
@@ -47,18 +47,23 @@ jobs:
           s = s.replace(old, new, 1)
           old = """            'total_yara': agent.get('total_yara', 0) or 0,\n"""
           new = """            'total_yara': len(agent.get('yara_findings') or []) if isinstance(agent.get('yara_findings') or [], list) else 0,\n"""
-          if old not in s: raise SystemExit('block 6 not found')
-          s = s.replace(old, new, 1)
+          if old in s:
+              s = s.replace(old, new, 1)
+          # Defender quarantine inventory must not be combined with agent/server counters.
+          s = s.replace("'quarantined_files': _get_scan_counter('quarantined_files', _count_quarantine_files()) + agent_quarantined,", "'quarantined_files': agent_quarantined,")
           p.write_text(s, encoding='utf-8')
-          p = Path('templates/yara_scanner.html')
+
+          # Retain every real YARA match. Ransomware/persistence are classifications,
+          # not a filter deciding whether an otherwise valid YARA match is kept.
+          p = Path('quick_start.py')
           s = p.read_text(encoding='utf-8')
-          old = "<strong style=\"color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';\">' + (ag.finding_count || 0) + '</strong>"
-          new = "<strong style=\"color:' + (ag.yara_count ? '#dc3545' : '#28a745') + ';\">' + (ag.yara_count || 0) + '</strong>"
-          if old not in s: raise SystemExit('template counter not found')
+          old = """                            if any('persistence' in r.lower() or 'ransomware' in r.lower() for r in rule_names):\n                                yara_suspicious.append({'file': file_path, 'rules': rule_names})\n"""
+          new = """                            if rule_names:\n                                yara_suspicious.append({'file': file_path, 'rules': rule_names})\n"""
+          if old not in s: raise SystemExit('quick_start YARA filter not found')
           p.write_text(s.replace(old, new, 1), encoding='utf-8')
 
       - name: Validate Python
-        run: python -m py_compile cloud/cloud_server.py
+        run: python -m py_compile cloud/cloud_server.py quick_start.py quarantine_utils.py
 
       - name: Commit patch through PR branch contents API
         env:
@@ -70,14 +75,14 @@ jobs:
           repo = os.environ['GITHUB_REPOSITORY']
           branch = os.environ['BRANCH']
           token = os.environ['GH_TOKEN']
-          for path in ('cloud/cloud_server.py', 'templates/yara_scanner.html'):
+          for path in ('cloud/cloud_server.py', 'quick_start.py', 'templates/yara_scanner.html'):
               content = open(path, 'rb').read()
               url = f'https://api.github.com/repos/{repo}/contents/{path}'
               req = urllib.request.Request(url + '?ref=' + branch, headers={'Authorization': f'Bearer {token}', 'Accept': 'application/vnd.github+json'})
               with urllib.request.urlopen(req) as r:
                   current = json.load(r)
               payload = json.dumps({
-                  'message': 'Synchronize YARA findings with dashboard counts',
+                  'message': 'Fix authoritative YARA findings and quarantine accounting',
                   'content': base64.b64encode(content).decode(),
                   'sha': current['sha'],
                   'branch': branch,
