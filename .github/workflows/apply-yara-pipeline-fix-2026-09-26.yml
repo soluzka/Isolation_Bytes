@@ -1,0 +1,95 @@
+name: Apply YARA pipeline fix
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch scanner pipeline
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          # cloud_server.py: persist every actual YARA finding and use that
+          # collection as the sole dashboard/API source of truth.
+          p = Path('cloud/cloud_server.py')
+          s = p.read_text(encoding='utf-8')
+
+          old = """    # Count threat types from this report's findings for cumulative counters\n    report_ransomware = 0\n    report_persistence = 0\n    report_yara = 0\n    report_ml = 0\n"""
+          new = """    # Count threat types from this report's findings for cumulative counters.\n    # YARA findings are persisted individually so dashboard/API results and the\n    # cumulative YARA counter always come from the same authoritative list.\n    report_ransomware = 0\n    report_persistence = 0\n    report_yara = 0\n    report_ml = 0\n\n    existing_yara_findings = existing.get('yara_findings') or []\n    if not isinstance(existing_yara_findings, list):\n        existing_yara_findings = []\n    report_yara_findings = []\n"""
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          old = """        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):\n            report_yara += 1\n"""
+          new = """        if ttype == 'yara_match' or bool(f.get('yara_match')) or bool(f.get('rule')):\n            report_yara += 1\n            yara_finding = dict(f)\n            yara_finding['yara_match'] = True\n            report_yara_findings.append(yara_finding)\n"""
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          old = """        'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n"""
+          new = """        'yara_findings': existing_yara_findings + report_yara_findings,\n        'total_yara': len(existing_yara_findings) + len(report_yara_findings),\n        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,\n"""
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          # Dashboard page: never source YARA findings from last_report and never slice.
+          s = re.sub(
+              r"""        # Collect agent scan findings\n        last_report = ag\.get\('last_report'\) or \{\}\n        findings = last_report\.get\('findings'\) or \[\]\n        agent_scan_results\.append\(\{\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': last_report\.get\('files_scanned', ag\.get\('files_scanned', 0\)),\n            'finding_count': len\(findings\),\n            'last_scan': ag\.get\('last_scan', ''\),\n            'findings': findings\[:50\],  # cap at 50 per agent\n        \}\)""",
+              """        yara_findings = ag.get('yara_findings') or []\n        if not isinstance(yara_findings, list):\n            yara_findings = []\n        agent_scan_results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': ag.get('files_scanned', 0),\n            'finding_count': len(yara_findings),\n            'yara_count': len(yara_findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': yara_findings,\n        })""",
+              s,
+              count=1,
+          )
+
+          # API: same authoritative collection, no [:100] truncation.
+          s = re.sub(
+              r"""        last_report = ag\.get\('last_report'\) or \{\}\n        findings = last_report\.get\('findings'\) or \[\]\n        results\.append\(\{\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': last_report\.get\('files_scanned', ag\.get\('files_scanned', 0\)\),\n            'finding_count': len\(findings\),\n            'last_scan': ag\.get\('last_scan', ''\),\n            'findings': findings\[:100\],\n            'scan_dirs': ag\.get\('scan_dirs'\) or \[\],\n            'quarantined_count': ag\.get\('quarantined_count', 0\) or 0,\n        \}\)""",
+              """        yara_findings = ag.get('yara_findings') or []\n        if not isinstance(yara_findings, list):\n            yara_findings = []\n        results.append({\n            'hostname': host,\n            'device_id': device_id,\n            'files_scanned': ag.get('files_scanned', 0),\n            'finding_count': len(yara_findings),\n            'yara_count': len(yara_findings),\n            'last_scan': ag.get('last_scan', ''),\n            'findings': yara_findings,\n            'scan_dirs': ag.get('scan_dirs') or [],\n            'quarantined_count': ag.get('quarantined_count', 0) or 0,\n        })""",
+              s,
+              count=1,
+          )
+
+          # Any remaining dashboard/API YARA total is derived from the same list.
+          s = s.replace("'total_yara': agent.get('total_yara', 0) or 0,", "'total_yara': len(agent.get('yara_findings') or []) if isinstance(agent.get('yara_findings') or [], list) else 0,")
+
+          # Never mix Defender quarantine-directory inventory with the agent's
+          # authoritative cumulative remediation counter.
+          s = s.replace("'quarantined_files': _get_scan_counter('quarantined_files', _count_quarantine_files()) + agent_quarantined,", "'quarantined_files': agent_quarantined,")
+
+          p.write_text(s, encoding='utf-8')
+
+          # quick_start.py: retain every actual YARA rule match. Ransomware and
+          # persistence remain classifications/counters, not an inclusion filter.
+          p = Path('quick_start.py')
+          s = p.read_text(encoding='utf-8')
+          s = s.replace(
+              "if any('persistence' in r.lower() or 'ransomware' in r.lower() for r in rule_names):\n                                yara_suspicious.append({'file': file_path, 'rules': rule_names})",
+              "if rule_names:\n                                yara_suspicious.append({'file': file_path, 'rules': rule_names})",
+              1,
+          )
+          p.write_text(s, encoding='utf-8')
+
+      - name: Validate changes
+        run: |
+          python -m py_compile cloud/cloud_server.py quick_start.py quarantine_utils.py
+          if grep -n "findings\[:50\]\|findings\[:100\]" cloud/cloud_server.py; then exit 1; fi
+
+      - name: Commit source changes and remove one-shot workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-yara-pipeline-fix-2026-09-26.yml
+          git add cloud/cloud_server.py quick_start.py
+          git commit -m "Fix authoritative YARA findings and quarantine accounting"
+          git push origin HEAD:security-v2
