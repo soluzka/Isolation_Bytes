@@ -3298,7 +3298,7 @@ def cloud_yara_scanner():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:50],  # cap at 50 per agent
+            'findings': findings,  # show all findings, not capped
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
 
@@ -3319,7 +3319,7 @@ def cloud_agent_scan_results():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:100],
+            'findings': findings,  # show all findings, not capped
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,
         })
@@ -4059,11 +4059,17 @@ def cloud_break_the_cycle_engage():
         events.clear()
         results.append('Event log cleared.')
 
-        # Reset the conditional startup scan state.
+        # Reset the conditional startup scan state for a fresh generation
         _startup_state['running'] = False
         _startup_state['started_at'] = None
         _startup_state['last_run'] = None
         _startup_state['scanned_files'] = 0
+        _startup_state['quarantined_files'] = 0
+        _startup_state['ml_detections'] = 0
+        _startup_state['ransomware_indicators'] = 0
+        _startup_state['persistence_indicators'] = 0
+        _startup_state['yara_suspicious'] = 0
+        _startup_state['threats_detected'] = 0
         _startup_state['scan_log'] = []
         results.append('Startup scan state reset.')
 
@@ -4385,18 +4391,16 @@ def _run_continuous_scan_all():
                                     rule_names = [getattr(m, 'rule', 'Unknown rule') for m in yara_matches]
                                     highest = get_highest_severity(yara_matches)
 
-                                    # Track ransomware/persistence indicators.
-                                    # Use 'in' rather than 'startswith' because
-                                    # rules like "LockBit_Ransomware" contain
-                                    # the keyword but don't start with it.
+                                    # Track ransomware/persistence indicators for summary stats
+                                    # but retain ALL YARA matches in the results
                                     for rule in rule_names:
                                         rl = rule.lower()
                                         if 'persistence' in rl:
                                             persistence_matches += 1
                                         if 'ransomware' in rl:
                                             ransomware_matches += 1
-                                    if any('persistence' in r.lower() or 'ransomware' in r.lower() for r in rule_names):
-                                        yara_suspicious_list.append({'file': filepath, 'rules': rule_names})
+                                    # Add all YARA matches to suspicious list, not just ransomware/persistence
+                                    yara_suspicious_list.append({'file': filepath, 'rules': rule_names})
 
                                     # Log every match with severity prefix.
                                     for match in yara_matches:
@@ -4478,18 +4482,14 @@ def _run_continuous_scan_all():
                                                 quarantined = ok
                                                 qmsg = msg
                                             elif _quarantine_file:
-                                                # quarantine_file returns None,
-                                                # so verify by checking if the
-                                                # .enc file appeared in the
-                                                # quarantine folder.
-                                                _quarantine_file(
+                                                # quarantine_file returns True only after
+                                                # encrypted artifact is verified AND source is removed
+                                                ok = _quarantine_file(
                                                     filepath,
                                                     reason=f'YARA match (score {score:.0f}, rules: {", ".join(rule_names)})'
                                                 )
-                                                base = os.path.basename(filepath)
-                                                enc_path = os.path.join(quarantine_dir, base + '.enc')
-                                                quarantined = os.path.exists(enc_path)
-                                                qmsg = 'verified via .enc file' if quarantined else 'no .enc file found'
+                                                quarantined = ok  # quarantine_file returns True/False
+                                                qmsg = 'verified by source removal' if quarantined else 'quarantine function returned False'
                                             else:
                                                 qmsg = 'no quarantine function available'
                                         except Exception as qe:
@@ -5304,6 +5304,14 @@ _startup_state = {
     'last_run': None,
     'last_updated': None,
     'duration': None,
+    'scanned_files': 0,
+    'quarantined_files': 0,
+    'ml_detections': 0,
+    'ransomware_indicators': 0,
+    'persistence_indicators': 0,
+    'yara_suspicious': 0,
+    'threats_detected': 0,
+    'scan_log': [],
 }
 
 
@@ -5415,7 +5423,7 @@ def cloud_startup_status():
             if labeled not in agent_dirs:
                 agent_dirs.append(labeled)
         last_report = ag.get('last_report') or {}
-        for f in (last_report.get('findings') or [])[:50]:
+        for f in (last_report.get('findings') or []):
             agent_findings.append(f)
         agent_list.append({
             'device_id': device_id,
@@ -5461,7 +5469,7 @@ def cloud_startup_status():
         'last_updated': _startup_state['last_updated'] or _startup_state['last_run'],
         'duration': _startup_state['duration'],
         'scanned_files': (_startup_state['scanned_files'] if _startup_state['running'] else agent_files_scanned),
-        'quarantined_files': _get_scan_counter('quarantined_files', _count_quarantine_files()) + agent_quarantined,
+        'quarantined_files': agent_quarantined,  # Use agent quarantined count only, not mixed with local _count_quarantine_files()
         'errors': _get_scan_counter('errors', 0) + agent_quarantine_errors,
         'process_events': sum(1 for _ in psutil.process_iter()),
         'ml_detections': _get_scan_counter('ml_detections', 0) + agent_ml,
@@ -5496,6 +5504,12 @@ def cloud_run_startup():
     _startup_state['last_updated'] = _startup_state['started_at']
     _startup_state['duration'] = None
     _startup_state['scanned_files'] = 0
+    _startup_state['quarantined_files'] = 0
+    _startup_state['ml_detections'] = 0
+    _startup_state['ransomware_indicators'] = 0
+    _startup_state['persistence_indicators'] = 0
+    _startup_state['yara_suspicious'] = 0
+    _startup_state['threats_detected'] = 0
     _startup_state['scan_log'] = []
     # Trigger a scan on all connected agents instead of scanning the VPS.
     agents = _all_agents()

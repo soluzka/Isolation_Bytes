@@ -72,7 +72,7 @@ class LocalFindingsAssistant:
         findings = context.get('findings') or context.get('results') or []
         if isinstance(findings, dict):
             findings = list(findings.values())
-        return [item if isinstance(item, dict) else {'value': str(item)} for item in findings[:100]]
+        return [item if isinstance(item, dict) else {'value': str(item)} for item in findings]
 
     @staticmethod
     def _extract_iocs(findings):

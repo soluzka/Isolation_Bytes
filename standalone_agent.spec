@@ -30,7 +30,7 @@ a = Analysis(
                    'hashlib', 'json', 'threading', 'subprocess', 'ctypes',
                    'concurrent.futures', 're', 'argparse', 'plistlib',
                    'yara', 'cryptography.fernet'],
-    hookspath=[],
+    hookspath=['C:/Users/bpier/OneDrive/Documents/antivirus-yara-rules-c/antivirus-yara-rules-c/pyinstaller_hooks', ],
     hooksconfig={},
     runtime_hooks=[],
     excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*',
