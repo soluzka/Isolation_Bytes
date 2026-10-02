@@ -171,7 +171,24 @@ def _agent_online(agent, max_age=90):
         return False
 
 
+def _start_builtin_agent():
+    """Start the server's built-in agent if it can be; True when it is running."""
+    api_key = os.environ.get("CLOUD_API_KEY", "")
+    if not api_key:
+        return False
+    try:
+        from security.local_agent import start_local_agent
+        agent = start_local_agent(
+            server_url=os.environ.get("PUBLIC_URL", "https://isolation-bytes.com"),
+            api_key=api_key,
+        )
+        return bool(agent and getattr(agent, "_running", True))
+    except Exception:
+        return False
+
+
 def _agent_trigger_scan_response():
+    global _STARTUP_RUNNING, _STARTUP_STARTED_AT
     if not _logged_in():
         return jsonify({
             "ok": False,
@@ -199,6 +216,17 @@ def _agent_trigger_scan_response():
 
     online = {d: a for d, a in agents.items() if _agent_online(a)}
     if not online:
+        started = _start_builtin_agent()
+        if started:
+            _STARTUP_RUNNING = True
+            _STARTUP_STARTED_AT = time.strftime("%Y-%m-%d %H:%M:%S")
+            return jsonify({
+                "ok": True, "success": True, "status": "started", "accepted": True,
+                "message_type": "success",
+                "message": "No agent was online, so the built-in agent was started. "
+                           "Click again in a few seconds to queue the scan once it checks in.",
+                "error": None, "agents": 0, "agents_triggered": 0,
+            }), 200
         last_seen = max([str(a.get("last_seen") or "never") for a in agents.values()] or ["never"])
         message = (
             "No agent is online, so nothing can start the scan. The cloud can only "
@@ -211,7 +239,6 @@ def _agent_trigger_scan_response():
             "agents": 0, "agents_triggered": 0,
         }), 503
 
-    global _STARTUP_RUNNING, _STARTUP_STARTED_AT
     _STARTUP_RUNNING = True
     _STARTUP_STARTED_AT = time.strftime("%Y-%m-%d %H:%M:%S")
     now = time.time()
