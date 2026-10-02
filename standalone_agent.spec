@@ -28,13 +28,8 @@ a = Analysis(
     hiddenimports=['psutil', 'requests', 'urllib3', 'socket', 'platform',
                    'hashlib', 'json', 'threading', 'subprocess', 'ctypes',
                    'concurrent.futures', 're', 'argparse', 'plistlib',
-<<<<<<< HEAD
-                   'yara', 'cryptography.fernet'],
-    hookspath=['C:/Users/bpier/OneDrive/Documents/antivirus-yara-rules-c/antivirus-yara-rules-c/pyinstaller_hooks', ],
-=======
                    'yara', 'cryptography.fernet', 'standalone_agent'],
-    hookspath=[],
->>>>>>> origin/privacy-hide-connection-ips
+    hookspath=[]
     hooksconfig={},
     runtime_hooks=[],
     excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*',

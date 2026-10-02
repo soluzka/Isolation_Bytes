@@ -17,6 +17,7 @@ from cloud import cloud_server_original as _legacy
 from cloud._agent_results_unlimited import build_complete_agent_scan_results
 
 app = _legacy.app
+create_cloud_app = getattr(_legacy, 'create_cloud_app', lambda: app)
 _agent_scan_state = {}
 _STARTUP_RUNNING = False
 _STARTUP_STARTED_AT = None

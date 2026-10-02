@@ -2667,6 +2667,22 @@ def cloud_checksums():
 
 
 @cloud_bp.route('/agent/update-check', methods=['GET'])
+def _read_agent_version():
+    """Read the packaged agent version from the repository/build metadata."""
+    candidates = [
+        BASE_DIR / 'version.txt',
+        BASE_DIR.parent / 'version.txt',
+    ]
+    for path in candidates:
+        try:
+            value = path.read_text(encoding='utf-8').strip()
+            if value:
+                return value
+        except Exception:
+            pass
+    return '0.0.0.0'
+
+
 def cloud_agent_update_check():
     """Check if a newer agent EXE is available for download.
 
@@ -2705,7 +2721,8 @@ def cloud_agent_update_check():
 
     return jsonify({
         'update_available': True,
-        'version': '1.8.950.0',
+        # Keep the advertised version tied to the repository build metadata.
+        'version': _read_agent_version(),
         'download_url': f'{request.url_root.rstrip("/")}/download/IsolationBytesAgent.exe',
         'sha256': sha256,
         'size': size,

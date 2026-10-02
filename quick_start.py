@@ -1226,7 +1226,7 @@ def record_conditional_startup_run(scan_data=None, duration=None, error=None):
     last_internal = str(errors[-1]) if errors else None
     conditional_startup_state.update({
         'running': False,
-        'last_run': time.strftime('%Y-%m:%d %H:%M:%S'),
+        'last_run': time.strftime('%Y-%m-%d %H:%M:%S'),
         'duration': round(duration, 2) if duration is not None else None,
         'errors': len(errors),
         'process_events': len(scan_data.get('process_events', [])),
@@ -1266,7 +1266,7 @@ def run_conditional_startup_background():
         _last_progress_report = now
         errors = partial_results.get('errors', [])
         new_counts = {
-            'scanned_files': len(partial_results.get('scanned_files', [])),
+            'scanned_files': partial_results.get('scanned_files_count', 0) or len(partial_results.get('scanned_files') or []),
             'quarantined_files': len(partial_results.get('quarantined_files', [])),
             'errors': len(errors),
             'process_events': len(partial_results.get('process_events', [])),
@@ -1280,7 +1280,7 @@ def run_conditional_startup_background():
                 _add_delta(key, current)
             conditional_startup_state.update({
                 'running': True,
-                'last_updated': time.strftime('%Y-%m:%d %H:%M:%S'),
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S'),
                 'last_error': str(errors[-1]) if errors else None,
             })
             # Expose the latest detail lists so the review UI works

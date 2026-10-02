@@ -201,7 +201,7 @@
         primaryDownload = '/download/IsolationBytes.appinstaller';
     } else if (isAndroid) {
         detectedLabel = 'Android';
-        primaryDownload = '/download/IsolationBytes-v1.8.950.0.apk';
+        primaryDownload = '/download/IsolationBytes-v1.8.953.0.apk';
     } else if (isIOSOrIPad) {
         detectedLabel = 'iOS / iPadOS';
         primaryDownload = null; // PWA — no download
@@ -297,7 +297,7 @@
 
         // 4. Android (non-Chrome browser) — download APK
         if (isAndroid) {
-            window.location.href = '/download/IsolationBytes-v1.8.950.0.apk';
+            window.location.href = '/download/IsolationBytes-v1.8.953.0.apk';
             btn.textContent = 'Downloading APK...';
             return;
         }
@@ -350,8 +350,8 @@
                 { text: 'Agent EXE', url: '/download/IsolationBytesAgent.exe', primary: false },
                 { text: 'Agent Starter (.bat)', url: '/download/start_agent.bat', primary: false },
                 { text: 'Agent Starter (.sh)', url: '/download/start_agent.sh', primary: false },
-                { text: 'Download Installer', url: '/download/install-windows.bat', primary: false },
-                { text: 'PowerShell Script', url: '/download/install-windows.ps1', primary: false },
+                { text: 'Download Installer (.bat)', url: '/download/install-windows.bat', primary: false },
+                { text: 'PowerShell Installer (.ps1)', url: '/download/install-windows.ps1', primary: false },
                 { text: 'AppInstaller', url: '/download/IsolationBytes.appinstaller', primary: false },
                 { text: 'MSIX Package', url: '/download/IsolationBytes.msix', primary: false },
                 { text: 'Certificate', url: '/download/IsolationBytes.cer', primary: false }
@@ -361,7 +361,7 @@
         {
             name: 'Android', icon: '🤖', detected: isAndroid, desc: 'Android 7.0+ (APK + Termux Agent)',
             buttons: [
-                { text: 'Download APK', url: '/download/IsolationBytes-v1.8.950.0.apk', primary: true },
+                { text: 'Download APK', url: '/download/IsolationBytes-v1.8.953.0.apk', primary: true },
                 { text: 'Agent (Termux)', url: '/download/install-android.sh', primary: false },
                 { text: 'Universal Agent Starter (.sh)', url: '/download/start_agent.sh', primary: false },
                 { text: 'Agent EXE (Windows)', url: '/download/IsolationBytesAgent.exe', primary: false },
@@ -373,7 +373,7 @@
             name: 'iOS / iPadOS', icon: '📱', detected: isIOSOrIPad, desc: 'iPhone & iPad (PWA + Profile)',
             buttons: [
                 { text: 'Open in Safari', url: 'https://isolation-bytes.com/', primary: true },
-                { text: 'Download PWA Package', url: '/download/IsolationBytesPWA-v1.8.950.0.zip', primary: false },
+                { text: 'Download PWA Package', url: '/download/IsolationBytesPWA-v1.8.953.0.zip', primary: false },
                 { text: 'Config Profile', url: '/download/install-ios.mobileconfig', primary: false }
             ],
             instructions: 'iOS supports the Isolation Bytes PWA only. Open in Safari and tap Share > Add to Home Screen, or use the Configuration Profile for a fullscreen web app. iOS cannot run the EXE, BAT, or SH agent files; run the agent on a Windows, macOS, Linux, ChromeOS, or Android/Termux system instead.'
@@ -406,7 +406,7 @@
             name: 'ChromeOS', icon: '💻', detected: isChromeOS, desc: 'Chromebook & Chromebox (PWA + Linux Agent)',
             buttons: [
                 { text: 'Install as PWA', url: 'https://isolation-bytes.com/', primary: true },
-                { text: 'Chrome Extension', url: '/download/IsolationBytesChrome-v1.8.950.0.zip', primary: false },
+                { text: 'Chrome Extension', url: '/download/IsolationBytesChrome-v1.8.953.0.zip', primary: false },
                 { text: 'Agent (Linux)', url: '/download/install-chromeos.sh', primary: false },
                 { text: 'Agent Starter (.sh)', url: '/download/start_agent.sh', primary: false },
                 { text: 'Agent EXE (Windows)', url: '/download/IsolationBytesAgent.exe', primary: false },
@@ -417,9 +417,11 @@
         {
             name: 'Any Device (PWA)', icon: '🌐', detected: false, desc: 'Download the PWA package for any platform',
             buttons: [
-                { text: 'Download PWA Package', url: '/download/IsolationBytesPWA-v1.8.950.0.zip', primary: true },
+                { text: 'Download PWA Package', url: '/download/IsolationBytesPWA-v1.8.953.0.zip', primary: true },
                 { text: 'Agent Starter (.sh)', url: '/download/start_agent.sh', primary: false },
                 { text: 'Agent EXE', url: '/download/IsolationBytesAgent.exe', primary: false },
+                { text: 'Universal Installer (.bat)', url: '/download/install-universal.bat', primary: false },
+                { text: 'Universal Installer (.ps1)', url: '/download/install-windows.ps1', primary: false },
                 { text: 'Agent Starter (.bat)', url: '/download/start_agent.bat', primary: false },
                 { text: 'Install from Web', url: 'https://isolation-bytes.com/', primary: false }
             ],

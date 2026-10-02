@@ -24,6 +24,16 @@ jobs:
           set -euo pipefail
           python -m py_compile cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
 
+      - name: Validate unlimited standalone agent
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile standalone_agent.py standalone_agent_unlimited.py
+          ! grep -nE '^(<<<<<<<|=======|>>>>>>>)' standalone_agent.py standalone_agent.spec
+          grep -F "MAX_FILES_PER_SCAN = float('inf')" standalone_agent.py >/dev/null
+          grep -F "MAX_SCAN_CYCLE_SECONDS = float('inf')" standalone_agent.py >/dev/null
+          grep -F "Continuous scanner: each full traversal starts again immediately" standalone_agent.py >/dev/null
+
       - name: Verify unified scan status implementation
         shell: bash
         run: |

@@ -203,14 +203,13 @@ def _is_protected_path(filepath):
         if path == prefix or path.startswith(prefix + '\\'):
             return True
     return False
-SCAN_INTERVAL = 600        # seconds between scans
-<<<<<<< HEAD
-=======
-MAX_FILES_PER_SCAN = 5000    # full-system scan budget; keeps the agent aligned with dashboard scans
-MAX_SCAN_CYCLE_SECONDS = 600 # allow a full-system scan to run for the dashboard scan window
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
->>>>>>> origin/privacy-hide-connection-ips
-AGENT_VERSION = "1.8.950.0"
+SCAN_INTERVAL = 600        # seconds between full traversals
+# Full traversals are intentionally unbounded. These names remain for compatibility
+# with older scanner code, but they no longer impose file-count or time limits.
+MAX_FILES_PER_SCAN = float('inf')
+MAX_SCAN_CYCLE_SECONDS = float('inf')
+MAX_FILE_SIZE = float('inf')
+AGENT_VERSION = "1.8.953.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
     os.environ.get('USERPROFILE', os.path.expanduser('~')),
@@ -259,6 +258,7 @@ class StandaloneAgent:
         self._total_ml = 0
         self._last_report_ok = False
         self._last_report_error = ''
+        self._scan_lock = threading.Lock()
         self._cached_network_devices = []
         self._net_scan_thread = None
         self._headers = {'Content-Type': 'application/json'}
@@ -1973,6 +1973,10 @@ X-GNOME-Autostart-enabled=true
                     break
                 filepath = os.path.join(root, filename)
                 self._files_scanned += 1
+                # Publish periodic progress so the dashboard cannot remain
+                # stuck on an old completed-run value during a traversal.
+                if self._files_scanned % 25 == 0:
+                    self._report([], report_type='scan_progress')
                 try:
                     # Skip files we can't read (locked, permission denied)
                     # BUT don't skip files we blocked ourselves — they're
@@ -2482,27 +2486,37 @@ X-GNOME-Autostart-enabled=true
             return False
 
     def _scan_cycle(self):
-        # Reset per-scan counter so every new generation starts from 0.
-        # Cumulative totals (_total_yara, _total_ransomware, etc.) are
-        # intentionally NOT reset here — they accumulate across cycles.
-        self._files_scanned = 0
-        cycle_start = time.time()
-        all_findings = []
-        for dirpath in self._scan_dirs:
-            if not self._running:
-                break
-            if os.path.isdir(dirpath):
-                try:
-                    findings = self._scan_directory(dirpath, cycle_start=cycle_start)
-                    all_findings.extend(findings)
-                except Exception as e:
-                    print(f"[SCAN] Directory scan error for {dirpath}: {e}")
-                    continue
-        if all_findings:
-            print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
-            self._report(all_findings)
-        else:
-            self._report([], report_type='heartbeat_scan')
+        # Only one full traversal may run at a time. Cloud-triggered scans and
+        # the continuous scanner share this same lock so a second trigger
+        # cannot reset or race the authoritative counters.
+        if not self._scan_lock.acquire(blocking=False):
+            print("[SCAN] Full traversal already running; ignoring duplicate trigger")
+            return
+        try:
+            # Keep the file counter cumulative across full traversals. A new
+            # traversal must not make the dashboard jump backward to zero.
+            # Threat-type totals are also cumulative.
+            cycle_start = time.time()
+            all_findings = []
+            for dirpath in self._scan_dirs:
+                if not self._running:
+                    break
+                if os.path.isdir(dirpath):
+                    try:
+                        findings = self._scan_directory(dirpath, cycle_start=cycle_start)
+                        all_findings.extend(findings)
+                        self._report([], report_type='scan_progress')
+                    except Exception as e:
+                        print(f"[SCAN] Directory scan error for {dirpath}: {e}")
+                        self._report([], report_type='scan_progress')
+                        continue
+            if all_findings:
+                print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
+                self._report(all_findings)
+            else:
+                self._report([], report_type='heartbeat_scan')
+        finally:
+            self._scan_lock.release()
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
@@ -2832,15 +2846,16 @@ del "{bat_path}" 2>nul
                 time.sleep(1)
 
     def _scan_loop(self):
+        # Continuous scanner: each full traversal starts again immediately
+        # after the previous one completes. There is no file-count or
+        # elapsed-time ceiling and no idle/watchdog mode.
         while self._running:
             try:
                 self._scan_cycle()
-            except Exception:
-                pass
-            for _ in range(SCAN_INTERVAL):
-                if not self._running:
-                    break
-                time.sleep(1)
+            except Exception as e:
+                print(f"[SCAN] Continuous traversal error: {e}")
+            if self._running:
+                time.sleep(0.05)
 
     def start(self):
         self._running = True
@@ -2917,7 +2932,7 @@ del "{bat_path}" 2>nul
         print()
         print("Agent is running. Press Ctrl+C to stop.")
         print(f"  Heartbeats: every {HEARTBEAT_INTERVAL}s")
-        print(f"  Scans:      every {SCAN_INTERVAL}s")
+        print(f"  Scans:      continuous full traversals (no file/time cap); {SCAN_INTERVAL}s legacy interval")
         print(f"  Updates:    every {UPDATE_CHECK_INTERVAL}s")
         print(f"  Directories: {', '.join(self._scan_dirs)}")
         print()
