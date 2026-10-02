@@ -3,7 +3,6 @@ import os
 
 _BASE = SPECPATH
 
-# Collect the security package and YARA rules as datas
 _security_datas = []
 _security_dir = os.path.join(_BASE, 'security')
 if os.path.isdir(_security_dir):
@@ -14,7 +13,7 @@ if os.path.isdir(_security_dir):
             _security_datas.append((src, rel))
 
 a = Analysis(
-    [os.path.join(_BASE, 'standalone_agent.py')],
+    [os.path.join(_BASE, 'standalone_agent_unlimited.py')],
     pathex=[_BASE],
     binaries=[],
     datas=_security_datas + [
@@ -29,8 +28,13 @@ a = Analysis(
     hiddenimports=['psutil', 'requests', 'urllib3', 'socket', 'platform',
                    'hashlib', 'json', 'threading', 'subprocess', 'ctypes',
                    'concurrent.futures', 're', 'argparse', 'plistlib',
+<<<<<<< HEAD
                    'yara', 'cryptography.fernet'],
     hookspath=['C:/Users/bpier/OneDrive/Documents/antivirus-yara-rules-c/antivirus-yara-rules-c/pyinstaller_hooks', ],
+=======
+                   'yara', 'cryptography.fernet', 'standalone_agent'],
+    hookspath=[],
+>>>>>>> origin/privacy-hide-connection-ips
     hooksconfig={},
     runtime_hooks=[],
     excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*',

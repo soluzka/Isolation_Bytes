@@ -1,10 +1,4 @@
-"""Minimal Windows agent for the cloud antivirus split.
-
-This runs on the customer PC. It sends heartbeats and scan reports to the
-cloud server and receives commands (scan, update, quarantine) from it.
-
-Full integration with the local security modules is still needed.
-"""
+"""Minimal Windows security agent with dynamic process/network scoring."""
 import hashlib
 import ipaddress
 import json
@@ -19,33 +13,48 @@ import requests
 from dotenv import load_dotenv
 
 try:
+    import psutil
+except Exception:
+    psutil = None
+
+try:
     import scan_utils
-except Exception as e:
+except Exception as exc:
     scan_utils = None
-    print(f'Could not load scan_utils: {e}')
+    print(f'Could not load scan_utils: {exc}')
 
 try:
     from security.yara_scanner import scan_file_with_yara
-except Exception as e:
+except Exception as exc:
     scan_file_with_yara = None
-    print(f'Could not load yara_scanner: {e}')
+    print(f'Could not load yara_scanner: {exc}')
+
+try:
+    from threat_level_engine import threat_level_engine
+except Exception as exc:
+    threat_level_engine = None
+    print(f'Could not load threat_level_engine: {exc}')
+
+try:
+    from network_blocking import block_ip, should_auto_block_ip
+except Exception as exc:
+    block_ip = None
+    should_auto_block_ip = None
+    print(f'Could not load network_blocking: {exc}')
 
 try:
     import quarantine_utils
-except Exception as e:
+except Exception as exc:
     quarantine_utils = None
-    print(f'Could not load quarantine_utils: {e}')
-
+    print(f'Could not load quarantine_utils: {exc}')
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / '.env')
-
 CLOUD_URL = os.environ.get('CLOUD_URL', 'http://localhost:5002').rstrip('/')
 CLOUD_API_KEY = os.environ.get('CLOUD_API_KEY', '').strip()
 
 
 def _get_device_id():
-    # Use the same machine ID from the launcher's license if it exists.
     default = os.path.join(os.environ.get('ProgramData', r'C:\\ProgramData'), 'AntivirusServer')
     runtime_dir = os.path.expandvars(os.environ.get('ANTIVIRUS_RUNTIME_DIR', default))
     lic_path = Path(runtime_dir) / 'credentials.lic'
@@ -65,20 +74,14 @@ DEVICE_ID = _get_device_id()
 
 def _post(endpoint, payload):
     try:
-        return requests.post(
-            f'{CLOUD_URL}{endpoint}',
-            json=payload,
-            headers={'X-Api-Key': CLOUD_API_KEY},
-            timeout=15,
-            verify=True
-        )
-    except Exception as e:
-        print(f'Cloud connection failed: {e}')
+        return requests.post(f'{CLOUD_URL}{endpoint}', json=payload,
+                             headers={'X-Api-Key': CLOUD_API_KEY}, timeout=15, verify=True)
+    except Exception as exc:
+        print(f'Cloud connection failed: {exc}')
         return None
 
 
 def register():
-    print(f'Registering agent {DEVICE_ID} with cloud')
     _post('/agent/register', {'device_id': DEVICE_ID, 'hostname': platform.node()})
 
 
@@ -96,62 +99,112 @@ def report_scan(target, findings):
     _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'scan', 'target': target, 'findings': findings})
 
 
+def _safe_yara_severity(matches):
+    if not matches:
+        return 0.0
+    if isinstance(matches, str):
+        return 0.85
+    severities = []
+    for match in matches if isinstance(matches, (list, tuple, set)) else [matches]:
+        if isinstance(match, dict):
+            value = match.get('severity', 0)
+        else:
+            value = getattr(match, 'severity', 0)
+        if isinstance(value, str):
+            severities.append({'critical': 1.0, 'high': 0.85, 'medium': 0.55, 'low': 0.25}.get(value.lower(), 0.0))
+        else:
+            try:
+                severities.append(float(value))
+            except (TypeError, ValueError):
+                severities.append(0.85)
+    return max(severities, default=0.0)
+
+
+def _scan_ml_confidence(path, yara_matches=None):
+    """Best-effort ML confidence. A missing/unfitted model is neutral, not malicious."""
+    try:
+        from ml_security import security_ml
+        if not os.path.isfile(path) or not security_ml._is_fitted():
+            return 0.0
+        features = security_ml.get_features({'path': path, 'filename': os.path.basename(path)})
+        _, scores = security_ml.predict(features)
+        if scores is None:
+            return 0.0
+        score = float(scores[0])
+        # IsolationForest decision_function is positive for inliers and negative
+        # for anomalies. Map a useful anomaly range to 0..1.
+        return max(0.0, min(1.0, 0.5 - score))
+    except Exception:
+        return 0.0
+
+
+def _assess(entity_id, *, yara_matches=None, ml_confidence=0.0, behavioral_signals=None):
+    if threat_level_engine is None:
+        return {'entity_id': entity_id, 'score': 0.0, 'level': 'clean'}
+    return threat_level_engine.update(
+        entity_id,
+        yara_severity=_safe_yara_severity(yara_matches),
+        ml_confidence=ml_confidence,
+        behavioral_signals=behavioral_signals or {},
+    )
+
+
 def scan_target(target):
     findings = []
     if not target or not os.path.exists(target):
         return [{'error': f'target not found: {target}'}]
     if os.path.isfile(target):
+        yara_matches = None
         if scan_utils is not None:
-            success, found, msg = scan_utils.scan_file_for_viruses(target)
-            findings.append({'path': target, 'success': success, 'malware_found': found, 'message': msg})
+            try:
+                success, found, msg = scan_utils.scan_file_for_viruses(target)
+                findings.append({'path': target, 'success': success, 'malware_found': found, 'message': msg})
+            except Exception as exc:
+                findings.append({'path': target, 'scan_error': str(exc)})
         if scan_file_with_yara is not None:
             try:
                 yara_matches = scan_file_with_yara(target)
                 if yara_matches:
                     findings.append({'path': target, 'yara_matches': yara_matches})
-            except Exception as e:
-                findings.append({'path': target, 'yara_error': str(e)})
-    elif os.path.isdir(target):
-        if scan_utils is not None:
-            try:
-                results = scan_utils.scan_all_folders_with_yara([target])
-                findings.extend([{'message': r} for r in results])
-            except Exception as e:
-                findings.append({'error': str(e)})
+            except Exception as exc:
+                findings.append({'path': target, 'yara_error': str(exc)})
+        assessment = _assess(target, yara_matches=yara_matches,
+                             ml_confidence=_scan_ml_confidence(target, yara_matches),
+                             behavioral_signals={'file_in_user_path': os.path.expandvars(r'%USERPROFILE%').lower() in target.lower()})
+        findings.append({'path': target, 'threat_assessment': assessment})
+    elif os.path.isdir(target) and scan_utils is not None:
+        try:
+            results = scan_utils.scan_all_folders_with_yara([target])
+            findings.extend([{'message': r} for r in results])
+        except Exception as exc:
+            findings.append({'error': str(exc)})
     return findings
 
 
 def handle_command(cmd):
     target = cmd.get('target', '')
     if cmd.get('type') == 'scan':
-        print(f'Cloud requested scan of: {target}')
         findings = scan_target(target)
         report_scan(target, findings)
     elif cmd.get('type') == 'quarantine':
-        print(f'Cloud requested quarantine of: {target}')
         if quarantine_utils is not None and target and os.path.exists(target):
             try:
                 quarantine_utils.quarantine_file(target, reason='cloud quarantine command')
                 _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'quarantine', 'path': target, 'ok': True})
-            except Exception as e:
-                _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'quarantine', 'path': target, 'error': str(e)})
-        else:
-            _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'quarantine', 'path': target, 'error': 'target not found or quarantine not loaded'})
+            except Exception as exc:
+                _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'quarantine', 'path': target, 'error': str(exc)})
     else:
         print(f'Unknown command: {cmd}')
 
 
 def _cloud_event_callback(event):
-    try:
-        _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'event', 'event': event})
-    except Exception as e:
-        print(f'Failed to send event: {e}')
+    _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'event', 'event': event})
     if quarantine_utils is not None and event.get('type') == 'malware_found' and event.get('exe'):
         try:
             quarantine_utils.quarantine_file(event['exe'], reason='malware found in running process')
             _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'quarantine', 'path': event['exe']})
-        except Exception as e:
-            print(f'Quarantine error: {e}')
+        except Exception as exc:
+            print(f'Quarantine error: {exc}')
 
 
 def _load_blocklists():
@@ -167,122 +220,165 @@ def _load_blocklists():
     return blocked, c2_ports
 
 
-def network_monitor_loop():
+def _terminate_process(pid):
+    if psutil is None or not pid:
+        return False, 'process information unavailable'
     try:
-        import psutil
-        blocked_ips, c2_ports = _load_blocklists()
-    except Exception as e:
-        print(f'Could not load network blocklists: {e}')
+        proc = psutil.Process(int(pid))
+        if proc.pid == os.getpid():
+            return False, 'refusing to terminate the monitoring agent itself'
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            proc.kill()
+        return True, 'terminated'
+    except (psutil.NoSuchProcess, psutil.AccessDenied, ValueError) as exc:
+        return False, str(exc)
+
+
+def network_monitor_loop():
+    if psutil is None:
+        print('psutil is unavailable; network monitoring disabled')
         return
+    blocked_ips, c2_ports = _load_blocklists()
     while True:
         try:
             for conn in psutil.net_connections(kind='inet'):
                 if not conn.raddr:
                     continue
-                remote = conn.raddr
-                ip = remote.ip
-                port = remote.port
-                reason = None
-                if ip in blocked_ips:
-                    reason = f'blocked ip {ip}'
-                elif port in c2_ports:
-                    reason = f'c2 port {port}'
-                if reason:
-                    try:
-                        ipaddress.ip_address(ip)
-                    except ValueError:
-                        continue
+                ip = getattr(conn.raddr, 'ip', None)
+                port = getattr(conn.raddr, 'port', None)
+                if not ip:
+                    continue
+                try:
+                    ipaddress.ip_address(ip)
+                except ValueError:
+                    continue
+
+                port_signal = port in c2_ports
+                known_blocked = ip in blocked_ips
+                assessment = _assess(
+                    f'network:{ip}',
+                    behavioral_signals={
+                        'known_blocked_ip': 1.0 if known_blocked else 0.0,
+                        'known_c2_port': 0.75 if port_signal else 0.0,
+                        'repeated_remote_connection': 0.25 if conn.status == 'ESTABLISHED' else 0.0,
+                    },
+                )
+
+                confirmed_c2 = known_blocked or (port_signal and assessment.get('score', 0.0) >= 0.85)
+                if confirmed_c2 and block_ip is not None and should_auto_block_ip is not None:
+                    if should_auto_block_ip(ip, threat_level=assessment, confirmed_c2=True):
+                        ok, msg = block_ip(ip, reason=f"confirmed C2; threat={assessment.get('score', 0):.2f}")
+                        if ok:
+                            blocked_ips.add(ip)
+
+                if known_blocked or port_signal or assessment.get('level') in ('high', 'critical'):
                     _post('/agent/report', {
-                        'device_id': DEVICE_ID,
-                        'type': 'network_alert',
-                        'remote_ip': ip,
-                        'remote_port': port,
-                        'pid': conn.pid,
-                        'reason': reason
+                        'device_id': DEVICE_ID, 'type': 'network_alert',
+                        'remote_ip': ip, 'remote_port': port, 'pid': conn.pid,
+                        'reason': 'confirmed C2' if confirmed_c2 else ('blocked ip' if known_blocked else f'c2 port {port}'),
+                        'threat_assessment': assessment,
                     })
-        except Exception as e:
-            print(f'Network monitor error: {e}')
+        except Exception as exc:
+            print(f'Network monitor error: {exc}')
         time.sleep(30)
 
 
 def process_scan_loop():
     try:
         from security import process_monitor
-        if scan_utils is not None:
-            def scan_func(path):
-                return scan_utils.scan_file_for_viruses(path)
-        else:
-            def scan_func(path):
-                return (True, False, 'scan_utils not loaded')
+        def scan_func(path):
+            if scan_utils is None:
+                return True, False, 'scan_utils not loaded'
+            return scan_utils.scan_file_for_viruses(path)
+
         while True:
             try:
                 process_monitor.scan_running_processes(
                     scan_func=scan_func,
-                    terminate_on_malware=True,
+                    terminate_on_malware=False,
                     block_connections=False,
-                    event_callback=_cloud_event_callback
+                    event_callback=_cloud_event_callback,
                 )
-            except Exception as e:
-                print(f'Process scan error: {e}')
+
+                # Independently inspect running processes so the threat engine
+                # can combine repeated behavior with file/YARA evidence.
+                if psutil is not None:
+                    for proc in psutil.process_iter(['pid', 'name', 'exe']):
+                        try:
+                            pid = proc.info['pid']
+                            exe = proc.info.get('exe')
+                            if not exe or not os.path.isfile(exe):
+                                continue
+                            yara_matches = None
+                            if scan_file_with_yara is not None:
+                                try:
+                                    yara_matches = scan_file_with_yara(exe)
+                                except Exception:
+                                    yara_matches = None
+                            ml_confidence = _scan_ml_confidence(exe, yara_matches)
+                            assessment = _assess(
+                                f'process:{pid}', yara_matches=yara_matches,
+                                ml_confidence=ml_confidence,
+                                behavioral_signals={'running_executable': 0.25},
+                            )
+                            if assessment.get('level') == 'critical' or (assessment.get('level') == 'high' and yara_matches):
+                                ok, reason = _terminate_process(pid)
+                                _post('/agent/report', {
+                                    'device_id': DEVICE_ID, 'type': 'process_response',
+                                    'pid': pid, 'exe': exe, 'terminated': ok,
+                                    'reason': reason, 'threat_assessment': assessment,
+                                })
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+            except Exception as exc:
+                print(f'Process scan error: {exc}')
             time.sleep(60)
-    except Exception as e:
-        print(f'Could not start process monitor: {e}')
+    except Exception as exc:
+        print(f'Could not start process monitor: {exc}')
 
 
 def _post_voice_result(job_id, status, result):
-    """Report a voice command result back to the cloud queue."""
-    _post('/api/voice/agent/result', {
-        'device_id': DEVICE_ID,
-        'job_id': job_id,
-        'status': status,
-        'result': result,
-    })
+    _post('/api/voice/agent/result', {'device_id': DEVICE_ID, 'job_id': job_id, 'status': status, 'result': result})
 
 
 def _execute_voice_command(cmd):
-    """Execute a queued voice command on this PC and post back the result."""
     job_id = cmd.get('job_id')
     raw = cmd.get('command', '')
     apply_fix = bool(cmd.get('apply_fix', False))
     try:
         import voice_assistant
-        intent = voice_assistant.parse_intent(raw)
-        result = voice_assistant.run_command(intent, raw_command=raw, apply_fix=apply_fix)
+        result = voice_assistant.run_command(voice_assistant.parse_intent(raw), raw_command=raw, apply_fix=apply_fix)
         _post_voice_result(job_id, 'completed', result)
     except ImportError:
-        _post_voice_result(job_id, 'error',
-                           'This agent build does not support voice commands yet.')
-    except Exception as e:
-        _post_voice_result(job_id, 'error', str(e))
+        _post_voice_result(job_id, 'error', 'This agent build does not support voice commands yet.')
+    except Exception as exc:
+        _post_voice_result(job_id, 'error', str(exc))
 
 
 def voice_command_loop():
-    """Poll the cloud for queued voice commands and execute them locally."""
     while True:
         try:
             resp = _post('/api/voice/agent/pending', {'device_id': DEVICE_ID})
             if resp is not None and resp.status_code == 200:
                 for cmd in resp.json().get('commands', []):
-                    threading.Thread(target=_execute_voice_command,
-                                     args=(cmd,), daemon=True).start()
+                    threading.Thread(target=_execute_voice_command, args=(cmd,), daemon=True).start()
         except Exception:
             pass
         time.sleep(5)
 
 
 def monitoring_snapshot():
+    if psutil is None:
+        return
     try:
-        import psutil
         procs = [{'pid': p.pid, 'name': p.name()} for p in psutil.process_iter(['pid', 'name'])]
         conns = [{'laddr': c.laddr, 'raddr': c.raddr, 'status': c.status} for c in psutil.net_connections()]
-        _post('/agent/report', {
-            'device_id': DEVICE_ID,
-            'type': 'monitoring',
-            'processes': procs[:50],
-            'connections': conns[:50]
-        })
-    except Exception as e:
-        print(f'Monitoring error: {e}')
+        _post('/agent/report', {'device_id': DEVICE_ID, 'type': 'monitoring', 'processes': procs[:50], 'connections': conns[:50]})
+    except Exception as exc:
+        print(f'Monitoring error: {exc}')
 
 
 def main():
@@ -294,12 +390,11 @@ def main():
     threading.Thread(target=voice_command_loop, daemon=True).start()
     while True:
         try:
-            commands = send_heartbeat()
-            for cmd in commands:
+            for cmd in send_heartbeat():
                 handle_command(cmd)
             monitoring_snapshot()
-        except Exception as e:
-            print(f'Agent error: {e}')
+        except Exception as exc:
+            print(f'Agent error: {exc}')
         time.sleep(30)
 
 

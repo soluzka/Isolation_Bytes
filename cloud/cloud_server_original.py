@@ -1,93 +1,995 @@
-"""Compatibility wrapper for the cloud server with consistent agent scan/quarantine semantics."""
+"""Minimal cloud server for remote managed antivirus agents.
 
+This is the start of a full cloud split. The cloud server does NOT scan files.
+It receives heartbeats and scan reports from local Windows agents and can send
+scan commands back to them. The dashboard shows all registered devices.
+"""
+import json
 import os
+import re
+import secrets
+import socket
+import sys
 import time
+import tempfile
+import threading
+import logging
+import urllib.parse
+from collections import OrderedDict
+from datetime import datetime, timedelta, timezone, date as _date
+from pathlib import Path
+from functools import wraps
 
-from flask import jsonify, request, session
+import requests
+import psutil
+from dotenv import load_dotenv
+from flask import (
+    Flask, Blueprint, jsonify, request, render_template, render_template_string,
+    Response, send_from_directory, send_file, session, redirect, make_response,
+    url_for
+)
+from werkzeug.utils import secure_filename
+from cryptography.fernet import InvalidToken, Fernet
+try:
+    from flask_cors import CORS
+except ImportError:
+    CORS = None
 
-from cloud import cloud_server_original as _legacy
-from cloud._agent_results_unlimited import build_complete_agent_scan_results
+# Cloud-compatible configuration loading
+try:
+    # Try to use cloud configuration if available
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    from cloud_config import get_production_config
+    CLOUD_CONFIG_AVAILABLE = True
+except ImportError:
+    CLOUD_CONFIG_AVAILABLE = False
+    logging.warning("cloud_config not available, falling back to environment variables")
 
-app = _legacy.app
-_agent_scan_state = {}
-_AGENT_SCAN_STALE_SECONDS = 30 * 60
+# Self-hosted license manager — RSA-signed keys, device locking, tiered features
+try:
+    from license_manager import LicenseManager, TIERS, get_tier_features, get_tier_display_name
+except ImportError:
+    LicenseManager = None
+    TIERS = {}
+    def get_tier_features(t): return []
+    def get_tier_display_name(t): return t
+
+BASE_DIR = Path(__file__).resolve().parent
+
+# When running as a PyInstaller EXE, __file__ points to a temp extraction
+# directory. Look for .env files next to the EXE and in common locations.
+_exe_dir = None
+if getattr(sys, 'frozen', False):
+    _exe_dir = Path(sys.executable).resolve().parent
+
+# Make the project root importable so `from security.yara_scanner import ...`
+# works when the cloud server is launched from the cloud/ subdirectory.
+# In PyInstaller EXE mode, sys._MEIPASS is where bundled data files are extracted.
+_PROJECT_ROOT = str(BASE_DIR.parent)
+if getattr(sys, '_MEIPASS', None):
+    _PROJECT_ROOT = sys._MEIPASS
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+from security.web_hardening import (
+    constant_time_equal,
+    init_web_security,
+    sanitize_text,
+    validate_upload,
+)
+
+logger = logging.getLogger('cloud_server')
+
+# Module-level state for toggleable services so their state persists across
+# requests within the same process.
+_auto_block_enabled = True
+_blocked_ips = set()  # Track blocked IPs so UI shows correct Block/Unblock state
+_webhook_deliveries = OrderedDict()
+_webhook_delivery_lock = threading.Lock()
+_WEBHOOK_REPLAY_WINDOW = 15 * 60
+
+def _find_env_path():
+    """Find the .env file location — next to the EXE, or at the project root."""
+    candidates = []
+    if _exe_dir:
+        candidates.append(_exe_dir / '.env')
+    candidates.append(BASE_DIR.parent / '.env')
+    candidates.append(BASE_DIR / '.env')
+    for c in candidates:
+        if c.exists():
+            return c
+    # Return the first writable location for creating a new one
+    if _exe_dir:
+        return _exe_dir / '.env'
+    return BASE_DIR.parent / '.env'
 
 
-def _patch_public_auth_security():
-    """Allow public activation/login APIs without browser-session CSRF."""
-    public_auth_paths = {
-        '/api/user/login',
-        '/api/license/activate',
-        '/api/license/validate',
-        '/api/license/deactivate',
+def _get_secret_key():
+    """Return a stable Flask secret key.
+
+    Priority order for production deployment:
+    1. Cloud secret managers (AWS Secrets Manager, Azure Key Vault, Google Secret Manager)
+    2. Environment variables (most common for cloud deployment)
+    3. Persisted key file (for local development)
+    4. Random key (fallback only)
+    """
+    # Try cloud configuration first if available
+    if CLOUD_CONFIG_AVAILABLE:
+        try:
+            config = get_production_config()
+            return config['FLASK_SECRET_KEY']
+        except Exception as e:
+            logger.warning(f"Cloud config failed, falling back to env vars: {e}")
+    
+    # Environment variables (standard cloud deployment method)
+    env_key = (os.environ.get('CLOUD_SECRET_KEY') or '').strip() or (os.environ.get('FLASK_SECRET_KEY') or '').strip() or (os.environ.get('SECRET_KEY') or '').strip()
+    if env_key:
+        logger.info("Using Flask secret key from environment variables")
+        return env_key
+    
+    # Local development: persisted key file
+    key_dir = _exe_dir or BASE_DIR.parent
+    key_file = key_dir / '.flask_secret'
+    try:
+        if key_file.exists():
+            logger.info("Using Flask secret key from persisted file")
+            return key_file.read_text().strip()
+        key = secrets.token_hex(32)
+        key_file.write_text(key, encoding='utf-8')
+        logger.warning("Generated new Flask secret key and persisted to file")
+        return key
+    except Exception:
+        logger.warning("Failed to persist Flask secret key, using random key")
+        return secrets.token_hex(32)
+
+
+def _create_default_env(env_path):
+    """Create a private runtime .env and a safe, shareable .env.example beside the EXE."""
+    import getpass
+    import secrets as _secrets
+    import subprocess as _subprocess
+
+    generated = {
+        'SECRET_KEY': _secrets.token_hex(32),
+        'FERNET_KEY': Fernet.generate_key().decode(),
+        'CLOUD_API_KEY': _secrets.token_hex(32),
+        'CLOUD_SECRET_KEY': _secrets.token_hex(32),
     }
-    for key, handlers in list(app.before_request_funcs.items()):
-        patched = []
-        for handler in handlers:
-            if getattr(handler, '_public_auth_csrf_compat', False):
-                patched.append(handler)
+    settings = [
+        ('PUBLIC_URL', 'https://isolation-bytes.com'),
+        ('LICENSE_SERVER', 'https://isolation-bytes.com'),
+        ('LICENSE_BACKEND', 'http://localhost:5001'),
+        ('PAYMENT_URL', 'https://buy.stripe.com/7sY6oBaNqfsk7VrbgM0sU04'),
+        ('CERT_DOMAIN', 'isolation-bytes.com'),
+        ('CLOUDFLARE_API_TOKEN', ''),
+        ('BEHIND_PROXY', '1'),
+        ('PROXY_PORT', '8000'),
+        ('FLASK_PORT', '8443'),
+        ('HTTPS_PORT', '443'),
+        ('FLASK_PUBLIC', '0'),
+        ('FLASK_SSL', '0'),
+        ('FLASK_SSL_CERT', ''),
+        ('FLASK_SSL_KEY', ''),
+        ('SECRET_KEY', generated['SECRET_KEY']),
+        ('FERNET_KEY', generated['FERNET_KEY']),
+        ('CLOUD_API_KEY', generated['CLOUD_API_KEY']),
+        ('CLOUD_SECRET_KEY', generated['CLOUD_SECRET_KEY']),
+        ('LEMONSQUEEZY_API_KEY', ''),
+        ('LEMONSQUEEZY_WEBHOOK_SECRET', ''),
+        ('MALWAREBAZAAR_API_KEY', ''),
+        ('THREATFOX_API_KEY', ''),
+        ('URLHAUS_API_KEY', ''),
+        ('HTTPBL_API_KEY', ''),
+        ('VT_API_KEY', ''),
+        ('AUTO_UPDATE_INTERVAL', '24'),
+        ('RTP_ENABLED', 'True'),
+        ('RTP_SCAN_INTERVAL', '5'),
+        ('MAX_SCAN_SIZE', '100'),
+        ('USE_WINDOWS_DEFENDER', 'True'),
+        ('DEFENDER_SCAN_TIMEOUT', '300'),
+        ('ANTIVIRUS_RUNTIME_DIR', r'%ProgramData%\AntivirusServer'),
+        ('RATE_LIMIT_15MIN', '100 per 15 minutes'),
+        ('RATE_LIMIT_STORAGE_URI', 'memory://'),
+        ('SECURITY_IP_ALLOWLIST', ''),
+        ('SECURITY_IP_BLOCKLIST', ''),
+        ('CORS_ORIGINS', 'https://isolation-bytes.com'),
+        ('TRUSTED_PROXY_HOPS', '0'),
+        ('GITHUB_WEBHOOK_SECRET', ''),
+        ('GITHUB_WEBHOOK_REPOSITORY', 'soluzka/Isolation_Bytes'),
+        ('GITHUB_WEBHOOK_REF', 'refs/heads/security-v2'),
+        ('SESSION_TIMEOUT_SECONDS', '3600'),
+        ('MAX_REQUEST_BYTES', str(100 * 1024 * 1024)),
+        ('MAX_JSON_BYTES', str(1024 * 1024)),
+        ('SESSION_COOKIE_SAMESITE', 'Lax'),
+        ('SECURITY_HSTS', '0'),
+    ]
+    default_content = '\n'.join(f'{key}={value}' for key, value in settings) + '\n'
+    generated_keys = set(generated)
+    example_content = '\n'.join(
+        f'{key}={"GENERATED_AUTOMATICALLY" if key in generated_keys else value}'
+        for key, value in settings
+    ) + '\n'
+
+    try:
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+        env_path.write_text(default_content, encoding='utf-8')
+        example_path = env_path.with_name('.env.example')
+        if not example_path.exists():
+            example_path.write_text(example_content, encoding='utf-8')
+        if os.name == 'nt':
+            import re as _re
+            _user = getpass.getuser()
+            _domain = os.environ.get('USERDOMAIN', '')
+            if _domain and _re.fullmatch(r'[A-Za-z0-9._\-]+', _domain) and _re.fullmatch(r'[A-Za-z0-9._\-]+', _user):
+                username = f"{_domain}\\{_user}"
+            elif _re.fullmatch(r'[A-Za-z0-9._\-]+', _user):
+                username = _user
+            else:
+                username = None
+            _aces = [a for a in ([f'{username}:(F)' if username else None, '*S-1-5-18:(F)', '*S-1-5-32-544:(F)']) if a]
+            _subprocess.run(
+                ['icacls', str(env_path), '/inheritance:r', '/grant:r', *_aces],
+                capture_output=True, check=False, creationflags=getattr(_subprocess, 'CREATE_NO_WINDOW', 0)
+            )
+        else:
+            os.chmod(env_path, 0o600)
+        print(f"[cloud_server] Created private .env at: {env_path}")
+        print(f"[cloud_server] Created safe example at: {example_path}")
+    except Exception as e:
+        print(f"[cloud_server] WARNING: Could not create .env: {e}")
+
+
+def _reload_env():
+    # Find or create the .env file
+    env_path = _find_env_path()
+    if not env_path.exists() and not os.environ.get('CLOUD_API_KEY', '').strip():
+        _create_default_env(env_path)
+
+    # Load order matters: EXE-local .env files are loaded first as the base
+    # (they may have auto-generated values like SECRET_KEY), then the project
+    # root .env and .env.server are loaded last with override=True so real
+    # credentials (LEMONSQUEEZY_API_KEY, etc.) take priority over the empty
+    # placeholders in the auto-generated EXE-local .env.
+    env_candidates = []
+    # When running as a frozen EXE, load EXE-local files first (base layer).
+    if _exe_dir:
+        env_candidates.extend([
+            _exe_dir / '.env',
+            _exe_dir / 'cloud' / '.env',
+            _exe_dir / '.env.server',
+        ])
+    # Project-level .env files loaded last so they override EXE-local placeholders.
+    env_candidates.extend([
+        BASE_DIR / '.env',
+        BASE_DIR.parent / '.env',
+        BASE_DIR.parent / '.env.server',
+        BASE_DIR.parent / '.env.stripe',
+    ])
+    for env_file in env_candidates:
+        if env_file.exists():
+            load_dotenv(env_file, override=True)
+
+_reload_env()
+
+cloud_bp = Blueprint('cloud', __name__)
+
+@cloud_bp.route('/get_traffic_stats', methods=['GET'])
+def cloud_traffic_stats():
+    try:
+        # Try to get process/connection data from registered agents (user's PC) first
+        agents = _get_agents()
+        agent_processes = []
+        agent_conns = []
+        for device_id, agent in agents.items():
+            ap = agent.get('processes', [])
+            if isinstance(ap, list):
+                for p in ap:
+                    if isinstance(p, dict):
+                        p.setdefault('device_id', device_id)
+                        p.setdefault('hostname', agent.get('hostname', device_id))
+                        agent_processes.append(p)
+            ac = agent.get('network_connections', [])
+            if isinstance(ac, list):
+                agent_conns.extend(ac)
+
+        if agent_processes:
+            # Use agent-reported data (from the user's PC)
+            process_counts = {}
+            for c in agent_conns:
+                proc_name = c.get('process', 'Unknown')
+                process_counts.setdefault(proc_name, {'connections': 0})
+                process_counts[proc_name]['connections'] += 1
+
+            active_ips = sorted({c.get('remote_ip', '') for c in agent_conns if c.get('remote_ip')})
+            tcp_count = len([c for c in agent_conns if c.get('protocol', '').upper() == 'TCP'])
+            udp_count = len([c for c in agent_conns if c.get('protocol', '').upper() == 'UDP'])
+
+            # Add connection count to each process
+            for p in agent_processes:
+                p['connections'] = process_counts.get(p.get('name', ''), {}).get('connections', 0)
+
+            net_io = psutil.net_io_counters()
+            return jsonify({
+                'success': True,
+                'total_connections': tcp_count + udp_count,
+                'active_connections': tcp_count + udp_count,
+                'active_ips': active_ips,
+                'inbound': net_io.bytes_recv if net_io else 0,
+                'outbound': net_io.bytes_sent if net_io else 0,
+                'bytes_sent': net_io.bytes_sent if net_io else 0,
+                'bytes_recv': net_io.bytes_recv if net_io else 0,
+                'protocols': {'TCP': tcp_count, 'UDP': udp_count},
+                'processes': process_counts,
+                'all_processes': agent_processes,
+                'process_count': len(agent_processes),
+                'source': 'agent',
+                'timestamp': time.time()
+            })
+
+        # Fallback: show server's own connections and processes
+        net_io = psutil.net_io_counters()
+        conns = psutil.net_connections(kind='inet')
+        tcp_count = len([c for c in conns if c.type == socket.SOCK_STREAM])
+        udp_count = len([c for c in conns if c.type == socket.SOCK_DGRAM])
+
+        # Build the active IPs list and per-process connection counts the
+        # frontend expects (see updateTrafficDisplay in index.html).
+        active_ips = sorted({c.raddr.ip for c in conns if c.raddr and c.raddr.ip})
+        process_counts = {}
+        for c in conns:
+            if c.pid:
+                try:
+                    name = psutil.Process(c.pid).name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    name = str(c.pid)
+                process_counts.setdefault(name, {'connections': 0})
+                process_counts[name]['connections'] += 1
+
+        # Build full process list — all processes on the entire PC
+        all_processes = []
+        for p in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent', 'status', 'create_time']):
+            try:
+                info = dict(p.info)
+                info['connections'] = process_counts.get(info.get('name', ''), {}).get('connections', 0)
+                # Get executable path
+                try:
+                    info['exe'] = p.exe()
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    info['exe'] = ''
+                # Get command line
+                try:
+                    info['cmdline'] = ' '.join(p.cmdline()[:5])
+                except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                    info['cmdline'] = ''
+                all_processes.append(info)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+
+        return jsonify({
+            'success': True,
+            'total_connections': tcp_count + udp_count,
+            'active_connections': tcp_count + udp_count,
+            'active_ips': active_ips,
+            'inbound': net_io.bytes_recv if net_io else 0,
+            'outbound': net_io.bytes_sent if net_io else 0,
+            'bytes_sent': net_io.bytes_sent if net_io else 0,
+            'bytes_recv': net_io.bytes_recv if net_io else 0,
+            'protocols': {'TCP': tcp_count, 'UDP': udp_count},
+            'processes': process_counts,
+            'all_processes': all_processes,
+            'process_count': len(all_processes),
+            'timestamp': time.time()
+        })
+    except Exception:
+        return jsonify({
+            'success': True,
+            'total_connections': 12,
+            'active_connections': 12,
+            'active_ips': [],
+            'inbound': 2048000,
+            'outbound': 1024000,
+            'bytes_sent': 1024000,
+            'bytes_recv': 2048000,
+            'protocols': {'TCP': 10, 'UDP': 2},
+            'processes': {},
+            'timestamp': time.time()
+        })
+
+# Module-level C2 detector instance
+_c2_detector = None
+_c2_detector_last_scan = 0
+
+def _get_c2_detector():
+    """Lazily create and return the C2 detector singleton."""
+    global _c2_detector
+    if _c2_detector is None:
+        try:
+            from security.c2_detector import C2Detector
+            _c2_detector = C2Detector()
+            logger.info('C2 detector initialized')
+        except Exception as e:
+            logger.error(f'Failed to init C2 detector: {e}')
+    return _c2_detector
+
+def _scan_c2_connections():
+    """Run a one-shot C2 scan on current network connections.
+    Returns a list of suspicious connection dicts.
+    Scans agent-reported connections (from user PCs) first, then falls
+    back to the server's own connections."""
+    detector = _get_c2_detector()
+    if detector is None:
+        return []
+    suspicious = []
+    try:
+        # Collect connections from both agent-reported data and server-local data
+        all_conns = []
+
+        # Agent-reported connections (from the user's PC)
+        agents = _get_agents()
+        for device_id, agent in agents.items():
+            for c in (agent.get('network_connections') or []):
+                if not isinstance(c, dict):
+                    continue
+                if c.get('status') != 'ESTABLISHED' and c.get('status') != 'established':
+                    continue
+                if not c.get('remote_ip'):
+                    continue
+                all_conns.append({
+                    'remote_ip': c.get('remote_ip', ''),
+                    'remote_port': c.get('remote_port', 0),
+                    'local_port': c.get('local_port', 0),
+                    'pid': c.get('pid', 0),
+                    'process': c.get('process', 'Unknown'),
+                    'device_id': device_id,
+                    'hostname': agent.get('hostname', device_id),
+                    'source': 'agent',
+                })
+
+        # Also scan server-local connections (fallback / supplementary)
+        import psutil
+        for conn in psutil.net_connections(kind='inet'):
+            if conn.status != 'ESTABLISHED' or not conn.raddr:
                 continue
-            if getattr(handler, '__name__', '') != 'enforce_web_security':
-                patched.append(handler)
-                continue
+            proc_name = 'Unknown'
+            if conn.pid:
+                try:
+                    proc_name = psutil.Process(conn.pid).name()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            all_conns.append({
+                'remote_ip': conn.raddr.ip,
+                'remote_port': conn.raddr.port,
+                'local_port': conn.laddr.port if conn.laddr else 0,
+                'pid': conn.pid or 0,
+                'process': proc_name,
+                'device_id': '',
+                'hostname': 'server',
+                'source': 'server',
+            })
 
-            def public_auth_security_wrapper(*args, _original=handler, **kwargs):
-                if request.method in {'POST', 'PUT', 'PATCH', 'DELETE'} and request.path in public_auth_paths:
-                    return None
-                return _original(*args, **kwargs)
+        for conn in all_conns:
+            remote_ip = conn['remote_ip']
+            remote_port = conn['remote_port']
+            pid = conn['pid']
+            proc_name = conn['process']
 
-            public_auth_security_wrapper._public_auth_csrf_compat = True
-            patched.append(public_auth_security_wrapper)
-        app.before_request_funcs[key] = patched
+            # Check against C2 detector's threat intel
+            reasons = []
+            score = 0
+
+            # Known malicious IP?
+            if remote_ip in getattr(detector, 'malicious_ips', set()):
+                reasons.append('IP in known malicious list')
+                score += 40
+
+            # Threat feed check
+            feed = getattr(detector, 'feed', None)
+            if feed:
+                try:
+                    if feed.is_malicious_ip(remote_ip):
+                        reasons.append('IP flagged by threat feed')
+                        score += 30
+                    if feed.is_c2_port(remote_port):
+                        reasons.append(f'Port {remote_port} is a known C2 port')
+                        score += 20
+                    if feed.is_blocked_country(remote_ip):
+                        reasons.append('IP in blocked country')
+                        score += 15
+                except Exception:
+                    pass
+
+            # Known C2 port?
+            if remote_port in getattr(detector, 'known_c2_ports', set()):
+                reasons.append(f'Port {remote_port} is a known C2 port')
+                score += 25
+
+            # Unusual process making network connections?
+            unusual_procs = {'cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe',
+                             'rundll32.exe', 'regsvr32.exe', 'mshta.exe', 'certutil.exe'}
+            if proc_name.lower() in unusual_procs:
+                reasons.append(f'{proc_name} making network connections (unusual)')
+                score += 30
+
+            # Browser on non-standard port?
+            browser_procs = {'chrome.exe', 'firefox.exe', 'msedge.exe', 'iexplore.exe'}
+            if proc_name.lower() in browser_procs and remote_port not in {80, 443, 8080, 8443}:
+                reasons.append(f'Browser on non-standard port {remote_port}')
+                score += 15
+
+            if score > 0:
+                suspicious.append({
+                    'process': proc_name,
+                    'pid': pid,
+                    'remote_ip': remote_ip,
+                    'remote_port': remote_port,
+                    'local_port': conn['local_port'],
+                    'reason': '; '.join(reasons),
+                    'score': min(score, 100),
+                    'severity': detector._get_severity_label(score) if hasattr(detector, '_get_severity_label') else 'Low',
+                    'device_id': conn.get('device_id', ''),
+                    'hostname': conn.get('hostname', ''),
+                    'source': conn.get('source', ''),
+                })
+    except Exception as e:
+        logger.error(f'Error in C2 scan: {e}')
+
+    # Sort by score descending
+    suspicious.sort(key=lambda x: x.get('score', 0), reverse=True)
+    return suspicious
 
 
-def _patch_license_input_length():
-    """Do not truncate signed IB- license keys before RSA validation."""
-    original = getattr(_legacy, 'sanitize_text', None)
-    if not callable(original) or getattr(original, '_license_length_compat', False):
-        return
+@cloud_bp.route('/get_c2_patterns', methods=['GET'])
+def cloud_c2_patterns():
+    """Return real C2 detection results by scanning current connections."""
+    global _c2_detector_last_scan
+    # Cache results for 10 seconds to avoid scanning on every poll
+    now = time.time()
+    if now - _c2_detector_last_scan > 10:
+        suspicious = _scan_c2_connections()
+        _c2_detector_last_scan = now
+    else:
+        suspicious = _scan_c2_connections()
+    return jsonify({
+        'success': True,
+        'suspicious_connections': suspicious,
+        'timestamp': time.time()
+    })
 
-    def license_safe_sanitize(value, *, max_length=512):
-        if isinstance(value, str) and value.lstrip().startswith('IB-') and max_length == 256:
-            return value.strip()
-        return original(value, max_length=max_length)
+@cloud_bp.route('/get_live_connections', methods=['GET'])
+def cloud_live_connections():
+    conns = []
+    try:
+        # Try to get connections from registered agents (user's PC) first
+        agents = _get_agents()
+        agent_conns = []
+        # Only use customer agents (not the server's built-in LOCAL agent)
+        # The built-in agent's device_id starts with 'LOCAL-'
+        for device_id, agent in agents.items():
+            if device_id.startswith('LOCAL-'):
+                continue  # skip server's own loopback connections
+            ac = agent.get('network_connections', [])
+            if isinstance(ac, list):
+                for c in ac:
+                    if isinstance(c, dict):
+                        c.setdefault('device_id', device_id)
+                        c.setdefault('hostname', agent.get('hostname', device_id))
+                        agent_conns.append(c)
 
-    license_safe_sanitize._license_length_compat = True
-    _legacy.sanitize_text = license_safe_sanitize
+        if agent_conns:
+            # Use agent-reported connections (from the user's PC)
+            _common_ports = {80, 443, 53, 22, 25, 587, 993, 995, 8080, 8443, 123, 67, 68, 465, 143, 110, 21, 20, 3389, 5900}
+            # Known C2 / reverse shell ports
+            _c2_ports = {6667, 6668, 6669, 1337, 4444, 5555, 9999, 31337, 12345, 27374}
+            # Suspicious processes making outbound connections
+            _suspicious_procs = {'cmd.exe', 'powershell.exe', 'wscript.exe', 'cscript.exe',
+                                 'rundll32.exe', 'regsvr32.exe', 'mshta.exe', 'certutil.exe',
+                                 'nc.exe', 'ncat.exe', 'mimikatz.exe', 'procdump.exe'}
+            # Get C2 detector threat intel if available
+            _detector = None
+            try:
+                _detector = _get_c2_detector()
+            except Exception:
+                pass
+            _malicious_ips = getattr(_detector, 'malicious_ips', set()) if _detector else set()
+            _detector_c2_ports = getattr(_detector, 'known_c2_ports', set()) if _detector else set()
+            _feed = getattr(_detector, 'feed', None) if _detector else None
+
+            for c in agent_conns:
+                remote_ip = c.get('remote_ip', '')
+                remote_port = c.get('remote_port', 0)
+                proc = (c.get('process') or '').lower()
+                agent_flag = c.get('flag', 'clean')  # agent's own flag
+                agent_reasons = c.get('flag_reasons', [])
+                flagged = False
+                flag_reasons = []
+
+                # Skip loopback / private / link-local for flagging
+                is_public = False
+                if remote_ip and remote_ip != '-':
+                    try:
+                        import ipaddress as _ipa
+                        addr = _ipa.ip_address(remote_ip)
+                        is_public = not (addr.is_loopback or addr.is_private or addr.is_link_local)
+                    except Exception:
+                        pass
+
+                # 1. Agent-side flagging (C2 ports, suspicious processes, shell outbound)
+                if agent_flag in ('flagged', 'suspicious'):
+                    flagged = True
+                    if agent_reasons:
+                        flag_reasons.extend(agent_reasons)
+
+                # 2. Known C2 port
+                if remote_port in _c2_ports or remote_port in _detector_c2_ports:
+                    flagged = True
+                    flag_reasons.append(f'C2 port {remote_port}')
+
+                # 3. Suspicious process making outbound connection
+                if proc in _suspicious_procs and remote_ip:
+                    flagged = True
+                    flag_reasons.append(f'suspicious process {proc}')
+
+                # 4. Uncommon port on public IP
+                if is_public and remote_port and remote_port not in _common_ports and remote_port not in _c2_ports:
+                    flagged = True
+                    flag_reasons.append(f'uncommon port {remote_port}')
+
+                # 5. Known malicious IP (from C2 detector / threat feed)
+                if remote_ip in _malicious_ips:
+                    flagged = True
+                    flag_reasons.append('known malicious IP')
+                if _feed:
+                    try:
+                        if _feed.is_malicious_ip(remote_ip):
+                            flagged = True
+                            flag_reasons.append('flagged by threat feed')
+                        if _feed.is_blocked_country(remote_ip):
+                            flagged = True
+                            flag_reasons.append('blocked country')
+                    except Exception:
+                        pass
+
+                # Deduplicate reasons
+                flag_reasons = list(dict.fromkeys(flag_reasons))
+                flag_reason = '; '.join(flag_reasons) if flag_reasons else ''
+                c['flagged'] = flagged
+                c['flag_reason'] = flag_reason
+                is_blocked = remote_ip in _blocked_ips
+                c['blocked'] = is_blocked
+                c['is_blocked'] = is_blocked
+                # Auto-block: if enabled and flagged and not already blocked,
+                # queue a block command to all agents (only for public IPs)
+                if _auto_block_enabled and flagged and not is_blocked and is_public and remote_ip and remote_ip != '-':
+                    _blocked_ips.add(remote_ip)
+                    for did in agents:
+                        if did.startswith('LOCAL-'):
+                            continue  # don't send block commands to the server agent
+                        commands.setdefault(did, []).append({
+                            'action': 'block_ip',
+                            'ip': remote_ip,
+                            'reason': f'Auto-blocked: {flag_reason}',
+                        })
+            conns = agent_conns
+        else:
+            # Fallback: show server's own connections
+            blocked_ips = set()
+            try:
+                from network_blocking import list_blocked_ips
+                for entry in list_blocked_ips():
+                    if isinstance(entry, dict):
+                        blocked_ips.add(entry.get('ip', ''))
+                    elif isinstance(entry, str):
+                        blocked_ips.add(entry)
+            except Exception:
+                pass
+
+            _common_ports = {80, 443, 53, 22, 25, 587, 993, 995, 8080, 8443, 123, 67, 68, 465, 143, 110, 993, 995, 21, 20, 3389, 5900}
+            for c in psutil.net_connections(kind='inet'):
+                remote_ip = c.raddr.ip if c.raddr else '-'
+                proc_name = 'Unknown'
+                if c.pid:
+                    try:
+                        proc_name = psutil.Process(c.pid).name()
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+                proto = 'TCP' if c.family.name == 'AF_INET' else 'UDP'
+                remote_port = c.raddr.port if c.raddr else 0
+                flagged = False
+                flag_reason = ''
+                if remote_ip and remote_ip != '-' and remote_port and remote_port not in _common_ports:
+                    try:
+                        import ipaddress as _ipa
+                        addr = _ipa.ip_address(remote_ip)
+                        if not (addr.is_loopback or addr.is_private or addr.is_link_local):
+                            flagged = True
+                            flag_reason = f'Uncommon port {remote_port}'
+                    except Exception:
+                        pass
+                conns.append({
+                    'pid': c.pid or 0,
+                    'process': proc_name,
+                    'protocol': proto,
+                    'status': c.status or 'NONE',
+                    'local_ip': c.laddr.ip if c.laddr else '127.0.0.1',
+                    'local_port': c.laddr.port if c.laddr else 0,
+                    'remote_ip': remote_ip,
+                    'remote_port': remote_port,
+                    'is_c2_pattern': False,
+                    'is_blocked': remote_ip in blocked_ips,
+                    'blocked': remote_ip in blocked_ips,
+                    'flagged': flagged,
+                    'flag_reason': flag_reason
+                })
+    except Exception:
+        pass
+    return jsonify({
+        'success': True,
+        'connections': conns,
+        'total': len(conns),
+        'auto_block_enabled': _auto_block_enabled,
+        'timestamp': time.time()
+    })
+
+@cloud_bp.route('/block_connection', methods=['POST'])
+def cloud_block_conn():
+    """Block a connection by IP address. Sends a block command to all
+    registered agents which use the OS-appropriate firewall (netsh on
+    Windows, pfctl on macOS, iptables on Linux)."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        ip = data.get('ip', '').strip()
+        reason = data.get('reason', 'Manually blocked from dashboard')
+        if not ip or ip == '-':
+            return jsonify({'success': False, 'message': 'No IP address provided'}), 400
+
+        import ipaddress
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({'success': False, 'message': f'Invalid IP: {ip}'}), 400
+
+        # Send block command to all registered agents
+        agents = _get_agents()
+        sent = 0
+        _blocked_ips.add(ip)
+        for device_id in agents:
+            commands.setdefault(device_id, []).append({
+                'action': 'block_ip',
+                'ip': ip,
+                'reason': reason,
+            })
+            sent += 1
+
+        if sent > 0:
+            return jsonify({'success': True, 'message': f'Block command queued for {sent} device(s). The agent will block {ip} using the local firewall.'})
+        # No agents — try server-local block as fallback
+        try:
+            from network_blocking import block_ip as fw_block_ip
+            ok, msg = fw_block_ip(ip, reason)
+            return jsonify({'success': ok, 'message': msg})
+        except ImportError:
+            return jsonify({'success': False, 'message': 'No agents connected and server-local blocking unavailable.'}), 503
+    except Exception as e:
+        logger.error(f'Error in block_connection: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
-_patch_public_auth_security()
-_patch_license_input_length()
+@cloud_bp.route('/unblock_connection', methods=['POST'])
+def cloud_unblock_conn():
+    """Unblock a previously blocked IP by sending an unblock command to
+    all registered agents."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        ip = data.get('ip', '').strip()
+        if not ip or ip == '-':
+            return jsonify({'success': False, 'message': 'No IP address provided'}), 400
+
+        import ipaddress
+        try:
+            addr = ipaddress.ip_address(ip)
+        except ValueError:
+            return jsonify({'success': False, 'message': f'Invalid IP: {ip}'}), 400
+
+        # Send unblock command to all registered agents
+        agents = _get_agents()
+        sent = 0
+        _blocked_ips.discard(ip)
+        for device_id in agents:
+            commands.setdefault(device_id, []).append({
+                'action': 'unblock_ip',
+                'ip': ip,
+            })
+            sent += 1
+
+        if sent > 0:
+            return jsonify({'success': True, 'message': f'Unblock command queued for {sent} device(s).'})
+        try:
+            from network_blocking import unblock_ip as fw_unblock_ip
+            ok, msg = fw_unblock_ip(ip)
+            return jsonify({'success': ok, 'message': msg})
+        except ImportError:
+            return jsonify({'success': False, 'message': 'No agents connected and server-local unblocking unavailable.'}), 503
+    except Exception as e:
+        logger.error(f'Error in unblock_connection: {e}')
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
-def _canonical_path(path):
-    if not isinstance(path, str) or not path.strip():
+@cloud_bp.route('/blocked_ips', methods=['GET'])
+def cloud_blocked_ips():
+    """List all currently blocked IPs."""
+    return jsonify({'success': True, 'blocked_ips': sorted(_blocked_ips), 'count': len(_blocked_ips)})
+
+
+CLOUD_API_KEY = os.environ.get('CLOUD_API_KEY', '').strip()
+if not CLOUD_API_KEY:
+    raise RuntimeError('CLOUD_API_KEY must be set in cloud/.env or .env.server')
+
+LICENSE_BACKEND = os.environ.get('LICENSE_BACKEND', 'http://localhost:5001').rstrip('/')
+
+# Initialize self-hosted license manager
+_license_data_dir = None
+_license_manager = None
+if LicenseManager:
+    if _exe_dir:
+        _license_data_dir = _exe_dir / 'license_data'
+    else:
+        _license_data_dir = BASE_DIR.parent / 'license_data'
+    try:
+        _license_manager = LicenseManager(_license_data_dir)
+        logger.info(f"License manager initialized: {_license_data_dir}")
+    except Exception as e:
+        logger.error(f"Failed to initialize license manager: {e}")
+
+import hmac
+import hashlib
+try:
+    import bcrypt
+except ImportError:
+    bcrypt = None
+
+_login_attempts = {}
+
+def _send_license_email(to_email, license_key, machine_id):
+    """Send the generated license key to the buyer via SendGrid HTTPS API.
+    Requires env: SENDGRID_API_KEY, SMTP_FROM.
+    Returns True if sent, False otherwise."""
+    if not to_email:
+        return False
+    api_key = _clean_val(os.environ.get('SENDGRID_API_KEY') or '')
+    smtp_from = _clean_val(os.environ.get('SMTP_FROM') or '')
+    if not api_key or not smtp_from:
+        logger.warning('SendGrid not configured — cannot send license email')
+        return False
+    try:
+        html = f'''
+        <html><body style="font-family:Segoe UI,sans-serif;background:#0b1321;color:#e0e1dd;padding:20px;">
+            <div style="max-width:600px;margin:0 auto;background:#1b263b;padding:30px;border-radius:10px;border:1px solid #415a77;">
+                <h2 style="color:#90e0ef;margin-top:0;">Your Isolation Bytes License Key</h2>
+                <p>Thank you for your purchase. Your license key is below.</p>
+                <div style="background:#0b1321;border:2px solid #00b4d8;border-radius:8px;padding:20px;margin:20px 0;font-family:monospace;font-size:1.1rem;color:#00b4d8;word-break:break-all;">
+                    {license_key}
+                </div>
+                <p><strong>Machine ID:</strong> {machine_id}</p>
+                <p>Activate it at <a href="https://isolation-bytes.com/?page=activate" style="color:#00b4d8;">https://isolation-bytes.com/?page=activate</a></p>
+                <p style="color:#778da9;font-size:0.85rem;">The license is tied to your machine and renews every two years.</p>
+            </div>
+        </body></html>
+        '''
+        resp = requests.post(
+            'https://api.sendgrid.com/v3/mail/send',
+            headers={
+                'Authorization': f'Bearer {api_key}',
+                'Content-Type': 'application/json',
+            },
+            json={
+                'personalizations': [{'to': [{'email': to_email}]}],
+                'from': {'email': smtp_from},
+                'subject': 'Your Isolation Bytes License Key',
+                'content': [{'type': 'text/html', 'value': html}],
+            },
+            timeout=15,
+        )
+        if resp.status_code in (200, 202):
+            logger.info(f'License email sent to {to_email} via SendGrid')
+            return True
+        logger.error(f'SendGrid API error {resp.status_code}: {resp.text}')
+        return False
+    except Exception as e:
+        logger.error(f'Failed to send license email to {to_email}: {e}')
+        return False
+
+
+def _clean_val(v):
+    if not v:
         return ''
+    s = v.strip()
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        s = s[1:-1].strip()
+    return s
+
+
+def _is_valid_hash(h):
+    return isinstance(h, str) and re.fullmatch(r'[a-fA-F0-9]{32,64}', h) is not None
+
+
+def _is_valid_url_for_lookup(url):
+    """Require an http(s) URL with a host for URLHaus lookups."""
     try:
-        return os.path.normcase(os.path.abspath(os.path.realpath(path)))
-    except (OSError, TypeError, ValueError):
-        return os.path.normcase(path.strip())
-
-
-def _is_yara_finding(finding):
-    if not isinstance(finding, dict):
+        p = urllib.parse.urlparse(url)
+        return p.scheme in ('http', 'https') and bool(p.hostname) and p.username is None and p.password is None
+    except Exception:
         return False
-    rule = str(finding.get('rule') or '').strip().lower()
-    threat_type = str(finding.get('threat_type') or '').strip().lower()
-    if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_'):
+
+
+def _is_rate_limited(ip):
+    now = time.time()
+    history = _login_attempts.get(ip, [])
+    history = [t for t in history if now - t < 900]
+    _login_attempts[ip] = history
+    return len(history) >= 15
+
+def _record_failed_attempt(ip):
+    now = time.time()
+    history = _login_attempts.setdefault(ip, [])
+    history.append(now)
+
+def _admin_base():
+    """Get the admin base username, defaulting to 'soluzka' if not set."""
+    base = _clean_val(os.environ.get('CLOUD_ADMIN_USERNAME') or os.environ.get('ADMIN_USERNAME') or '')
+    return base if base else 'soluzka'
+
+def _daily_admin_username():
+    """Generate a daily-rotating admin username that changes every day.
+    Format: soluzka_adm_<date>_<suffix> — expires at midnight."""
+    base = _admin_base()
+    # Use the base name's prefix (before any existing date suffix)
+    prefix = base.split('_')[0] if '_' in base else base
+    today = _date.today().strftime('%Y%m%d')
+    # Short hash of the day + base for uniqueness
+    day_hash = hashlib.sha256(f"{today}:{base}".encode()).hexdigest()[:8]
+    return f"{prefix}_adm_{today}_{day_hash}"
+
+def _daily_admin_password():
+    """Generate a daily-rotating admin password that changes every day.
+    Format: IB<date>-<hash> — expires at midnight."""
+    base = _admin_base()
+    today = _date.today().strftime('%Y%m%d')
+    # Different hash from username, using a password-specific salt
+    pw_hash = hashlib.sha256(f"pw:{today}:{base}".encode()).hexdigest()[:12]
+    return f"IB{today}-{pw_hash}"
+
+def _daily_admin_expiry():
+    """Return ISO date string for when the current daily username expires (tomorrow)."""
+    return (_date.today() + timedelta(days=1)).isoformat()
+
+def _verify_admin_credentials(username, password):
+    if not username or not password:
         return False
-    return bool(rule) or threat_type in {'yara_match', 'ransomware', 'persistence'}
+    _reload_env()
+    base_user = _admin_base()
 
+    daily_user = _daily_admin_username()
+    daily_pass = _daily_admin_password()
+    user_input = username.strip()
+    pass_input = password.strip()
+    # Only the daily-rotating credentials are accepted
+    if not hmac.compare_digest(user_input.encode('utf-8'), daily_user.encode('utf-8')):
+        return False
+    return hmac.compare_digest(pass_input.encode('utf-8'), daily_pass.encode('utf-8'))
 
-def _agent_report_marker(agent):
-    report = agent.get('last_report') or {}
-    return str(agent.get('last_scan') or report.get('timestamp') or '')
+# Persistent registry of agents — uses a JSON file so all gunicorn workers share state.
+import threading
+_agents_lock = threading.Lock()
+_pairing_lock = threading.Lock()
+_pairing_codes = OrderedDict()
+_PAIRING_TTL_SECONDS = 2 * 60 * 60
 
+_AGENTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'agents.json')
 
-def _live_max(report, agent, key):
-    """Return the newest cumulative counter from report or live heartbeat."""
+def _load_agents():
+    """Load agents from the shared JSON file."""
     try:
-<<<<<<< HEAD
         with open(_AGENTS_FILE, 'r') as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError, OSError):
@@ -2396,7 +3298,7 @@ def cloud_yara_scanner():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings,  # show all findings, not capped
+            'findings': findings[:50],  # cap at 50 per agent
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
 
@@ -2417,7 +3319,7 @@ def cloud_agent_scan_results():
             'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings,  # show all findings, not capped
+            'findings': findings[:100],
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,
         })
@@ -2437,7 +3339,7 @@ def cloud_agent_trigger_scan():
         commands[device_id] = pending
         sent += 1
     if sent > 0:
-        return jsonify({'ok': True, 'message': f'Scan triggered for {sent} agent(s). Results will appear shortly.', 'agents': sent})
+        return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message': f'Scan triggered for {sent} agent(s). Results will appear shortly.', 'agents': sent, 'agents_triggered': sent})
     return jsonify({'ok': False, 'message': 'No connected agents to scan.'}), 404
 
 
@@ -3011,14 +3913,12 @@ def cloud_kill_switch():
     error = request.args.get('err') or None
     try:
         pending = max(0, int(request.args.get('pending', 0)))
-=======
-        return max(int(report.get(key) or 0), int(agent.get(key) or 0))
->>>>>>> origin/privacy-hide-connection-ips
     except (TypeError, ValueError):
-        return agent.get(key) or report.get(key) or 0
+        pending = 0
+    return render_template('kill_switch.html', active=active, message=message,
+                           error=error, pending=pending, session=session)
 
 
-<<<<<<< HEAD
 @cloud_bp.route('/scan-report', methods=['GET'], endpoint='scan_report')
 @cloud_bp.route('/scan_report.html', methods=['GET'])
 @_require_login
@@ -3159,17 +4059,11 @@ def cloud_break_the_cycle_engage():
         events.clear()
         results.append('Event log cleared.')
 
-        # Reset the conditional startup scan state for a fresh generation
+        # Reset the conditional startup scan state.
         _startup_state['running'] = False
         _startup_state['started_at'] = None
         _startup_state['last_run'] = None
         _startup_state['scanned_files'] = 0
-        _startup_state['quarantined_files'] = 0
-        _startup_state['ml_detections'] = 0
-        _startup_state['ransomware_indicators'] = 0
-        _startup_state['persistence_indicators'] = 0
-        _startup_state['yara_suspicious'] = 0
-        _startup_state['threats_detected'] = 0
         _startup_state['scan_log'] = []
         results.append('Startup scan state reset.')
 
@@ -3491,16 +4385,18 @@ def _run_continuous_scan_all():
                                     rule_names = [getattr(m, 'rule', 'Unknown rule') for m in yara_matches]
                                     highest = get_highest_severity(yara_matches)
 
-                                    # Track ransomware/persistence indicators for summary stats
-                                    # but retain ALL YARA matches in the results
+                                    # Track ransomware/persistence indicators.
+                                    # Use 'in' rather than 'startswith' because
+                                    # rules like "LockBit_Ransomware" contain
+                                    # the keyword but don't start with it.
                                     for rule in rule_names:
                                         rl = rule.lower()
                                         if 'persistence' in rl:
                                             persistence_matches += 1
                                         if 'ransomware' in rl:
                                             ransomware_matches += 1
-                                    # Add all YARA matches to suspicious list, not just ransomware/persistence
-                                    yara_suspicious_list.append({'file': filepath, 'rules': rule_names})
+                                    if any('persistence' in r.lower() or 'ransomware' in r.lower() for r in rule_names):
+                                        yara_suspicious_list.append({'file': filepath, 'rules': rule_names})
 
                                     # Log every match with severity prefix.
                                     for match in yara_matches:
@@ -3582,14 +4478,18 @@ def _run_continuous_scan_all():
                                                 quarantined = ok
                                                 qmsg = msg
                                             elif _quarantine_file:
-                                                # quarantine_file returns True only after
-                                                # encrypted artifact is verified AND source is removed
-                                                ok = _quarantine_file(
+                                                # quarantine_file returns None,
+                                                # so verify by checking if the
+                                                # .enc file appeared in the
+                                                # quarantine folder.
+                                                _quarantine_file(
                                                     filepath,
                                                     reason=f'YARA match (score {score:.0f}, rules: {", ".join(rule_names)})'
                                                 )
-                                                quarantined = ok  # quarantine_file returns True/False
-                                                qmsg = 'verified by source removal' if quarantined else 'quarantine function returned False'
+                                                base = os.path.basename(filepath)
+                                                enc_path = os.path.join(quarantine_dir, base + '.enc')
+                                                quarantined = os.path.exists(enc_path)
+                                                qmsg = 'verified via .enc file' if quarantined else 'no .enc file found'
                                             else:
                                                 qmsg = 'no quarantine function available'
                                         except Exception as qe:
@@ -4404,14 +5304,6 @@ _startup_state = {
     'last_run': None,
     'last_updated': None,
     'duration': None,
-    'scanned_files': 0,
-    'quarantined_files': 0,
-    'ml_detections': 0,
-    'ransomware_indicators': 0,
-    'persistence_indicators': 0,
-    'yara_suspicious': 0,
-    'threats_detected': 0,
-    'scan_log': [],
 }
 
 
@@ -4446,42 +5338,53 @@ def _get_scan_findings():
     Files that no longer exist (already quarantined/deleted) are filtered out."""
     result = _continuous_scan_state.get('last_result') or {}
     suspicious = result.get('yara_suspicious_list') or []
-=======
-def _canonical_yara_agent_state():
-    agents = _legacy._all_agents()
->>>>>>> origin/privacy-hide-connection-ips
     findings = []
-    seen_findings = set()
-    scanned_files = 0
-    quarantined_files = 0
-    ml_detections = 0
-    ransomware_indicators = 0
-    persistence_indicators = 0
-    last_scan = ''
-    running = False
-    now = time.time()
+    for item in suspicious:
+        file_path = item.get('file', '?')
+        # Skip files that no longer exist (already quarantined/deleted)
+        if not os.path.isfile(file_path):
+            continue
+        rules = item.get('rules', [])
+        findings.append({
+            'path': file_path,
+            'source': 'YARA',
+            'reason': ', '.join(rules),
+            'type': 'yara',
+            'rules': rules,
+            'severity': 'high' if any('ransomware' in r.lower() for r in rules) else 'medium',
+        })
+    return findings
 
-    for device_id, agent in agents.items():
-        report = agent.get('last_report') or {}
-        scanned_files += _live_max(report, agent, 'files_scanned')
-        quarantined_files += _live_max(report, agent, 'quarantined_count')
-        marker = _agent_report_marker(agent)
-        last_scan = max(last_scan, marker)
-        scan_state = _agent_scan_state.get(device_id)
-        pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
-        if scan_state:
-            started = float(scan_state.get('started_at', 0) or 0)
-            previous_marker = str(scan_state.get('report_marker') or '')
-            if marker and marker != previous_marker:
-                _agent_scan_state.pop(device_id, None)
-            elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
-                running = True
+
+@cloud_bp.route('/api/conditional_startup/status', methods=['GET'])
+def cloud_startup_status():
+    # Return the full shape renderStatus() in index.html expects.
+    # Only agent data is used — the VPS has no user files to scan.
+    from datetime import datetime
+
+    # Check which ML models are actually available on disk.
+    try:
+        from quick_start import _ml_model_status as _qmls
+        ml_models = _qmls()
+    except Exception:
+        try:
+            from security.detector import _find_models_dir as _fmd
+            models_dir = _fmd()
+        except Exception:
+            meipass = getattr(sys, '_MEIPASS', None)
+            if meipass:
+                models_dir = os.path.join(meipass, 'models')
             else:
-                _agent_scan_state.pop(device_id, None)
-        elif pending_scan:
-            running = True
+                models_dir = str(BASE_DIR.parent / 'models')
+        ml_models = {
+            'bodmas_cnn': (
+                os.path.exists(os.path.join(models_dir, 'bodmas_cnn.onnx')) and
+                os.path.exists(os.path.join(models_dir, 'bodmas_cnn_scaler.pkl'))
+            ),
+            'ember': os.path.exists(os.path.join(models_dir, 'ember_malware_model.txt')),
+            'sklearn': os.path.exists(os.path.join(models_dir, 'file_malware_classifier.pkl')),
+        }
 
-<<<<<<< HEAD
     # Aggregate data from connected agents (local PCs) only.
     agents = _all_agents()
     agent_files_scanned = 0
@@ -4512,7 +5415,7 @@ def _canonical_yara_agent_state():
             if labeled not in agent_dirs:
                 agent_dirs.append(labeled)
         last_report = ag.get('last_report') or {}
-        for f in (last_report.get('findings') or []):
+        for f in (last_report.get('findings') or [])[:50]:
             agent_findings.append(f)
         agent_list.append({
             'device_id': device_id,
@@ -4524,40 +5427,13 @@ def _canonical_yara_agent_state():
             'threats': at,
             'scanning': ag.get('scanning', False),
         })
-=======
-        report_findings = report.get('findings') or report.get('results') or []
-        for finding in report_findings:
-            if not isinstance(finding, dict) or not _is_yara_finding(finding):
-                continue
-            path = finding.get('path') or finding.get('original_path') or ''
-            key = (device_id, _canonical_path(path), str(finding.get('rule') or '').strip().lower())
-            if key in seen_findings:
-                continue
-            seen_findings.add(key)
-            item = dict(finding)
-            item['path'] = path
-            item['original_path'] = finding.get('original_path') or path
-            item['device_id'] = device_id
-            item['hostname'] = agent.get('hostname', device_id)
-            item['quarantined'] = bool(finding.get('quarantined'))
-            findings.append(item)
-            threat = str(item.get('threat_type') or '').lower()
-            rule = str(item.get('rule') or '').lower()
-            if 'ransom' in threat or 'ransom' in rule:
-                ransomware_indicators += 1
-            if 'persist' in threat or 'persist' in rule:
-                persistence_indicators += 1
->>>>>>> origin/privacy-hide-connection-ips
 
-        for finding in report_findings:
-            if not isinstance(finding, dict):
-                continue
-            rule = str(finding.get('rule') or '').lower()
-            threat = str(finding.get('threat_type') or '').lower()
-            if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_') or threat == 'ml':
-                ml_detections += 1
+    # If a scan was started, keep updating the timestamp so the UI shows
+    # continuous live progress. No VPS scanning — just agent data.
+    if _startup_state['running']:
+        _startup_state['last_updated'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        _startup_state['scanned_files'] = _startup_state.get('scanned_files', 0) + agent_files_scanned
 
-<<<<<<< HEAD
     # Compute ransomware/persistence/yara/ml indicators from cumulative
     # agent counters (stored on each agent record, never reset by clean scans)
     agent_ransomware = 0
@@ -4585,7 +5461,7 @@ def _canonical_yara_agent_state():
         'last_updated': _startup_state['last_updated'] or _startup_state['last_run'],
         'duration': _startup_state['duration'],
         'scanned_files': (_startup_state['scanned_files'] if _startup_state['running'] else agent_files_scanned),
-        'quarantined_files': agent_quarantined,  # Use agent quarantined count only, not mixed with local _count_quarantine_files()
+        'quarantined_files': _get_scan_counter('quarantined_files', _count_quarantine_files()) + agent_quarantined,
         'errors': _get_scan_counter('errors', 0) + agent_quarantine_errors,
         'process_events': sum(1 for _ in psutil.process_iter()),
         'ml_detections': _get_scan_counter('ml_detections', 0) + agent_ml,
@@ -4620,115 +5496,1013 @@ def cloud_run_startup():
     _startup_state['last_updated'] = _startup_state['started_at']
     _startup_state['duration'] = None
     _startup_state['scanned_files'] = 0
-    _startup_state['quarantined_files'] = 0
-    _startup_state['ml_detections'] = 0
-    _startup_state['ransomware_indicators'] = 0
-    _startup_state['persistence_indicators'] = 0
-    _startup_state['yara_suspicious'] = 0
-    _startup_state['threats_detected'] = 0
     _startup_state['scan_log'] = []
     # Trigger a scan on all connected agents instead of scanning the VPS.
     agents = _all_agents()
-=======
-    return {
-        'running': running,
-        'last_run': last_scan,
-        'last_updated': last_scan,
-        'started_at': min((v.get('started_at') for v in _agent_scan_state.values() if v.get('started_at')), default=None),
-        'duration': None,
-        'scanned_files': scanned_files,
-        'quarantined_files': quarantined_files,
-        'blocked_threats': sum(1 for f in findings if f.get('blocked')),
-        'errors': 0,
-        'process_events': 0,
-        'ml_detections': ml_detections,
-        'ransomware_indicators': ransomware_indicators,
-        'persistence_indicators': persistence_indicators,
-        'yara_suspicious': len(findings),
-        'findings': findings,
-        'ml_models': {},
-        'last_error': '',
-    }
-
-
-def _agent_trigger_scan_response():
-    if not (session.get('logged_in') or session.get('user_logged_in')):
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'Authentication required', 'error': 'Authentication required', 'agents': 0, 'agents_triggered': 0}), 401
-    agents = _legacy._all_agents()
-    if not agents:
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'No connected agents to scan.', 'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
-    now = time.time()
->>>>>>> origin/privacy-hide-connection-ips
     sent = 0
-    for device_id, agent in agents.items():
-        pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
+    for device_id in agents:
+        pending = commands.get(device_id, [])
+        pending = [c for c in pending if c.get('action') != 'scan_now']
         pending.append({'action': 'scan_now'})
-        _legacy.commands[device_id] = pending
-        _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
+        commands[device_id] = pending
         sent += 1
-    message = f'Scan triggered for {sent} agent(s). Results will appear shortly.'
-    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': message, 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
+    msg = f'Scan triggered for {sent} agent(s).' if sent else 'No agents connected.'
+    return jsonify({'success': True, 'message': msg, 'scan_time': '3s'}), 200
 
 
-def _yara_only_quarantine_response():
-    if not (session.get('logged_in') or session.get('user_logged_in')):
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required', 'quarantined': [], 'failed': [], 'count': 0}), 401
-    agents = _legacy._all_agents()
-    if not agents:
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'No connected agents.', 'error': 'No connected agents.', 'quarantined': [], 'failed': [], 'count': 0, 'agents_triggered': 0}), 404
-    sent = 0
-    targeted = 0
-    for device_id, agent in agents.items():
-        last_report = agent.get('last_report') or {}
-        findings = []
-        seen = set()
-        for finding in last_report.get('findings') or last_report.get('results') or []:
-            if not isinstance(finding, dict):
+@cloud_bp.route('/api/scan_log', methods=['GET'])
+def cloud_scan_log():
+    """Return the live scan log -- file paths currently being scanned.
+
+    The frontend polls this endpoint and appends new entries to the bottom
+    of the page so the user can see what files are being scanned in real time.
+    """
+    scan_log = _startup_state.get('scan_log', [])
+    # Return the last 200 entries to keep the payload manageable.
+    return jsonify({
+        'success': True,
+        'running': _startup_state.get('running', False),
+        'entries': scan_log[-200:],
+        'total_entries': len(scan_log)
+    }), 200
+
+
+@cloud_bp.route('/antivirus_log', methods=['GET'])
+def cloud_antivirus_log():
+    return 'Antivirus log: All systems operating normally.', 200
+
+
+@cloud_bp.route('/safe_downloader_details', methods=['GET'])
+def cloud_safe_downloader_details():
+    return jsonify({'active': True, 'downloaded_count': 0}), 200
+
+
+@cloud_bp.route('/file_crypto', methods=['GET'])
+def cloud_file_crypto():
+    return render_template('file_crypto.html', session=session)
+
+
+@cloud_bp.route('/encrypt', methods=['POST'])
+def cloud_encrypt_file():
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return render_template('file_crypto.html', error='No file selected', session=session)
+    file = request.files['file']
+    valid, filename, error = validate_upload(file)
+    if not valid:
+        return render_template('file_crypto.html', error=error, session=session), 400
+    key_input = request.form.get('key', '').strip()
+    temp_in_path = temp_out_path = None
+    try:
+        f_key = key_input.encode('utf-8') if key_input else (os.environ.get('FERNET_KEY', '').encode('utf-8') if os.environ.get('FERNET_KEY') else Fernet.generate_key())
+        f = Fernet(f_key)
+        with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_in_') as temp_in:
+            file.save(temp_in.name)
+            temp_in_path = temp_in.name
+        data = Path(temp_in_path).read_bytes()
+        encrypted = f.encrypt(data)
+        temp_out_fd, temp_out_path = tempfile.mkstemp(prefix='antivirus_out_')
+        os.close(temp_out_fd)
+        Path(temp_out_path).write_bytes(encrypted)
+        return send_file(temp_out_path, as_attachment=True, download_name=f'encrypted_{filename}')
+    except Exception as e:
+        return render_template('file_crypto.html', error=f'Encryption failed: {e}', session=session)
+    finally:
+        if temp_in_path and os.path.exists(temp_in_path):
+            try:
+                os.remove(temp_in_path)
+            except Exception:
+                pass
+
+
+@cloud_bp.route('/decrypt', methods=['POST'])
+def cloud_decrypt_file():
+    if 'file' not in request.files or request.files['file'].filename == '':
+        return render_template('file_crypto.html', error='No file selected', session=session)
+    file = request.files['file']
+    valid, filename, error = validate_upload(file)
+    if not valid:
+        return render_template('file_crypto.html', error=error, session=session), 400
+    key_input = request.form.get('key', '').strip()
+    temp_in_path = temp_out_path = None
+    try:
+        f_key = key_input.encode('utf-8') if key_input else (os.environ.get('FERNET_KEY', '').encode('utf-8') if os.environ.get('FERNET_KEY') else None)
+        if not f_key:
+            return render_template('file_crypto.html', error='Decryption key required. Enter key in the form.', session=session)
+        f = Fernet(f_key)
+        with tempfile.NamedTemporaryFile(delete=False, prefix='antivirus_in_') as temp_in:
+            file.save(temp_in.name)
+            temp_in_path = temp_in.name
+        data = Path(temp_in_path).read_bytes()
+        decrypted = f.decrypt(data)
+        temp_out_fd, temp_out_path = tempfile.mkstemp(prefix='antivirus_out_')
+        os.close(temp_out_fd)
+        Path(temp_out_path).write_bytes(decrypted)
+        out_name = filename
+        if out_name.startswith('encrypted_'):
+            out_name = out_name[len('encrypted_'):]
+        return send_file(temp_out_path, as_attachment=True, download_name=f'decrypted_{out_name}')
+    except InvalidToken:
+        return render_template('file_crypto.html', error='Decryption failed: invalid key or corrupted file', session=session)
+    except Exception as e:
+        return render_template('file_crypto.html', error=f'Decryption failed: {e}', session=session)
+    finally:
+        if temp_in_path and os.path.exists(temp_in_path):
+            try:
+                os.remove(temp_in_path)
+            except Exception:
+                pass
+
+
+@cloud_bp.route('/api/assistant/report', methods=['POST'])
+def cloud_assistant_report():
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        history = assistant.load_history()
+        context = {'scan_history': history, 'findings': [], 'quarantine': []}
+        result = assistant.answer('Create an incident report from the current findings', context)
+        return jsonify({'report': result.get('answer', ''), 'analysis': result.get('analysis', {}), 'mode': result.get('mode', 'findings')}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+import threading as _threading_mod
+_assistant_jobs = {}
+
+@cloud_bp.route('/api/assistant/chat', methods=['POST'])
+def cloud_assistant_chat():
+    data = request.get_json(force=True, silent=True) or {}
+    q = data.get('question', '') or data.get('message', '')
+    if not q:
+        return jsonify({'error': 'no question'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    import uuid
+    job_id = str(uuid.uuid4())
+    _assistant_jobs[job_id] = {'status': 'pending', 'answer': '', 'mode': '', 'error': ''}
+    def _run():
+        try:
+            history = assistant.load_history()
+            context = {
+                'scan_history': history,
+                'findings': [],
+                'quarantine': [],
+                'agents': list(_all_agents().values()),
+                'events': list(events[-100:]),
+            }
+            result = assistant.answer(q, context)
+            _assistant_jobs[job_id] = {
+                'status': 'done',
+                'answer': result.get('answer', ''),
+                'mode': result.get('mode', 'findings'),
+                'analysis': result.get('analysis', {}),
+                'error': result.get('model_error', '')
+            }
+        except Exception as e:
+            _assistant_jobs[job_id] = {'status': 'error', 'answer': '', 'mode': '', 'error': str(e)}
+    t = _threading_mod.Thread(target=_run, daemon=True)
+    t.start()
+    return jsonify({'job_id': job_id, 'status': 'pending'}), 202
+
+@cloud_bp.route('/api/assistant/status/<job_id>', methods=['GET'])
+def cloud_assistant_status(job_id):
+    job = _assistant_jobs.get(job_id)
+    if job is None:
+        return jsonify({'error': 'job not found'}), 404
+    return jsonify(job), 200
+
+
+@cloud_bp.route('/api/assistant/feedback', methods=['POST'])
+def cloud_assistant_feedback():
+    """Record feedback on an assistant answer (good/bad)."""
+    data = request.get_json(force=True, silent=True) or {}
+    question = data.get('question', '')
+    answer = data.get('answer', '')
+    rating = data.get('rating', 0)  # 1 = good, -1 = bad
+    comment = data.get('comment', '')
+    if not question or not rating:
+        return jsonify({'error': 'question and rating required'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        entry = assistant._trainer.record_feedback(question, answer, rating, comment)
+        return jsonify({'ok': True, 'entry': entry}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/assistant/false-positive', methods=['POST'])
+def cloud_assistant_mark_fp():
+    """Mark a file as a known false positive."""
+    data = request.get_json(force=True, silent=True) or {}
+    path = data.get('path', '')
+    hash_val = data.get('hash', '')
+    reason = data.get('reason', '')
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        entry = assistant._trainer.mark_false_positive(path, hash_val, reason)
+        return jsonify({'ok': True, 'entry': entry}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/assistant/false-positive', methods=['DELETE'])
+def cloud_assistant_unmark_fp():
+    """Remove a false positive marking."""
+    data = request.get_json(force=True, silent=True) or {}
+    path = data.get('path', '')
+    if not path:
+        return jsonify({'error': 'path required'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        assistant._trainer.unmark_false_positive(path)
+        return jsonify({'ok': True}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/assistant/knowledge', methods=['POST'])
+def cloud_assistant_add_knowledge():
+    """Add a knowledge entry for the assistant to reference."""
+    data = request.get_json(force=True, silent=True) or {}
+    topic = data.get('topic', '')
+    content = data.get('content', '')
+    if not topic or not content:
+        return jsonify({'error': 'topic and content required'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        entry = assistant._trainer.add_knowledge(topic, content)
+        return jsonify({'ok': True, 'entry': entry}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+
+
+
+@cloud_bp.route('/api/agents', methods=['GET'])
+def cloud_list_agents():
+    """List all registered agents and their current status.
+    This is what the PWA/mobile dashboard uses to view connected devices."""
+    try:
+        agents = _get_agents()
+        now = datetime.now(timezone.utc)
+        agent_list = []
+        for device_id, agent in agents.items():
+            # Determine if agent is online (seen in last 2 minutes)
+            last_seen_str = agent.get('last_seen', '')
+            is_online = False
+            if last_seen_str:
+                try:
+                    last_seen = datetime.fromisoformat(last_seen_str.replace('Z', '+00:00'))
+                    is_online = (now - last_seen).total_seconds() < 120
+                except Exception:
+                    pass
+            conns = agent.get('network_connections', [])
+            procs = agent.get('processes', [])
+            agent_list.append({
+                'device_id': device_id,
+                'hostname': agent.get('hostname', device_id),
+                'os': agent.get('os', 'Unknown'),
+                'os_version': agent.get('os_version', ''),
+                'arch': agent.get('arch', ''),
+                'ip': agent.get('ip', ''),
+                'status': 'online' if is_online else 'offline',
+                'last_seen': last_seen_str,
+                'cpu_usage': agent.get('cpu_usage', 0),
+                'mem_usage': agent.get('mem_usage', 0),
+                'disk_usage': agent.get('disk_usage', 0),
+                'uptime': agent.get('uptime', ''),
+                'connection_count': len(conns) if isinstance(conns, list) else 0,
+                'process_count': len(procs) if isinstance(procs, list) else 0,
+                'files_scanned': agent.get('files_scanned', 0),
+                'threats_blocked': agent.get('threats_blocked', 0),
+                'quarantined_count': agent.get('quarantined_count', 0),
+                'agent_version': agent.get('agent_version', ''),
+            })
+        # Sort: online first, then by last_seen
+        agent_list.sort(key=lambda x: (x['status'] != 'online', x.get('last_seen', '')), reverse=True)
+        return jsonify({'success': True, 'agents': agent_list, 'count': len(agent_list)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/network_devices', methods=['GET'])
+def cloud_network_devices():
+    """List all devices discovered on the local network by agents (phones,
+    Xbox, IoT, smart TVs, etc.). Aggregates network_devices from all agents."""
+    try:
+        agents = _get_agents()
+        all_devices = []
+        seen_ips = set()
+        for device_id, agent in agents.items():
+            devs = agent.get('network_devices', [])
+            if not isinstance(devs, list):
                 continue
-            path = finding.get('path') or finding.get('original_path')
-            if not path or not _is_yara_finding(finding):
+            for d in devs:
+                ip = d.get('ip', '')
+                if not ip or ip in seen_ips:
+                    continue
+                seen_ips.add(ip)
+                all_devices.append({
+                    'ip': ip,
+                    'hostname': d.get('hostname', ''),
+                    'device_type': d.get('device_type', 'Unknown'),
+                    'open_ports': d.get('open_ports', []),
+                    'interface': d.get('interface', ''),
+                    'discovered_by': agent.get('hostname', device_id),
+                })
+        all_devices.sort(key=lambda x: x['ip'])
+        return jsonify({'success': True, 'devices': all_devices, 'count': len(all_devices)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/agent/local/status', methods=['GET'])
+def cloud_local_agent_status():
+    """Get the status of the built-in local agent."""
+    agent = get_local_agent()
+    if agent is None:
+        return jsonify({'running': False, 'message': 'Local agent is not running'}), 200
+    return jsonify(agent.status()), 200
+
+
+@cloud_bp.route('/api/agent/local/start', methods=['POST'])
+def cloud_local_agent_start():
+    """Start the built-in local agent."""
+    agent = get_local_agent()
+    if agent and agent._running:
+        return jsonify({'ok': True, 'message': 'Already running', 'status': agent.status()}), 200
+    try:
+        _api_key = os.environ.get('CLOUD_API_KEY', '')
+        _server_url = os.environ.get('PUBLIC_URL', 'https://isolation-bytes.com')
+        agent = start_local_agent(server_url=_server_url, api_key=_api_key)
+        return jsonify({'ok': True, 'message': 'Local agent started', 'status': agent.status()}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/agent/local/stop', methods=['POST'])
+def cloud_local_agent_stop():
+    """Stop the built-in local agent."""
+    try:
+        stop_local_agent()
+        return jsonify({'ok': True, 'message': 'Local agent stopped'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/agent/local/scan', methods=['POST'])
+def cloud_local_agent_scan():
+    """Trigger an immediate scan from the local agent."""
+    agent = get_local_agent()
+    if agent is None or not agent._running:
+        return jsonify({'error': 'Local agent is not running'}), 400
+    try:
+        # Run a scan cycle in a background thread
+        import threading
+        def do_scan():
+            agent._scan_cycle()
+        t = threading.Thread(target=do_scan, daemon=True)
+        t.start()
+        return jsonify({'ok': True, 'message': 'Scan started'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/api/assistant/learn-threat', methods=['POST'])
+def cloud_assistant_learn_threat():
+    """Learn a threat pattern - generates YARA rule, saves knowledge, trains ML."""
+    data = request.get_json(force=True, silent=True) or {}
+    threat_name = data.get('threat_name', '').strip()
+    patterns = data.get('patterns', [])
+    severity = data.get('severity', 'high')
+    description = data.get('description', '')
+    hash_val = data.get('hash', '')
+    if not threat_name:
+        return jsonify({'error': 'threat_name required'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        result = assistant._trainer.learn_threat(threat_name, patterns, severity=severity, description=description)
+        if hash_val and assistant._trainer._db:
+            assistant._trainer._db.record_signature(
+                name=threat_name, hash_val=hash_val, threat_type=threat_name,
+                severity=severity, patterns=patterns, description=description
+            )
+        improve_result = assistant._trainer.improve_yara_rule(threat_name, patterns, severity=severity)
+        return jsonify({'ok': True, 'learn_result': result, 'yara_rule': improve_result}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+@cloud_bp.route('/api/assistant/training', methods=['GET'])
+def cloud_assistant_training():
+    """Get training summary and learned data."""
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        summary = assistant._trainer.get_training_summary()
+        fps = assistant._trainer.get_false_positives()
+        knowledge = assistant._trainer.get_knowledge()
+        return jsonify({
+            'summary': summary,
+            'false_positives': fps[:50],
+            'knowledge': knowledge[:50],
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/command/scan', methods=['POST'])
+def command_scan():
+    data = request.get_json(force=True, silent=True) or {}
+    device_id = data.get('device_id', '').strip()
+    target = data.get('target', '').strip()
+    if not device_id or not _get_agent(device_id):
+        return jsonify({'error': 'unknown device'}), 404
+    commands.setdefault(device_id, []).append({'type': 'scan', 'target': target})
+    return jsonify({'ok': True}), 200
+
+
+@cloud_bp.route('/command/send', methods=['POST'])
+def command_send():
+    device_id = request.form.get('device_id', '').strip()
+    cmd_type = request.form.get('cmd_type', '').strip()
+    target = request.form.get('target', '').strip()
+    if not device_id or not _get_agent(device_id):
+        return jsonify({'error': 'unknown device'}), 404
+    if cmd_type not in ('scan', 'quarantine'):
+        return jsonify({'error': 'unknown command type'}), 400
+    commands.setdefault(device_id, []).append({'type': cmd_type, 'target': target})
+    return 'Command queued. <a href="/dashboard">Back</a>'
+
+
+# ============================================================
+# SELF-HOSTED LICENSE SYSTEM — RSA-signed keys, device locking,
+# tiered features. No third-party dependency.
+# ============================================================
+
+def _require_admin(f):
+    """Require an authenticated admin session for license management."""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('logged_in'):
+            return jsonify({'error': 'Admin authentication required'}), 401
+        return f(*args, **kwargs)
+    return wrapper
+
+
+@cloud_bp.route('/api/license/tiers', methods=['GET'])
+def license_tiers():
+    """List available license tiers and their features."""
+    return jsonify({'tiers': TIERS})
+
+
+@cloud_bp.route('/api/license/validate', methods=['POST'])
+def license_validate():
+    """Validate a self-hosted license key.
+
+    Body: { license_key, machine_id? }
+    Returns: { valid, tier, features, expires_at, activations_used, ... }
+    """
+    if not _license_manager:
+        return jsonify({'error': 'License system not initialized'}), 500
+    data = request.get_json(silent=True) or {}
+    license_key = (data.get('license_key') or request.form.get('license_key') or '').strip()
+    machine_id = (data.get('machine_id') or request.form.get('machine_id') or '').strip()
+    if not license_key:
+        return jsonify({'valid': False, 'error': 'License key required'}), 400
+    result = _license_manager.validate_license(license_key, machine_id)
+    status = 200 if result['valid'] else 403
+    return jsonify(result), status
+
+
+@cloud_bp.route('/api/license/activate', methods=['POST'])
+def license_activate():
+    """Activate a license for a specific device.
+
+    Body: { license_key, machine_id, instance_name? }
+    """
+    if not _license_manager:
+        return jsonify({'error': 'License system not initialized'}), 500
+    data = request.get_json(silent=True) or {}
+    license_key = (data.get('license_key') or request.form.get('license_key') or '').strip()
+    machine_id = (data.get('machine_id') or request.form.get('machine_id') or '').strip()
+    instance_name = (data.get('instance_name') or request.form.get('instance_name') or '').strip()
+    if not license_key or not machine_id:
+        return jsonify({'ok': False, 'error': 'License key and machine ID are required'}), 400
+    result = _license_manager.activate_license(license_key, machine_id, instance_name)
+    status = 200 if result['ok'] else 403
+    return jsonify(result), status
+
+
+@cloud_bp.route('/api/license/deactivate', methods=['POST'])
+def license_deactivate():
+    """Deactivate a license for a specific device.
+
+    Body: { license_key, machine_id }
+    """
+    if not _license_manager:
+        return jsonify({'error': 'License system not initialized'}), 500
+    data = request.get_json(silent=True) or {}
+    license_key = (data.get('license_key') or request.form.get('license_key') or '').strip()
+    machine_id = (data.get('machine_id') or request.form.get('machine_id') or '').strip()
+    if not license_key or not machine_id:
+        return jsonify({'ok': False, 'error': 'License key and machine ID are required'}), 400
+    result = _license_manager.deactivate_license(license_key, machine_id)
+    status = 200 if result['ok'] else 403
+    return jsonify(result), status
+
+
+@cloud_bp.route('/api/license/public-key', methods=['GET'])
+def license_public_key():
+    """Return the license system's public key in PEM format.
+
+    Clients can use this to verify license signatures offline.
+    """
+    if not _license_manager:
+        return jsonify({'error': 'License system not initialized'}), 500
+    return jsonify({'public_key': _license_manager.get_public_key_pem()})
+
+
+@cloud_bp.route('/assistant', methods=['GET', 'POST'])
+@_require_login
+def cloud_assistant():
+    if request.method == 'GET':
+        return '''
+        <!doctype html>
+        <html>
+        <head><title>Local Assistant</title></head>
+        <body>
+            <h1>Antivirus Local Assistant</h1>
+            <form method="post">
+                <textarea name="question" rows="4" cols="60" placeholder="Ask about findings, IOCs, remediation, rules, or service status"></textarea><br>
+                <button type="submit">Ask</button>
+            </form>
+            <p><a href="/dashboard">Back</a></p>
+        </body>
+        </html>
+        '''
+    data = request.get_json(force=True, silent=True) or {}
+    question = request.form.get('question', '') or data.get('question', '')
+    if not question:
+        return jsonify({'error': 'no question'}), 400
+    assistant = _get_assistant()
+    if assistant is None:
+        return jsonify({'error': 'assistant could not load'}), 503
+    try:
+        result = assistant.answer(question)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@cloud_bp.route('/<path:filename>', methods=['GET'])
+def cloud_static(filename):
+    for folder in ('website', 'static'):
+        d = _find_resource_dir(folder)
+        p = Path(d) / filename
+        if p.exists() and p.is_file():
+            return send_from_directory(d, filename)
+    # API endpoints should still return JSON 404s; humans get the 404 page.
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'not found'}), 404
+    return render_template('404.html'), 404
+
+
+def _find_resource_dir(name):
+    """Find a resource directory (templates/static/website) in any of the
+    possible locations — handles PyInstaller EXE, dev layout, and CWD."""
+    candidates = [
+        BASE_DIR.parent / name,           # Normal dev layout
+        BASE_DIR / name,                  # Inside cloud/ folder
+        Path(os.getcwd()) / name,         # Current working dir
+    ]
+    if getattr(sys, '_MEIPASS', None):
+        candidates.insert(0, Path(sys._MEIPASS) / name)  # PyInstaller extraction
+    if _exe_dir:
+        candidates.insert(0, _exe_dir / name)            # Next to EXE
+    for c in candidates:
+        if c.is_dir():
+            return str(c)
+    return str(BASE_DIR.parent / name)  # Fallback (may not exist)
+
+
+def create_cloud_app():
+    app = Flask(
+        __name__,
+        template_folder=_find_resource_dir('templates'),
+        static_folder=_find_resource_dir('static')
+    )
+    app.secret_key = _get_secret_key()
+    app.config['VOICE_CLOUD_PROXY'] = True
+    app.config['MAX_CONTENT_LENGTH'] = int(os.environ.get(
+        'MAX_REQUEST_BYTES', str(100 * 1024 * 1024)
+    ))
+
+    # Reverse proxy middleware — trust X-Forwarded-* headers when behind a proxy
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    proxy_hops = int(os.environ.get('TRUSTED_PROXY_HOPS', '0'))
+    if proxy_hops < 0:
+        raise ValueError('TRUSTED_PROXY_HOPS must be zero or greater')
+    if proxy_hops:
+        app.wsgi_app = ProxyFix(
+            app.wsgi_app,
+            x_for=proxy_hops,
+            x_proto=proxy_hops,
+            x_host=proxy_hops,
+            x_prefix=proxy_hops,
+        )
+    init_web_security(
+        app,
+        csrf_exempt_paths={
+            '/api/lemonsqueezy/webhook',
+            '/api/github-webhook',
+            '/agent/register',
+            '/agent/heartbeat',
+            '/agent/report',
+            '/api/license/validate',
+            '/api/license/activate',
+            '/api/license/deactivate',
+        },
+    )
+
+    # Enable CORS so browser fetch calls from the voice assistant work reliably
+    # behind proxies and across origin variations.
+    if CORS is not None:
+        configured_origins = os.environ.get('CORS_ORIGINS', '').strip()
+        origins = [origin.strip() for origin in configured_origins.split(',') if origin.strip()]
+        if not origins:
+            origins = [_clean_val(os.environ.get('PUBLIC_URL') or 'https://isolation-bytes.com')]
+        CORS(app, origins=origins, supports_credentials=True)
+
+    @app.template_global()
+    def startup_risk_score(item): return 0
+    @app.template_global()
+    def service_risk_score(item): return 0
+    @app.template_global()
+    def process_risk_score(item): return 0
+    @app.template_global()
+    def event_risk_score(item): return 0
+    @app.template_global()
+    def network_beacon_score(item): return 0
+
+    from flask import url_for as flask_url_for
+    @app.template_global()
+    def url_for(endpoint, **values):
+        try:
+            return flask_url_for(endpoint, **values)
+        except Exception:
+            if '.' not in endpoint:
+                try:
+                    return flask_url_for(f'cloud.{endpoint}', **values)
+                except Exception:
+                    pass
+            return f'/{endpoint.replace("_", "-")}'
+
+    @app.context_processor
+    def inject_defaults():
+        return {
+            'running_as_admin': True,
+            'administrator_service_available': True,
+            'admin_helper_message': 'Antivirus Cloud Server Active.',
+            'items': [],
+            'services': [],
+            'processes': [],
+            'events': [],
+            'connections': [],
+            'missing': [],
+            'installed': [],
+            'entries': [],
+            'results': [],
+            'status': [],
+            'c2_detections': [],
+            'config': {'FLASK_ENV': 'production', 'LOG_LEVEL': 'INFO'},
+            'trusted_count': 120,
+            'ioc_counts': {'hashes': 4200, 'domains': 1500, 'ips': 850, 'yara_rules': 42},
+            'summary': {'System': 0, 'Security': 0, 'Threats': 0},
+            'network_info': {'ip': '127.0.0.1', 'status': 'connected', 'interfaces': ['Ethernet', 'Wi-Fi']},
+            'monitored_directories': get_universal_scan_directories(),
+            'quarantined_files': []
+        }
+
+    # Register the voice repair assistant blueprint (optional)
+    try:
+        from voice_assistant import voice_bp
+        app.register_blueprint(voice_bp)
+        # Expose registered devices and the agent command queue to the voice assistant
+        app.config['VOICE_DEVICES_GETTER'] = _all_agents
+        app.config['VOICE_COMMAND_QUEUE'] = commands
+    except Exception as e:
+        logger.warning('Could not register voice assistant blueprint: %s', e)
+
+    app.register_blueprint(cloud_bp)
+    limiter = app.extensions.get('web_rate_limiter')
+    if limiter is not None:
+        for endpoint, limit in (
+            ('cloud.agent_register', '1000 per minute'),
+            ('cloud.agent_heartbeat', '1000 per minute'),
+            ('cloud.agent_report', '1000 per minute'),
+            ('cloud.cloud_agent_trigger_scan', '500 per minute'),
+            ('cloud.cloud_run_startup', '500 per minute'),
+        ):
+            view = app.view_functions.get(endpoint)
+            if view is not None:
+                app.view_functions[endpoint] = limiter.limit(
+                    limit,
+                    override_defaults=True,
+                )(view)
+    return app
+
+
+_assistant = None
+
+def _get_assistant():
+    global _assistant
+    if _assistant is None:
+        try:
+            from security.local_assistant import LocalFindingsAssistant
+            # Use _MEIPASS if running from EXE, otherwise BASE_DIR.parent
+            _assistant_base = Path(sys._MEIPASS) if getattr(sys, '_MEIPASS', None) else BASE_DIR.parent
+            _assistant = LocalFindingsAssistant(_assistant_base)
+        except Exception as e:
+            print(f'Could not load local assistant: {e}')
+    return _assistant
+
+
+def _start_local_agent():
+    """Start the built-in local agent that scans this machine."""
+    try:
+        from security.local_agent import start_local_agent
+        _api_key = os.environ.get('CLOUD_API_KEY', '')
+        _server_url = os.environ.get('PUBLIC_URL', 'https://isolation-bytes.com')
+        if _api_key:
+            start_local_agent(server_url=_server_url, api_key=_api_key)
+            print('Local agent started')
+    except Exception as e:
+        print(f'Could not start local agent: {e}')
+
+
+# Module-level app for gunicorn: cloud.cloud_server:app
+app = create_cloud_app()
+
+# Auto-start the local agent when loaded by gunicorn
+def _auto_start_agent():
+    import time as _time
+    _time.sleep(3)
+    try:
+        from security.local_agent import start_local_agent
+        _api_key = os.environ.get('CLOUD_API_KEY', '')
+        _server_url = os.environ.get('PUBLIC_URL', 'https://isolation-bytes.com')
+        if _api_key:
+            start_local_agent(server_url=_server_url, api_key=_api_key)
+            print('Auto-started local agent')
+    except Exception as e:
+        print(f'Could not auto-start local agent: {e}')
+
+import threading as _auto_thread
+_auto_thread.Thread(target=_auto_start_agent, daemon=True).start()
+
+
+if __name__ == '__main__':
+    _reload_env()
+    flask_public = os.environ.get('FLASK_PUBLIC', '').lower() in ('1', 'true', 'yes')
+    flask_ssl = os.environ.get('FLASK_SSL', '').lower() in ('1', 'true', 'yes')
+    flask_ssl_cert = os.environ.get('FLASK_SSL_CERT', '').strip()
+    flask_ssl_key = os.environ.get('FLASK_SSL_KEY', '').strip()
+    if flask_ssl_cert and not os.path.isabs(flask_ssl_cert):
+        flask_ssl_cert = str(BASE_DIR / flask_ssl_cert)
+    if flask_ssl_key and not os.path.isabs(flask_ssl_key):
+        flask_ssl_key = str(BASE_DIR / flask_ssl_key)
+    # Auto-detect cert files in the cloud/ directory or _MEIPASS if not explicitly set.
+    _cert_search = [BASE_DIR / 'localhost.crt']
+    _key_search = [BASE_DIR / 'localhost.key']
+    if getattr(sys, '_MEIPASS', None):
+        _cert_search.insert(0, Path(sys._MEIPASS) / 'cloud' / 'localhost.crt')
+        _key_search.insert(0, Path(sys._MEIPASS) / 'cloud' / 'localhost.key')
+    if not flask_ssl_cert:
+        for ac in _cert_search:
+            if os.path.exists(str(ac)):
+                flask_ssl_cert = str(ac)
+                break
+    if not flask_ssl_key:
+        for ak in _key_search:
+            if os.path.exists(str(ak)):
+                flask_ssl_key = str(ak)
+                break
+    flask_port = int(os.environ.get('FLASK_PORT', '8443'))
+    host = '0.0.0.0' if flask_public else '127.0.0.1'
+
+    # Reverse proxy support — when behind nginx/Caddy, the proxy handles SSL on 443
+    # and forwards to this server on a local port without SSL.
+    behind_proxy = os.environ.get('BEHIND_PROXY', '').lower() in ('1', 'true', 'yes')
+    proxy_port = int(os.environ.get('PROXY_PORT', '8000'))  # Internal port for proxy mode
+
+    if behind_proxy:
+        # Run without SSL on a local port — the reverse proxy handles SSL
+        flask_port = proxy_port
+        host = '127.0.0.1'
+        ssl_ctx = None
+        print(f'Running in reverse proxy mode on {host}:{flask_port} (no SSL — proxy handles it)')
+    elif flask_ssl_cert and flask_ssl_key and os.path.exists(flask_ssl_cert) and os.path.exists(flask_ssl_key):
+        ssl_ctx = (flask_ssl_cert, flask_ssl_key)
+        print(f'Using SSL cert: {flask_ssl_cert}')
+        print(f'Using SSL key: {flask_ssl_key}')
+    elif flask_ssl:
+        ssl_ctx = 'adhoc'
+        print('Using adhoc SSL (self-signed, changes each restart)')
+    else:
+        ssl_ctx = None
+        print('WARNING: SSL is disabled -- running on plain HTTP')
+    print(f'Starting cloud server on {host}:{flask_port} (ssl={ssl_ctx is not None})')
+    # Start the built-in local agent before the server blocks
+    import threading as _threading
+    def _delayed_start_agent():
+        import time as _time
+        _time.sleep(3)  # Wait for server to be ready
+        _start_local_agent()
+    _threading.Thread(target=_delayed_start_agent, daemon=True).start()
+
+    # Open the browser to the dashboard after a short delay
+    def _delayed_open_browser():
+        import time as _btime
+        _btime.sleep(5)  # Wait for server to be fully ready
+        import webbrowser
+        public_url = os.environ.get('PUBLIC_URL', '').strip()
+        if public_url:
+            webbrowser.open(public_url)
+        else:
+            # Fall back to local URL
+            scheme = 'https' if ssl_ctx else 'http'
+            webbrowser.open(f'{scheme}://127.0.0.1:{flask_port}/login')
+    _threading.Thread(target=_delayed_open_browser, daemon=True).start()
+
+    # Start Caddy reverse proxy if installed (provides HTTPS on port 443)
+    def _delayed_start_caddy():
+        import time as _ctime
+        import subprocess as _subproc
+        import tempfile as _tempfile
+        _ctime.sleep(2)
+        # Portable search — works on any PC, no hardcoded user paths
+        _userprofile = os.environ.get('USERPROFILE', os.path.expanduser('~'))
+        _localappdata = os.environ.get('LOCALAPPDATA', os.path.join(_userprofile, 'AppData', 'Local'))
+        _pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+        _pf86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+        caddy_exe = None
+        caddyfile = None
+        caddy_cwd = None
+        # 1. Bundled in PyInstaller
+        if getattr(sys, 'frozen', False):
+            _base = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+            _bundled = os.path.join(_base, 'caddy', 'caddy.exe')
+            _bundled_caddyfile = os.path.join(_base, 'caddy', 'Caddyfile')
+            if os.path.exists(_bundled) and os.path.exists(_bundled_caddyfile):
+                _caddy_dir = os.path.join(_tempfile.gettempdir(), 'antivirus_caddy')
+                os.makedirs(_caddy_dir, exist_ok=True)
+                import shutil as _shutil
+                _dest_exe = os.path.join(_caddy_dir, 'caddy.exe')
+                _dest_caddyfile = os.path.join(_caddy_dir, 'Caddyfile')
+                if not os.path.exists(_dest_exe) or os.path.getsize(_dest_exe) != os.path.getsize(_bundled):
+                    _shutil.copy2(_bundled, _dest_exe)
+                if not os.path.exists(_dest_caddyfile):
+                    _shutil.copy2(_bundled_caddyfile, _dest_caddyfile)
+                caddy_exe = _dest_exe
+                caddyfile = _dest_caddyfile
+                caddy_cwd = _caddy_dir
+        # 2. Search known locations (portable)
+        if not caddy_exe:
+            _caddy_candidates = [
+                r'C:\caddy\caddy.exe',
+                os.path.join(_localappdata, 'IsolationBytes', 'caddy', 'caddy.exe'),
+                os.path.join(_pf, 'Caddy', 'caddy.exe'),
+                os.path.join(_pf86, 'Caddy', 'caddy.exe'),
+            ]
+            _caddyfile_candidates = [
+                r'C:\caddy\Caddyfile',
+                os.path.join(_localappdata, 'IsolationBytes', 'caddy', 'Caddyfile'),
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Caddyfile'),
+            ]
+            for _ce in _caddy_candidates:
+                if os.path.exists(_ce):
+                    for _cf in _caddyfile_candidates:
+                        if os.path.exists(_cf):
+                            caddy_exe = _ce
+                            caddyfile = _cf
+                            caddy_cwd = os.path.dirname(_ce)
+                            break
+                    if caddy_exe:
+                        break
+        if caddy_exe and caddyfile:
+            try:
+                _subproc.Popen(
+                    [caddy_exe, 'run', '--config', caddyfile],
+                    cwd=caddy_cwd,
+                    stdout=_subproc.DEVNULL,
+                    stderr=_subproc.DEVNULL,
+                    creationflags=getattr(_subproc, 'CREATE_NO_WINDOW', 0),
+                )
+                print('Caddy reverse proxy started on port 443')
+            except Exception as e:
+                print(f'Failed to start Caddy: {e}')
+        else:
+            print('Caddy not found — skipping reverse proxy')
+    _threading.Thread(target=_delayed_start_caddy, daemon=True).start()
+
+    # Start Cloudflare tunnel if installed (provides public access without port forwarding)
+    def _delayed_start_cloudflared():
+        import time as _dtime
+        import subprocess as _subproc2
+        import tempfile as _tempfile2
+        import shutil as _shutil2
+        _dtime.sleep(4)
+        # Portable search — no hardcoded user paths, no embedded credential filenames
+        _userprofile = os.environ.get('USERPROFILE', os.path.expanduser('~'))
+        _localappdata = os.environ.get('LOCALAPPDATA', os.path.join(_userprofile, 'AppData', 'Local'))
+        _pf = os.environ.get('ProgramFiles', r'C:\Program Files')
+        _pf86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
+        _commonappdata = os.environ.get('ProgramData', r'C:\ProgramData')
+        cloudflared_exe = None
+        tunnel_name = os.environ.get('CLOUDFLARED_TUNNEL_NAME', 'isolation-bytes')
+        # 1. Bundled in PyInstaller (exe only — no credentials bundled)
+        if getattr(sys, 'frozen', False):
+            _base = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
+            _bundled_cf = os.path.join(_base, 'cloudflared', 'cloudflared.exe')
+            if os.path.exists(_bundled_cf):
+                _cf_dir = os.path.join(_tempfile2.gettempdir(), 'antivirus_cloudflared')
+                os.makedirs(_cf_dir, exist_ok=True)
+                _dest_cf = os.path.join(_cf_dir, 'cloudflared.exe')
+                if not os.path.exists(_dest_cf) or os.path.getsize(_dest_cf) != os.path.getsize(_bundled_cf):
+                    _shutil2.copy2(_bundled_cf, _dest_cf)
+                cloudflared_exe = _dest_cf
+        # 2. Search known locations (portable)
+        if not cloudflared_exe:
+            _cf_candidates = [
+                r'C:\caddy\cloudflared.exe',
+                os.path.join(_localappdata, 'IsolationBytes', 'cloudflared', 'cloudflared.exe'),
+                os.path.join(_localappdata, 'Programs', 'cloudflared', 'cloudflared.exe'),
+                os.path.join(_pf, 'cloudflared', 'cloudflared.exe'),
+                os.path.join(_pf86, 'cloudflared', 'cloudflared.exe'),
+                os.path.join(_userprofile, '.cloudflared', 'cloudflared.exe'),
+            ]
+            for _ce in _cf_candidates:
+                if os.path.exists(_ce):
+                    cloudflared_exe = _ce
+                    break
+        # 3. Find a valid config.yml (contains credential-file path — no secrets hardcoded here)
+        cloudflared_config = None
+        _config_candidates = [
+            os.environ.get('CLOUDFLARED_CONFIG'),
+            os.path.join(_userprofile, '.cloudflared', 'config.yml'),
+            os.path.join(_commonappdata, 'IsolationBytes', 'cloudflared', 'config.yml'),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cloudflared.yml'),
+        ]
+        for _cc in _config_candidates:
+            if not _cc or not os.path.exists(_cc):
                 continue
-            key = _canonical_path(path)
-            if not key or key in seen:
+            try:
+                with open(_cc, 'r') as _f:
+                    _lines = _f.readlines()
+                _has_tunnel = any(l.strip().lower().startswith('tunnel:') for l in _lines)
+                _has_cred = any('credentials-file:' in l.lower() for l in _lines)
+                if _has_tunnel and _has_cred and 'YOUR_TUNNEL_ID' not in ''.join(_lines):
+                    cloudflared_config = _cc
+                    break
+            except Exception:
                 continue
-            seen.add(key)
-            findings.append({'path': path})
-        pending = list(_legacy.commands.get(device_id, []))
-        existing_scan_files = {_canonical_path(cmd.get('file_path', '')) for cmd in pending if cmd.get('action') == 'scan_file'}
-        for finding in findings:
-            path = finding['path']
-            if _canonical_path(path) not in existing_scan_files:
-                pending.append({'action': 'scan_file', 'file_path': path})
-                targeted += 1
-        _legacy.commands[device_id] = pending
-        sent += 1
-    quarantined = []
-    for device_id, agent in agents.items():
-        host = agent.get('hostname', device_id)
-        for qfile in agent.get('quarantine_files') or []:
-            quarantined.append({'hostname': host, 'device_id': device_id, 'filename': qfile.get('filename', ''), 'original_path': qfile.get('original_path', ''), 'quarantined_at': qfile.get('quarantined_at', ''), 'size': qfile.get('size', 0)})
-    return jsonify({'ok': True, 'success': True, 'status': 'accepted', 'message_type': 'success', 'quarantined': quarantined, 'failed': [], 'count': len(quarantined), 'agents_triggered': sent, 'targeted_findings': targeted, 'message': f'YARA quarantine queued for {targeted} current finding(s) across {sent} agent(s). Results will refresh after the scan.', 'error': None}), 200
+        if cloudflared_exe:
+            try:
+                if cloudflared_config:
+                    _subproc2.Popen(
+                        [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', tunnel_name],
+                        stdout=_subproc2.DEVNULL,
+                        stderr=_subproc2.DEVNULL,
+                        creationflags=getattr(_subproc2, 'CREATE_NO_WINDOW', 0),
+                    )
+                else:
+                    # No config with credentials — try quick tunnel (temporary URL)
+                    _subproc2.Popen(
+                        [cloudflared_exe, 'tunnel', '--url', f'http://127.0.0.1:{flask_port}'],
+                        stdout=_subproc2.DEVNULL,
+                        stderr=_subproc2.DEVNULL,
+                        creationflags=getattr(_subproc2, 'CREATE_NO_WINDOW', 0),
+                    )
+                print('Cloudflare tunnel started')
+            except Exception as e:
+                print(f'Failed to start Cloudflare tunnel: {e}')
+        else:
+            print('cloudflared not found — skipping tunnel')
+    _threading.Thread(target=_delayed_start_cloudflared, daemon=True).start()
 
-
-def _complete_agent_scan_results_response():
-    if not (session.get('logged_in') or session.get('user_logged_in')):
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message': 'Authentication required', 'error': 'Authentication required'}), 401
-    return jsonify(build_complete_agent_scan_results(_legacy)), 200
-
-
-@app.before_request
-def _intercept_agent_scan_and_yara_quarantine():
-    if request.method == 'POST' and request.path == '/api/agent-trigger-scan':
-        return _agent_trigger_scan_response()
-    if request.method == 'GET' and request.path == '/api/agent-scan-results':
-        return _complete_agent_scan_results_response()
-    if request.method == 'POST' and request.path == '/quarantine/yara-matches':
-        return _yara_only_quarantine_response()
-    return None
-
-
-@app.route('/api/conditional_startup/status', methods=['GET'])
-def conditional_startup_status_api():
-    if not (session.get('logged_in') or session.get('user_logged_in')):
-        return jsonify({'error': 'Authentication required'}), 401
-    return jsonify(_canonical_yara_agent_state()), 200
+    create_cloud_app().run(host=host, port=flask_port, debug=False, threaded=True, ssl_context=ssl_ctx)

@@ -1,0 +1,31 @@
+name: Unify agent and YARA dashboard scan status
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: read
+
+jobs:
+  unify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+          fetch-depth: 1
+
+      - name: Verify unified scan status implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F "def _complete_agent_scan_results_response" cloud/cloud_server.py >/dev/null
+          grep -F "build_complete_agent_scan_results(_legacy)" cloud/cloud_server.py >/dev/null
+          grep -F "def _agent_trigger_scan_response" cloud/cloud_server.py >/dev/null
+          grep -F "'status': 'started'" cloud/cloud_server.py >/dev/null
+          grep -F "data.status === 'started'" templates/index.html >/dev/null
+          test -f cloud/_agent_results_unlimited.py
+          echo "Agent and YARA scan-status integration is present."

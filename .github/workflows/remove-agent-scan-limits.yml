@@ -1,0 +1,29 @@
+name: Remove agent scan limits
+
+on:
+  push:
+    branches:
+      - security-v2
+
+permissions:
+  contents: read
+
+jobs:
+  remove-limits:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: security-v2
+
+      - name: Verify unlimited agent entrypoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f standalone_agent_unlimited.py
+          test -f standalone_agent.spec
+          grep -F "standalone_agent_unlimited.py" standalone_agent.spec >/dev/null
+          grep -F "MAX_FILES_PER_SCAN = float('inf')" standalone_agent_unlimited.py >/dev/null
+          grep -F "MAX_SCAN_CYCLE_SECONDS = float('inf')" standalone_agent_unlimited.py >/dev/null
+          echo "Unlimited scan entrypoint is configured and packaged by standalone_agent.spec."

@@ -233,19 +233,23 @@ def init_web_security(
     @app.after_request
     def add_security_headers(response):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
-        # The dashboard embeds the file-crypto page, but no external origin
-        # should be able to frame the application.
         response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         microphone_policy = "(self)" if request.path.rstrip("/") == "/voice-assistant" else "()"
         response.headers.setdefault(
             "Permissions-Policy", f"camera=(), microphone={microphone_policy}, geolocation=()"
         )
+        # The UI uses a small, explicit set of third-party static assets. Keep
+        # the policy restrictive while allowing those assets and Cloudflare's
+        # optional Web Analytics beacon.  Do not use wildcard sources.
         response.headers.setdefault(
             "Content-Security-Policy",
             "default-src 'self'; object-src 'none'; base-uri 'self'; "
             "frame-ancestors 'self'; form-action 'self'; "
-            "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'",
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://static.cloudflareinsights.com; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com data:; "
+            "connect-src 'self' https://cloudflareinsights.com https://static.cloudflareinsights.com;",
         )
         if request.is_secure or _env_bool("SECURITY_HSTS", False):
             response.headers.setdefault(

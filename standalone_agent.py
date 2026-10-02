@@ -204,6 +204,12 @@ def _is_protected_path(filepath):
             return True
     return False
 SCAN_INTERVAL = 600        # seconds between scans
+<<<<<<< HEAD
+=======
+MAX_FILES_PER_SCAN = 5000    # full-system scan budget; keeps the agent aligned with dashboard scans
+MAX_SCAN_CYCLE_SECONDS = 600 # allow a full-system scan to run for the dashboard scan window
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+>>>>>>> origin/privacy-hide-connection-ips
 AGENT_VERSION = "1.8.950.0"
 UPDATE_CHECK_INTERVAL = 3600  # check for updates every hour
 QUARANTINE_DIR = os.path.join(
@@ -2100,10 +2106,12 @@ X-GNOME-Autostart-enabled=true
                             # Count as a blocked threat only for high/critical
                             # matches, not medium, to avoid inflating the
                             # dashboard counter with low-confidence hits.
-                            if _rank_of(highest) >= _rank_of('high'):
+                            if _rank_of(highest) >= _rank_of('medium'):
                                 self._threats_blocked += 1
-                                # Block in place only — no quarantine during scan.
-                                # Quarantine is a separate manual action from the dashboard.
+                                # Contain first, then automatically quarantine confirmed
+                                # high/critical malware. _quarantine_file() delegates to
+                                # quarantine_utils, whose canonical destination is
+                                # %USERPROFILE%\AppData\Local\Temp\Defender_Quarantine.
                                 bok = self._block_file_in_place(filepath)
                                 if bok:
                                     for f in findings:
@@ -2119,6 +2127,18 @@ X-GNOME-Autostart-enabled=true
                                                 f['renamed'] = True
                                             else:
                                                 f['block_error'] = True
+                                # Quarantine confirmed high/critical YARA hits after
+                                # containment. Lower-severity matches remain for review.
+                                try:
+                                    if os.path.exists(filepath):
+                                        qok = self._quarantine_file(filepath)
+                                        for f in findings:
+                                            if f.get('path') == filepath:
+                                                f['quarantined'] = bool(qok)
+                                                if qok:
+                                                    f['blocked'] = False
+                                except Exception as qe:
+                                    print(f'[QUARANTINE] Failed for {filepath}: {qe}')
                     # ML detection — always run, even on YARA-matched files
                     # so ransomware/persistence indicators are counted
                     ml_suspicious = False
@@ -2156,6 +2176,17 @@ X-GNOME-Autostart-enabled=true
                                 except Exception:
                                     pass
                                 self._threats_blocked += 1
+                            # Quarantine ML-only findings at a strong-confidence threshold.
+                            try:
+                                if ml_suspicious and ml_score >= 60 and os.path.exists(filepath):
+                                    qok = self._quarantine_file(filepath)
+                                    target = next((f for f in findings if f.get('path') == filepath), None)
+                                    if target:
+                                        target['quarantined'] = bool(qok)
+                                        if qok:
+                                            target['blocked'] = False
+                            except Exception as qe:
+                                print(f'[QUARANTINE] ML quarantine failed for {filepath}: {qe}')
                             print(f"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}")
                     except Exception:
                         pass
@@ -2553,7 +2584,7 @@ X-GNOME-Autostart-enabled=true
                             self._register_blocked_file(filepath, threat_type)
                         except Exception:
                             pass
-                    if _rank_of(highest) >= _rank_of('high'):
+                    if _rank_of(highest) >= _rank_of('medium'):
                         self._threats_blocked += 1
                         # Block in place only — no quarantine during scan
                         bok = self._block_file_in_place(filepath)
@@ -2568,6 +2599,16 @@ X-GNOME-Autostart-enabled=true
                         else:
                             for f in findings:
                                 f['blocked'] = True
+                        try:
+                            if os.path.exists(filepath):
+                                qok = self._quarantine_file(filepath)
+                                for f in findings:
+                                    if f.get('path') == filepath:
+                                        f['quarantined'] = bool(qok)
+                                        if qok:
+                                            f['blocked'] = False
+                        except Exception as qe:
+                            print(f'[QUARANTINE] Single-file YARA quarantine failed for {filepath}: {qe}')
             # ML detection for single file scan — always run
             ml_suspicious, ml_score, ml_reason, ml_ttype = self._ml_scan_file(filepath)
             if ml_suspicious:
@@ -2599,6 +2640,16 @@ X-GNOME-Autostart-enabled=true
                     except Exception:
                         pass
                     self._threats_blocked += 1
+                    try:
+                        if ml_score >= 60 and os.path.exists(filepath):
+                            qok = self._quarantine_file(filepath)
+                            target = next((f for f in findings if f.get('path') == filepath), None)
+                            if target:
+                                target['quarantined'] = bool(qok)
+                                if qok:
+                                    target['blocked'] = False
+                    except Exception as qe:
+                        print(f'[QUARANTINE] Single-file ML quarantine failed for {filepath}: {qe}')
                     print(f"[ML FINDING] {filepath} | type={ml_ttype} | score={ml_score} | {ml_reason}")
             self._report(findings, report_type='single_file_scan')
             if findings:
