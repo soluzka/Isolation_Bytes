@@ -130,6 +130,21 @@ def run(cmd, **kw):
     return safe_run(cmd, **kw)
 
 
+# ---------------------------------------------------------------------------
+# Publish build artifacts
+# ---------------------------------------------------------------------------
+def _publish_build_artifact(src, filename):
+    """Copy a freshly built artifact into the canonical downloads directory."""
+    if not os.path.isfile(src):
+        raise RuntimeError(f'Expected build artifact missing: {src}')
+    downloads_dir = os.path.join(BASE_DIR, 'downloads')
+    os.makedirs(downloads_dir, exist_ok=True)
+    dst = os.path.join(downloads_dir, filename)
+    shutil.copy2(src, dst)
+    print(f'Published {filename}: {dst}')
+    return dst
+
+
 def find_dotnet():
     for c in [shutil.which('dotnet'),
               os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Microsoft', 'dotnet', 'dotnet.exe'),
@@ -367,19 +382,6 @@ publish_dir = os.path.join(NATIVE_DIR, 'bin', 'x64', 'Release',
 if not os.path.isdir(publish_dir):
     print(f'ERROR: publish output not found at {publish_dir}')
     sys.exit(1)
-
-# ---------------------------------------------------------------------------
-# Publish canonical installer artifacts before packaging/deployment.
-# ---------------------------------------------------------------------------
-def _publish_build_artifact(src, filename):
-    if not os.path.isfile(src):
-        raise RuntimeError(f'Expected build artifact missing: {src}')
-    os.makedirs(os.path.join(BASE_DIR, 'downloads'), exist_ok=True)
-    dst = os.path.join(BASE_DIR, 'downloads', filename)
-    shutil.copy2(src, dst)
-    print(f'Published {filename}: {dst}')
-    return dst
-
 
 # ---------------------------------------------------------------------------
 # 4. Stage the MSIX contents (WPF app + antivirus_server onedir)
