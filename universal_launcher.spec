@@ -12,7 +12,7 @@ a = Analysis(
                    'standalone_agent', 'psutil', 'requests', 'urllib3',
                    'socket', 'platform', 'hashlib', 'threading', 'datetime',
                    'argparse', 'concurrent.futures', 're', 'plistlib'],
-    hookspath=['C:/Users/bpier/OneDrive/Documents/antivirus-yara-rules-c/antivirus-yara-rules-c/pyinstaller_hooks', ],
+    hookspath=[os.path.join(_BASE, 'pyinstaller_hooks')],
     hooksconfig={},
     runtime_hooks=[],
     excludes=['Crypto', 'Crypto.*', 'Cryptodome', 'Cryptodome.*',

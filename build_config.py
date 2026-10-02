@@ -349,6 +349,10 @@ if not args.skip_exe:
         sys.exit(1)
     print(f'Onedir: {onedir}')
 
+    # Materialize the launcher source from the canonical embedded installer
+    # definitions before PyInstaller reads universal_launcher.spec.
+    _generate_embedded_installer_scripts()
+
     # ── Build the universal launcher as a single standalone EXE ──
     launcher_spec = os.path.join(BASE_DIR, 'universal_launcher.spec')
     if os.path.isfile(launcher_spec):
