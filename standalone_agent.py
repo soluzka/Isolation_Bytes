@@ -829,6 +829,12 @@ class StandaloneAgent:
                 pass
             return
         if action == 'scan_now':
+            if self._scan_lock.locked():
+                # The continuous scanner is already traversing; publish current
+                # progress immediately instead of silently dropping the trigger.
+                print("[CMD] Scan trigger received while a traversal is running — reporting live progress")
+                threading.Thread(target=self._report, args=([], 'scan_progress'), daemon=True).start()
+                return
             print("[CMD] Scan triggered from cloud dashboard — running immediate scan")
             try:
                 import threading

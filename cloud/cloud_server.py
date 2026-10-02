@@ -159,6 +159,18 @@ def _canonical_yara_agent_state():
     }
 
 
+def _agent_online(agent, max_age=90):
+    """True when the agent has checked in recently (heartbeat is every ~10s)."""
+    from datetime import datetime, timezone
+    try:
+        seen = datetime.fromisoformat(str(agent.get("last_seen") or "").replace("Z", "+00:00"))
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - seen).total_seconds() <= max_age
+    except Exception:
+        return False
+
+
 def _agent_trigger_scan_response():
     if not _logged_in():
         return jsonify({
@@ -184,6 +196,20 @@ def _agent_trigger_scan_response():
             "agents": 0,
             "agents_triggered": 0,
         }), 404
+
+    online = {d: a for d, a in agents.items() if _agent_online(a)}
+    if not online:
+        last_seen = max([str(a.get("last_seen") or "never") for a in agents.values()] or ["never"])
+        message = (
+            "No agent is online, so nothing can start the scan. The cloud can only "
+            "queue the command; the agent process must be running on the PC "
+            f"(last check-in: {last_seen})."
+        )
+        return jsonify({
+            "ok": False, "success": False, "status": "error",
+            "message_type": "error", "message": message, "error": message,
+            "agents": 0, "agents_triggered": 0,
+        }), 503
 
     global _STARTUP_RUNNING, _STARTUP_STARTED_AT
     _STARTUP_RUNNING = True
