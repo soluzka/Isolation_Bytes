@@ -1070,7 +1070,11 @@ def _perform_scan_all():
                                     persistence_matches += 1
                                 if 'ransomware' in rl:
                                     ransomware_matches += 1
-                            if any('persistence' in r.lower() or 'ransomware' in r.lower() for r in rule_names):
+                            # Retain ALL YARA matches in the suspicious list so the
+                            # dashboard and quarantine button see every hit, not just
+                            # files whose rule name happens to contain the word
+                            # 'persistence' or 'ransomware'.
+                            if rule_names:
                                 yara_suspicious.append({'file': file_path, 'rules': rule_names})
 
                             yara_score = yara_risk_score(rule_names)
@@ -3857,7 +3861,7 @@ def run_scheduled_scans():
                 conditional_startup_state['scanned_files'] = conditional_startup_state.get('scanned_files', 0) + scan_files_count
                 conditional_startup_state['quarantined_files'] = conditional_startup_state.get('quarantined_files', 0) + scan_quarantine_count
                 conditional_startup_state['ml_detections'] = conditional_startup_state.get('ml_detections', 0) + scan_ml_hits
-                conditional_startup_state['yara_suspicious'] = conditional_startup_state.get('yara_suspicious', 0) + scan_ransomware_hits + scan_persistence_hits
+                conditional_startup_state['yara_suspicious'] = conditional_startup_state.get('yara_suspicious', 0) + scan_yara_hits
                 conditional_startup_state['ransomware_indicators'] = conditional_startup_state.get('ransomware_indicators', 0) + scan_ransomware_hits
                 conditional_startup_state['persistence_indicators'] = conditional_startup_state.get('persistence_indicators', 0) + scan_persistence_hits
                 conditional_startup_state['last_updated'] = time.strftime('%Y-%m-%d %H:%M:%S')

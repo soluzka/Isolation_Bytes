@@ -87,11 +87,9 @@ def _agent_report_marker(agent):
 def _live_max(report, agent, key):
     """Return the newest cumulative counter from report or live heartbeat."""
     try:
-<<<<<<< HEAD
-        with open(_AGENTS_FILE, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
+        return max(int(report.get(key) or 0), int(agent.get(key) or 0))
+    except (TypeError, ValueError):
+        return agent.get(key) or report.get(key) or 0
 
 def _save_agents(data):
     """Save agents to the shared JSON file."""
@@ -3011,14 +3009,10 @@ def cloud_kill_switch():
     error = request.args.get('err') or None
     try:
         pending = max(0, int(request.args.get('pending', 0)))
-=======
-        return max(int(report.get(key) or 0), int(agent.get(key) or 0))
->>>>>>> origin/privacy-hide-connection-ips
     except (TypeError, ValueError):
-        return agent.get(key) or report.get(key) or 0
+        pending = 0
 
 
-<<<<<<< HEAD
 @cloud_bp.route('/scan-report', methods=['GET'], endpoint='scan_report')
 @cloud_bp.route('/scan_report.html', methods=['GET'])
 @_require_login
@@ -4441,15 +4435,12 @@ def _get_scan_counter(key, default=0):
 
 def _get_scan_findings():
     """Build a findings list for the dashboard review UI from the latest
-    scan's yara_suspicious_list (ransomware/persistence matches).
+    scan's yara_suspicious_list (ALL YARA matches, not just
+    ransomware/persistence-named rules).
     The frontend expects fields: path, source, reason.
     Files that no longer exist (already quarantined/deleted) are filtered out."""
     result = _continuous_scan_state.get('last_result') or {}
     suspicious = result.get('yara_suspicious_list') or []
-=======
-def _canonical_yara_agent_state():
-    agents = _legacy._all_agents()
->>>>>>> origin/privacy-hide-connection-ips
     findings = []
     seen_findings = set()
     scanned_files = 0
@@ -4481,7 +4472,6 @@ def _canonical_yara_agent_state():
         elif pending_scan:
             running = True
 
-<<<<<<< HEAD
     # Aggregate data from connected agents (local PCs) only.
     agents = _all_agents()
     agent_files_scanned = 0
@@ -4524,30 +4514,6 @@ def _canonical_yara_agent_state():
             'threats': at,
             'scanning': ag.get('scanning', False),
         })
-=======
-        report_findings = report.get('findings') or report.get('results') or []
-        for finding in report_findings:
-            if not isinstance(finding, dict) or not _is_yara_finding(finding):
-                continue
-            path = finding.get('path') or finding.get('original_path') or ''
-            key = (device_id, _canonical_path(path), str(finding.get('rule') or '').strip().lower())
-            if key in seen_findings:
-                continue
-            seen_findings.add(key)
-            item = dict(finding)
-            item['path'] = path
-            item['original_path'] = finding.get('original_path') or path
-            item['device_id'] = device_id
-            item['hostname'] = agent.get('hostname', device_id)
-            item['quarantined'] = bool(finding.get('quarantined'))
-            findings.append(item)
-            threat = str(item.get('threat_type') or '').lower()
-            rule = str(item.get('rule') or '').lower()
-            if 'ransom' in threat or 'ransom' in rule:
-                ransomware_indicators += 1
-            if 'persist' in threat or 'persist' in rule:
-                persistence_indicators += 1
->>>>>>> origin/privacy-hide-connection-ips
 
         for finding in report_findings:
             if not isinstance(finding, dict):
@@ -4557,7 +4523,6 @@ def _canonical_yara_agent_state():
             if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_') or threat == 'ml':
                 ml_detections += 1
 
-<<<<<<< HEAD
     # Compute ransomware/persistence/yara/ml indicators from cumulative
     # agent counters (stored on each agent record, never reset by clean scans)
     agent_ransomware = 0
@@ -4627,38 +4592,23 @@ def cloud_run_startup():
     _startup_state['yara_suspicious'] = 0
     _startup_state['threats_detected'] = 0
     _startup_state['scan_log'] = []
-    # Trigger a scan on all connected agents instead of scanning the VPS.
-    agents = _all_agents()
-=======
-    return {
-        'running': running,
-        'last_run': last_scan,
-        'last_updated': last_scan,
-        'started_at': min((v.get('started_at') for v in _agent_scan_state.values() if v.get('started_at')), default=None),
-        'duration': None,
-        'scanned_files': scanned_files,
-        'quarantined_files': quarantined_files,
-        'blocked_threats': sum(1 for f in findings if f.get('blocked')),
-        'errors': 0,
-        'process_events': 0,
-        'ml_detections': ml_detections,
-        'ransomware_indicators': ransomware_indicators,
-        'persistence_indicators': persistence_indicators,
-        'yara_suspicious': len(findings),
-        'findings': findings,
-        'ml_models': {},
-        'last_error': '',
-    }
+    return _agent_trigger_scan_response()
 
 
 def _agent_trigger_scan_response():
+    """Queue a scan_now command for every connected agent and return immediately.
+    Used by both /run_startup (cloud dashboard) and the intercept hook on
+    /api/agent-trigger-scan so both paths share the same implementation."""
     if not (session.get('logged_in') or session.get('user_logged_in')):
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'Authentication required', 'error': 'Authentication required', 'agents': 0, 'agents_triggered': 0}), 401
+        return jsonify({'ok': False, 'success': False, 'status': 'error',
+                        'message_type': 'error', 'message': 'Authentication required',
+                        'error': 'Authentication required', 'agents': 0, 'agents_triggered': 0}), 401
     agents = _legacy._all_agents()
     if not agents:
-        return jsonify({'ok': False, 'success': False, 'status': 'error', 'message_type': 'error', 'message': 'No connected agents to scan.', 'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
+        return jsonify({'ok': False, 'success': False, 'status': 'error',
+                        'message_type': 'error', 'message': 'No connected agents to scan.',
+                        'error': 'No connected agents to scan.', 'agents': 0, 'agents_triggered': 0}), 404
     now = time.time()
->>>>>>> origin/privacy-hide-connection-ips
     sent = 0
     for device_id, agent in agents.items():
         pending = [cmd for cmd in list(_legacy.commands.get(device_id, [])) if cmd.get('action') != 'scan_now']
@@ -4667,7 +4617,9 @@ def _agent_trigger_scan_response():
         _agent_scan_state[device_id] = {'started_at': now, 'report_marker': _agent_report_marker(agent)}
         sent += 1
     message = f'Scan triggered for {sent} agent(s). Results will appear shortly.'
-    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True, 'message_type': 'success', 'message': message, 'error': None, 'agents': sent, 'agents_triggered': sent}), 200
+    return jsonify({'ok': True, 'success': True, 'status': 'started', 'accepted': True,
+                    'message_type': 'success', 'message': message, 'error': None,
+                    'agents': sent, 'agents_triggered': sent}), 200
 
 
 def _yara_only_quarantine_response():
