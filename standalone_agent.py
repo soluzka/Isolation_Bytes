@@ -2482,6 +2482,10 @@ X-GNOME-Autostart-enabled=true
             return False
 
     def _scan_cycle(self):
+        # Reset per-scan counter so every new generation starts from 0.
+        # Cumulative totals (_total_yara, _total_ransomware, etc.) are
+        # intentionally NOT reset here — they accumulate across cycles.
+        self._files_scanned = 0
         cycle_start = time.time()
         all_findings = []
         for dirpath in self._scan_dirs:
