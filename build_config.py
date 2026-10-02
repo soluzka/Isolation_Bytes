@@ -20,6 +20,7 @@ import re
 import argparse
 import zipfile
 import contextlib
+import ast
 
 from utils.subprocess_safe import safe_run
 
@@ -144,6 +145,60 @@ def _publish_build_artifact(src, filename):
     print(f'Published {filename}: {dst}')
     return dst
 
+
+def _generate_embedded_installer_scripts():
+    """Materialize installer scripts embedded in cloud_server_original.py."""
+    source_path = os.path.join(BASE_DIR, 'cloud', 'cloud_server_original.py')
+    if not os.path.isfile(source_path):
+        raise RuntimeError(f'Cloud server source not found: {source_path}')
+
+    with open(source_path, 'r', encoding='utf-8') as f:
+        tree = ast.parse(f.read(), filename=source_path)
+
+    values = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.startswith('_INSTALL_'):
+                    try:
+                        values[target.id] = ast.literal_eval(node.value)
+                    except (ValueError, SyntaxError):
+                        pass
+                elif isinstance(target, ast.Name) and target.id in {
+                    '_UNIVERSAL_LAUNCHER_PY', '_STANDALONE_AGENT_PY',
+                    '_START_AGENT_BAT', '_START_AGENT_SH',
+                }:
+                    try:
+                        values[target.id] = ast.literal_eval(node.value)
+                    except (ValueError, SyntaxError):
+                        pass
+
+    filename_map = {
+        'install-windows.ps1': '_INSTALL_WINDOWS_PS1',
+        'install-windows.bat': '_INSTALL_WINDOWS_BAT',
+        'install-macos.sh': '_INSTALL_MACOS_SH',
+        'install-linux.sh': '_INSTALL_LINUX_SH',
+        'install-universal.sh': '_INSTALL_UNIVERSAL_SH',
+        'install-universal.bat': '_INSTALL_WINDOWS_BAT',
+        'install-android.sh': '_INSTALL_ANDROID_SH',
+        'install-chromeos.sh': '_INSTALL_CHROMEOS_SH',
+        'install-ios.mobileconfig': '_INSTALL_IOS_MOBILECONFIG',
+        'start_agent.bat': '_START_AGENT_BAT',
+        'start_agent.sh': '_START_AGENT_SH',
+        'universal_launcher.py': '_UNIVERSAL_LAUNCHER_PY',
+        'standalone_agent.py': '_STANDALONE_AGENT_PY',
+    }
+
+    os.makedirs(DIST_DIR, exist_ok=True)
+    for filename, variable in filename_map.items():
+        content = values.get(variable)
+        if content is None:
+            print(f'WARNING: embedded installer {variable} not found; {filename} skipped.')
+            continue
+        path = os.path.join(DIST_DIR, filename)
+        with open(path, 'w', encoding='utf-8', newline='') as f:
+            f.write(content)
+        print(f'Generated installer script: {path}')
 
 def find_dotnet():
     for c in [shutil.which('dotnet'),
@@ -512,25 +567,6 @@ for script in ['install-windows.ps1', 'install-windows.bat',
             print(f'Copied {script} to dist/')
         else:
             print(f'{script} already in dist/')
-
-# Publish installer aliases with stable names.  These aliases are generated
-# from the same installer scripts used by the build, so they cannot drift to
-# an older release name.
-installer_aliases = {
-    'universal.bat': 'install-universal.bat',
-    'universal.ps1': 'install-windows.ps1',
-}
-for alias, source_name in installer_aliases.items():
-    source = os.path.join(DIST_DIR, source_name)
-    if not os.path.isfile(source):
-        source = os.path.join(BASE_DIR, source_name)
-    if os.path.isfile(source):
-        alias_path = os.path.join(DIST_DIR, alias)
-        shutil.copy2(source, alias_path)
-        print(f'Installer alias generated: {alias_path}')
-        _publish_build_artifact(alias_path, alias)
-    else:
-        print(f'WARNING: installer source {source_name} not found; {alias} skipped.')
 
 # Publish the canonical installer scripts themselves as well.
 for script in [
