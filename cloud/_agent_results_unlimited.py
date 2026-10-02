@@ -167,6 +167,9 @@ def _fix_license_input_and_login_csrf(legacy):
     # already-registered before_request function. Add the public login API to
     # that set without replacing the security middleware itself.
     try:
+        app = getattr(legacy, 'app', None)
+        if app is None:
+            return
         for funcs in getattr(app, 'before_request_funcs', {}).values():
             for func in funcs:
                 if getattr(func, '__name__', '') != 'enforce_web_security':
