@@ -2987,6 +2987,13 @@ def pair_agent():
     return jsonify({'ok': True, 'device_token': credential}), 200
 
 
+def _as_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 @cloud_bp.route('/agent/heartbeat', methods=['POST'])
 @_require_key
 def agent_heartbeat():
@@ -3019,12 +3026,13 @@ def agent_heartbeat():
         'watched_count': data.get('watched_count', 0),
         'scan_dirs': data.get('scan_dirs', agent.get('scan_dirs', [])),
         'dir_file_counts': data.get('dir_file_counts', agent.get('dir_file_counts', {})),
-        # Cumulative finding counters from agent (survive even if report fails)
-        'total_findings': data.get('total_findings', agent.get('total_findings', 0)),
-        'total_ransomware': data.get('total_ransomware', agent.get('total_ransomware', 0)),
-        'total_persistence': data.get('total_persistence', agent.get('total_persistence', 0)),
-        'total_yara': data.get('total_yara', agent.get('total_yara', 0)),
-        'total_ml': data.get('total_ml', agent.get('total_ml', 0)),
+        # Cumulative finding counters: the cloud's own totals survive agent
+        # restarts (an agent restarting reports 0), so never let them go down.
+        'total_findings': max(_as_int(data.get('total_findings')), _as_int(agent.get('total_findings'))),
+        'total_ransomware': max(_as_int(data.get('total_ransomware')), _as_int(agent.get('total_ransomware'))),
+        'total_persistence': max(_as_int(data.get('total_persistence')), _as_int(agent.get('total_persistence'))),
+        'total_yara': max(_as_int(data.get('total_yara')), _as_int(agent.get('total_yara'))),
+        'total_ml': max(_as_int(data.get('total_ml')), _as_int(agent.get('total_ml'))),
         'last_report_ok': data.get('last_report_ok', agent.get('last_report_ok', False)),
         'last_report_error': data.get('last_report_error', agent.get('last_report_error', '')),
     }

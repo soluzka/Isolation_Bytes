@@ -2507,16 +2507,17 @@ X-GNOME-Autostart-enabled=true
                     try:
                         findings = self._scan_directory(dirpath, cycle_start=cycle_start)
                         all_findings.extend(findings)
-                        self._report([], report_type='scan_progress')
+                        # Report each directory's findings as soon as it
+                        # finishes so the dashboard indicators fill in during
+                        # the scan instead of only after the last directory.
+                        self._report(findings, report_type='scan' if findings else 'scan_progress')
                     except Exception as e:
                         print(f"[SCAN] Directory scan error for {dirpath}: {e}")
                         self._report([], report_type='scan_progress')
                         continue
             if all_findings:
                 print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
-                self._report(all_findings)
-            else:
-                self._report([], report_type='heartbeat_scan')
+            self._report([], report_type='heartbeat_scan')
         finally:
             self._scan_lock.release()
 
