@@ -31,7 +31,8 @@ def build_complete_agent_scan_results(legacy):
     results = []
     total_findings = 0
     for device_id, ag in agents.items():
-        findings = _legacy._agent_findings_list(ag)
+        report = ag.get('last_report') or {}
+        findings = legacy._agent_findings_list(ag)
         if not isinstance(findings, list):
             findings = []
 

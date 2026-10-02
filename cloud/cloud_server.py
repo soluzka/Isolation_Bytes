@@ -89,6 +89,7 @@ def _canonical_yara_agent_state():
         files_scanned = int(row.get("files_scanned") or 0)
         quarantined_count = int(row.get("quarantined_count") or 0)
         agent_findings = _legacy._agent_findings_list(agent)
+        report = agent.get("last_report") or {}
 
         scanned_files += files_scanned
         quarantined += quarantined_count
