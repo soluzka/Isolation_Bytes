@@ -18,6 +18,12 @@ jobs:
           ref: security-v2
           fetch-depth: 1
 
+      - name: Validate cloud Python syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile cloud/cloud_server.py cloud/cloud_server_original.py cloud/_agent_results_unlimited.py
+
       - name: Verify unified scan status implementation
         shell: bash
         run: |
