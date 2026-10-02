@@ -4434,45 +4434,44 @@ def _get_scan_counter(key, default=0):
 
 
 def _get_scan_findings():
-    """Build a findings list for the dashboard review UI from the latest
-    scan's yara_suspicious_list (ALL YARA matches, not just
-    ransomware/persistence-named rules).
-    The frontend expects fields: path, source, reason.
-    Files that no longer exist (already quarantined/deleted) are filtered out."""
+    """Build dashboard findings from the latest scan's ALL YARA matches."""
     result = _continuous_scan_state.get('last_result') or {}
     suspicious = result.get('yara_suspicious_list') or []
     findings = []
-    seen_findings = set()
-    scanned_files = 0
-    quarantined_files = 0
-    ml_detections = 0
-    ransomware_indicators = 0
-    persistence_indicators = 0
-    last_scan = ''
-    running = False
-    now = time.time()
+    seen = set()
 
-    for device_id, agent in agents.items():
-        report = agent.get('last_report') or {}
-        scanned_files += _live_max(report, agent, 'files_scanned')
-        quarantined_files += _live_max(report, agent, 'quarantined_count')
-        marker = _agent_report_marker(agent)
-        last_scan = max(last_scan, marker)
-        scan_state = _agent_scan_state.get(device_id)
-        pending_scan = any(isinstance(cmd, dict) and cmd.get('action') == 'scan_now' for cmd in _legacy.commands.get(device_id, []))
-        if scan_state:
-            started = float(scan_state.get('started_at', 0) or 0)
-            previous_marker = str(scan_state.get('report_marker') or '')
-            if marker and marker != previous_marker:
-                _agent_scan_state.pop(device_id, None)
-            elif pending_scan or (started and now - started < _AGENT_SCAN_STALE_SECONDS):
-                running = True
-            else:
-                _agent_scan_state.pop(device_id, None)
-        elif pending_scan:
-            running = True
+    for item in suspicious:
+        if not isinstance(item, dict):
+            continue
+        file_path = item.get('file') or item.get('path') or item.get('original_path') or '?'
+        rules = item.get('rules') or item.get('rule') or []
+        if isinstance(rules, str):
+            rules = [rules]
+        rules = [str(rule) for rule in rules if rule]
+        key = (_canonical_path(file_path), tuple(rules))
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            'path': file_path,
+            'source': 'YARA',
+            'reason': ', '.join(rules),
+            'type': 'yara',
+            'rules': rules,
+            'severity': (
+                'high'
+                if any('ransomware' in rule.lower() for rule in rules)
+                else 'medium'
+            ),
+        })
 
-    # Aggregate data from connected agents (local PCs) only.
+    return findings
+
+
+def _canonical_yara_agent_state():
+    """Return one canonical, agent-authoritative scan state for the dashboard."""
+    from datetime import datetime
+
     agents = _all_agents()
     agent_files_scanned = 0
     agent_quarantined = 0
@@ -4481,29 +4480,62 @@ def _get_scan_findings():
     agent_findings = []
     agent_list = []
     agent_dirs = []
+    running = bool(_startup_state.get('running'))
+    now = time.time()
+
     for device_id, ag in agents.items():
         host = ag.get('hostname', device_id)
-        af = ag.get('files_scanned', 0) or 0
-        aq = ag.get('quarantined_count', 0) or 0
-        # Fallback: if quarantined_count is 0 but quarantine_files list has
-        # entries, use the list length (counter resets on agent restart)
+        report = ag.get('last_report') or {}
+
+        af = _live_max(report, ag, 'files_scanned')
+        aq = _live_max(report, ag, 'quarantined_count')
+        at = ag.get('findings_count', 0) or 0
+        ab = ag.get('threats_blocked', 0) or 0
+
         if aq == 0:
             qf_list = ag.get('quarantine_files') or []
             if qf_list:
                 aq = len(qf_list)
-        at = ag.get('findings_count', 0) or 0
-        ab = ag.get('threats_blocked', 0) or 0
-        agent_files_scanned += af
-        agent_quarantined += aq
-        agent_threats += at
-        agent_blocked += ab
-        for d in (ag.get('scan_dirs') or []):
-            labeled = f"[{host}] {d}"
+
+        agent_files_scanned += int(af or 0)
+        agent_quarantined += int(aq or 0)
+        agent_threats += int(at or 0)
+        agent_blocked += int(ab or 0)
+
+        for directory in ag.get('scan_dirs') or []:
+            labeled = f"[{host}] {directory}"
             if labeled not in agent_dirs:
                 agent_dirs.append(labeled)
-        last_report = ag.get('last_report') or {}
-        for f in (last_report.get('findings') or []):
-            agent_findings.append(f)
+
+        report_findings = report.get('findings') or report.get('results') or []
+        for finding in report_findings:
+            if isinstance(finding, dict):
+                agent_findings.append(finding)
+
+        marker = _agent_report_marker(ag)
+        scan_state = _agent_scan_state.get(device_id)
+        pending_scan = any(
+            isinstance(cmd, dict) and cmd.get('action') == 'scan_now'
+            for cmd in _legacy.commands.get(device_id, [])
+        )
+
+        if ag.get('scanning'):
+            running = True
+
+        if scan_state:
+            started = float(scan_state.get('started_at', 0) or 0)
+            previous_marker = str(scan_state.get('report_marker') or '')
+            if marker and previous_marker and marker != previous_marker:
+                _agent_scan_state.pop(device_id, None)
+            elif pending_scan or (
+                started and now - started < _AGENT_SCAN_STALE_SECONDS
+            ):
+                running = True
+            else:
+                _agent_scan_state.pop(device_id, None)
+        elif pending_scan:
+            running = True
+
         agent_list.append({
             'device_id': device_id,
             'hostname': host,
@@ -4512,52 +4544,70 @@ def _get_scan_findings():
             'files_scanned': af,
             'quarantined': aq,
             'threats': at,
-            'scanning': ag.get('scanning', False),
+            'scanning': bool(ag.get('scanning', False)),
         })
 
-        for finding in report_findings:
-            if not isinstance(finding, dict):
-                continue
-            rule = str(finding.get('rule') or '').lower()
-            threat = str(finding.get('threat_type') or '').lower()
-            if rule in {'ml_heuristic', 'ml'} or rule.startswith('ml_') or threat == 'ml':
-                ml_detections += 1
-
-    # Compute ransomware/persistence/yara/ml indicators from cumulative
-    # agent counters (stored on each agent record, never reset by clean scans)
     agent_ransomware = 0
     agent_persistence = 0
     agent_yara = 0
     agent_ml = 0
     agent_quarantine_errors = 0
-    for device_id, ag in agents.items():
-        agent_ransomware += ag.get('total_ransomware', 0) or 0
-        agent_persistence += ag.get('total_persistence', 0) or 0
-        agent_yara += ag.get('total_yara', 0) or 0
-        agent_ml += ag.get('total_ml', 0) or 0
-    # Count quarantine errors from last report findings
-    for f in agent_findings:
-        if f.get('quarantine_error'):
+
+    for ag in agents.values():
+        agent_ransomware += int(ag.get('total_ransomware', 0) or 0)
+        agent_persistence += int(ag.get('total_persistence', 0) or 0)
+        agent_yara += int(ag.get('total_yara', 0) or 0)
+        agent_ml += int(ag.get('total_ml', 0) or 0)
+
+    for finding in agent_findings:
+        if finding.get('quarantine_error'):
             agent_quarantine_errors += 1
 
-    return jsonify({
+    try:
+        from quick_start import _ml_model_status
+        ml_models = _ml_model_status()
+    except Exception:
+        ml_models = {}
+
+    if running:
+        _startup_state['last_updated'] = (
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        )
+
+    return {
         'success': True,
-        'status': 'running' if _startup_state['running'] else 'completed',
-        'progress': 100 if not _startup_state['running'] else 50,
-        'running': _startup_state['running'],
-        'started_at': _startup_state['started_at'],
-        'last_run': _startup_state['last_run'],
-        'last_updated': _startup_state['last_updated'] or _startup_state['last_run'],
-        'duration': _startup_state['duration'],
-        'scanned_files': (_startup_state['scanned_files'] if _startup_state['running'] else agent_files_scanned),
-        'quarantined_files': agent_quarantined,  # Use agent quarantined count only, not mixed with local _count_quarantine_files()
+        'status': 'running' if running else 'completed',
+        'progress': 50 if running else 100,
+        'running': running,
+        'started_at': _startup_state.get('started_at'),
+        'last_run': _startup_state.get('last_run'),
+        'last_updated': (
+            _startup_state.get('last_updated')
+            or _startup_state.get('last_run')
+        ),
+        'duration': _startup_state.get('duration'),
+
+        # Agent counters are authoritative. Do not mix in VPS/Defender
+        # quarantine files or reset these values between scan passes.
+        'scanned_files': agent_files_scanned,
+        'quarantined_files': agent_quarantined,
         'errors': _get_scan_counter('errors', 0) + agent_quarantine_errors,
         'process_events': sum(1 for _ in psutil.process_iter()),
         'ml_detections': _get_scan_counter('ml_detections', 0) + agent_ml,
-        'ransomware_indicators': _get_scan_counter('ransomware_indicators', 0) + agent_ransomware,
-        'persistence_indicators': _get_scan_counter('persistence_indicators', 0) + agent_persistence,
-        'yara_suspicious': _get_scan_counter('yara_suspicious', 0) + agent_yara,
-        'threats_found': _get_scan_counter('threats_detected', 0) + agent_threats,
+        'ransomware_indicators': (
+            _get_scan_counter('ransomware_indicators', 0)
+            + agent_ransomware
+        ),
+        'persistence_indicators': (
+            _get_scan_counter('persistence_indicators', 0)
+            + agent_persistence
+        ),
+        'yara_suspicious': (
+            _get_scan_counter('yara_suspicious', 0) + agent_yara
+        ),
+        'threats_found': (
+            _get_scan_counter('threats_detected', 0) + agent_threats
+        ),
         'blocked_threats': agent_blocked,
         'findings': _get_scan_findings() + agent_findings,
         'ml_models': ml_models,
@@ -4573,7 +4623,7 @@ def _get_scan_findings():
         'agent_persistence': agent_persistence,
         'agent_yara': agent_yara,
         'agent_ml': agent_ml,
-    }), 200
+    }
 
 
 @cloud_bp.route('/run_startup', methods=['POST'])
