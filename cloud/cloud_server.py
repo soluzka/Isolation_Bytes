@@ -42,6 +42,26 @@ def _pending_scan(agent_id):
         return False
 
 
+def _scan_still_running(agents):
+    """A triggered scan ends once every agent reports newer data or it times out."""
+    global _STARTUP_RUNNING
+    if not _STARTUP_RUNNING:
+        return False
+    now = time.time()
+    for device_id, agent in agents.items():
+        state = _agent_scan_state.get(device_id)
+        if not state:
+            continue
+        if now - state["started_at"] > 3600:
+            continue
+        if _pending_scan(device_id) or agent.get("scanning"):
+            return True
+        if _agent_report_marker(agent) == state["report_marker"]:
+            return True
+    _STARTUP_RUNNING = False
+    return False
+
+
 def _canonical_yara_agent_state():
     """Return the one dashboard scan state, using agent data as authority."""
     agents = _legacy._all_agents()
@@ -59,7 +79,7 @@ def _canonical_yara_agent_state():
     findings = []
     folders = []
     agent_rows = []
-    running = _STARTUP_RUNNING
+    running = _scan_still_running(agents)
 
     for device_id, agent in agents.items():
         row = normalized.get(device_id, {})
@@ -67,9 +87,7 @@ def _canonical_yara_agent_state():
 
         files_scanned = int(row.get("files_scanned") or 0)
         quarantined_count = int(row.get("quarantined_count") or 0)
-        agent_findings = report.get("findings") or report.get("results") or []
-        if not isinstance(agent_findings, list):
-            agent_findings = []
+        agent_findings = _legacy._agent_findings_list(agent)
 
         scanned_files += files_scanned
         quarantined += quarantined_count
@@ -241,14 +259,12 @@ def _yara_only_quarantine_response():
             and cmd.get("file_path")
         }
 
-        for finding in report.get("findings") or report.get("results") or []:
+        for finding in _legacy._agent_findings_list(agent):
             if not isinstance(finding, dict):
                 continue
-            rule = str(finding.get("rule") or "").strip().lower()
-            threat_type = str(finding.get("threat_type") or "").strip().lower()
-            if not (rule or threat_type in {"yara_match", "ransomware", "persistence"}):
+            if finding.get("quarantined"):
                 continue
-            if rule == "ml" or rule.startswith("ml_"):
+            if not _legacy._is_yara_finding(finding):
                 continue
             path = finding.get("path") or finding.get("original_path")
             if not path:
@@ -295,6 +311,8 @@ def _intercept_agent_scan_and_yara_quarantine():
         return _agent_trigger_scan_response()
     if request.method == "GET" and path == "/api/agent-scan-results":
         return _complete_agent_scan_results_response()
+    if request.method == "GET" and path == "/api/conditional_startup/status":
+        return conditional_startup_status_api()
     if request.method == "POST" and path == "/quarantine/yara-matches":
         return _yara_only_quarantine_response()
     return None
@@ -304,7 +322,13 @@ def _intercept_agent_scan_and_yara_quarantine():
 def conditional_startup_status_api():
     if not _logged_in():
         return jsonify({"error": "Authentication required"}), 401
-    return jsonify(_canonical_yara_agent_state()), 200
+    state = _canonical_yara_agent_state()
+    try:
+        legacy_state = _legacy.cloud_startup_status().get_json(silent=True) or {}
+        state["ml_models"] = legacy_state.get("ml_models") or {}
+    except Exception:
+        state.setdefault("ml_models", {})
+    return jsonify(state), 200
 
 
 # Delegate compatibility attributes that older imports may still access.

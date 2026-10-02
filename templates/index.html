@@ -724,7 +724,10 @@ if (stopAutoUpdatesBtn) {
 
             function renderStatus(data) {
                 window.currentConditionalStartupData = data;
-                if (!data.last_run && !data.running && !data.started_at) {
+                const hasActivity = ['scanned_files', 'quarantined_files', 'blocked_threats', 'ml_detections',
+                    'ransomware_indicators', 'persistence_indicators', 'yara_suspicious', 'threats_found']
+                    .some(function (k) { return Number(data[k]) > 0; });
+                if (!data.last_run && !data.running && !data.started_at && !hasActivity) {
                     statusDiv.innerHTML = '<p class="alert alert-info">Conditional startup has not run yet in this session.</p>';
                     renderMlModels(data.ml_models);
                     return;
@@ -976,7 +979,7 @@ if (stopAutoUpdatesBtn) {
                         if (!response.ok) throw new Error(data.error || data.message || `Server returned ${response.status}`);
                         return data;
                     })
-                    .then(renderStatus)
+                    .then(data => { renderStatus(data); return data; })
                     .catch(error => {
                         statusDiv.innerHTML = `<div class="alert alert-warning">Could not load conditional startup status: ${htmlEscape(error.message || error)}</div>`;
                     });

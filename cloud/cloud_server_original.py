@@ -3113,6 +3113,34 @@ def flagged_connections():
     })
 
 
+def _finding_key(f):
+    return (
+        str(f.get('path') or f.get('file') or '').lower(),
+        str(f.get('rule') or '').lower(),
+        str(f.get('hash') or ''),
+    )
+
+
+def _is_yara_finding(f):
+    """True for any real YARA rule match (not an ML-only heuristic finding)."""
+    rule = str(f.get('rule') or '').strip().lower()
+    if rule in ('ml', 'ml_heuristic') or rule.startswith('ml_'):
+        return False
+    ttype = str(f.get('threat_type') or '').lower()
+    reason = str(f.get('reason') or '').lower()
+    return bool(rule) or ttype in ('yara_match', 'blocked') or 'yara' in reason
+
+
+def _agent_findings_list(ag):
+    """Authoritative retained findings for an agent (falls back to last report)."""
+    store = ag.get('findings_store')
+    if store:
+        return list(store)
+    report = ag.get('last_report') or {}
+    found = report.get('findings') or report.get('results') or []
+    return list(found) if isinstance(found, list) else []
+
+
 @cloud_bp.route('/agent/report', methods=['POST'])
 @_require_key
 def agent_report():
@@ -3187,7 +3215,26 @@ def agent_report():
     report_persistence = 0
     report_yara = 0
     report_ml = 0
+    # Retain every distinct finding (path+rule) in one authoritative store so
+    # the dashboard, YARA page and cumulative counters all read the same list
+    # and a re-reported (already blocked) file is never double counted.
+    findings_store = list(existing.get('findings_store') or [])
+    store_index = {_finding_key(sf): i for i, sf in enumerate(findings_store)}
+    new_unique = []
     for f in enriched:
+        key = _finding_key(f)
+        if key in store_index:
+            stored = findings_store[store_index[key]]
+            for field in ('quarantined', 'blocked', 'quarantine_error', 'block_error', 'detected_at'):
+                if field in f:
+                    stored[field] = f[field]
+            if f.get('quarantined'):
+                stored['blocked'] = False
+        else:
+            store_index[key] = len(findings_store)
+            findings_store.append(f)
+            new_unique.append(f)
+    for f in new_unique:
         ttype = (f.get('threat_type') or '').lower()
         reason = str(f.get('reason', '')).lower()
         rule = str(f.get('rule', '')).lower()
@@ -3224,7 +3271,7 @@ def agent_report():
                 or 'firewall_disabl' in blob or 'antivirus_disabl' in blob
                 or ttype in ('rootkit', 'keylogger', 'trojan')):
             report_persistence += 1
-        if ttype == 'yara_match' or ttype == 'blocked' or 'yara' in blob or 'yara' in reason or f.get('rule') or ttype in ('ransomware', 'persistence'):
+        if _is_yara_finding(f):
             report_yara += 1
         if ttype == 'ml_suspicious' or 'ml' in reason or 'model' in reason or f.get('ml_score') or 'ml_heuristic' in rule:
             report_ml += 1
@@ -3238,8 +3285,9 @@ def agent_report():
         last_report = existing.get('last_report') or data
     update_fields = {
         'last_report': last_report,
+        'findings_store': findings_store,
         'last_seen': datetime.now(timezone.utc).isoformat(),
-        'findings_count': cumulative_findings,
+        'findings_count': prev_findings_count + len(new_unique),
         'last_scan': data.get('timestamp', datetime.now(timezone.utc).isoformat()),
         'files_scanned': data.get('files_scanned', existing.get('files_scanned', 0)),
         'quarantined_count': data.get('quarantined_count', existing.get('quarantined_count', 0)),
@@ -3307,15 +3355,14 @@ def cloud_yara_scanner():
         for d in (ag.get('scan_dirs') or []):
             monitored_folders.append(f"[{host}] {d}")
         # Collect agent scan findings
-        last_report = ag.get('last_report') or {}
-        findings = last_report.get('findings') or []
+        findings = _agent_findings_list(ag)
         agent_scan_results.append({
             'hostname': host,
             'device_id': device_id,
-            'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
+            'files_scanned': (ag.get('last_report') or {}).get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:50],  # cap at 50 per agent
+            'findings': findings,
         })
     return render_template('yara_scanner.html', rules_info=rules_info, monitored_folders=monitored_folders, monitored_directories=monitored_folders, agent_count=len(agents), agents=agents, agent_scan_results=agent_scan_results, session=session)
 
@@ -3328,15 +3375,14 @@ def cloud_agent_scan_results():
     results = []
     for device_id, ag in agents.items():
         host = ag.get('hostname', device_id)
-        last_report = ag.get('last_report') or {}
-        findings = last_report.get('findings') or []
+        findings = _agent_findings_list(ag)
         results.append({
             'hostname': host,
             'device_id': device_id,
-            'files_scanned': last_report.get('files_scanned', ag.get('files_scanned', 0)),
+            'files_scanned': (ag.get('last_report') or {}).get('files_scanned', ag.get('files_scanned', 0)),
             'finding_count': len(findings),
             'last_scan': ag.get('last_scan', ''),
-            'findings': findings[:100],
+            'findings': findings,
             'scan_dirs': ag.get('scan_dirs') or [],
             'quarantined_count': ag.get('quarantined_count', 0) or 0,
         })
@@ -5431,9 +5477,7 @@ def cloud_startup_status():
             labeled = f"[{host}] {d}"
             if labeled not in agent_dirs:
                 agent_dirs.append(labeled)
-        last_report = ag.get('last_report') or {}
-        for f in (last_report.get('findings') or [])[:50]:
-            agent_findings.append(f)
+        agent_findings.extend(_agent_findings_list(ag))
         agent_list.append({
             'device_id': device_id,
             'hostname': host,
@@ -5478,13 +5522,13 @@ def cloud_startup_status():
         'last_updated': _startup_state['last_updated'] or _startup_state['last_run'],
         'duration': _startup_state['duration'],
         'scanned_files': (_startup_state['scanned_files'] if _startup_state['running'] else agent_files_scanned),
-        'quarantined_files': _get_scan_counter('quarantined_files', _count_quarantine_files()) + agent_quarantined,
+        'quarantined_files': agent_quarantined,
         'errors': _get_scan_counter('errors', 0) + agent_quarantine_errors,
         'process_events': sum(1 for _ in psutil.process_iter()),
         'ml_detections': _get_scan_counter('ml_detections', 0) + agent_ml,
         'ransomware_indicators': _get_scan_counter('ransomware_indicators', 0) + agent_ransomware,
         'persistence_indicators': _get_scan_counter('persistence_indicators', 0) + agent_persistence,
-        'yara_suspicious': _get_scan_counter('yara_suspicious', 0) + agent_yara,
+        'yara_suspicious': agent_yara,
         'threats_found': _get_scan_counter('threats_detected', 0) + agent_threats,
         'blocked_threats': agent_blocked,
         'findings': _get_scan_findings() + agent_findings,
