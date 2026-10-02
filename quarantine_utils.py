@@ -90,15 +90,13 @@ def force_unlock_windows(filepath):
             logging.warning(f'Could not run handle.exe to unlock {filepath}: {e}')
 
 
-<<<<<<< HEAD
-=======
 def _neutralise_in_place(filepath):
-    """Overwrite a file's content with null bytes so it cannot execute.
+    """Overwrite a file content with null bytes so it cannot execute.
 
     Used as a last resort when the original file cannot be deleted (e.g. a
     webshell held open by IIS/Apache). Zeroing the content makes the file
-    harmless on disk immediately — web servers cannot interpret null-byte
-    PHP/ASP/JSP as executable code — even if the inode stays until reboot.
+    harmless on disk immediately - web servers cannot interpret null-byte
+    PHP/ASP/JSP as executable code - even if the inode stays until reboot.
 
     Returns True if neutralisation succeeded, False otherwise.
     """
@@ -115,7 +113,7 @@ def _neutralise_in_place(filepath):
         logging.error(f"Could not neutralise {filepath} in-place: {ne}")
         return False
 
->>>>>>> origin/privacy-hide-connection-ips
+
 def _add_local_signatures(data, filepath):
     """Append hashes of a quarantined file to the local signature file."""
     try:
@@ -350,51 +348,7 @@ def quarantine_file(filepath, reason=''):
         _send_alert(reason, filepath, hashlib.sha256(data).hexdigest())
         _add_local_signatures(data, filepath)
         secure_key.zero_and_unlock()
-<<<<<<< HEAD
         return True
-=======
-        if os.path.exists(filepath):
-            try:
-                os.remove(filepath)  # Delete the original file only after verified quarantine
-                logging.info(f"Deleted quarantined file: {filepath}")
-            except PermissionError:
-                # Step 1: try to unlock with handle.exe (Sysinternals)
-                force_unlock_windows(filepath)
-                try:
-                    os.remove(filepath)
-                    logging.info(f"Deleted {filepath} after handle.exe unlock")
-                except Exception as e2:
-                    logging.error(f"Still failed to delete {filepath} after unlock attempt: {e2}")
-                    # Step 2: kill processes holding the file open, then retry
-                    deleted = False
-                    try:
-                        from security.scan_cache import _kill_processes_locking_file
-                        _kill_processes_locking_file(filepath)
-                        os.remove(filepath)
-                        deleted = True
-                        logging.warning(f"Deleted {filepath} after killing locking process")
-                    except Exception as e3:
-                        logging.error(f"Could not delete {filepath} after killing processes: {e3}")
-
-                    if not deleted:
-                        # Step 3: neutralise the file in-place so it cannot execute
-                        # even though we cannot delete it yet.  This is critical for
-                        # webshells held open by IIS/Apache — zeroing the bytes makes
-                        # the script harmless immediately without needing to delete it.
-                        _neutralise_in_place(filepath)
-
-                        # Step 4: schedule for deletion on next reboot via MoveFileEx
-                        try:
-                            import ctypes
-                            MOVEFILE_DELAY_UNTIL_REBOOT = 4
-                            ctypes.windll.kernel32.MoveFileExW(
-                                filepath, None, MOVEFILE_DELAY_UNTIL_REBOOT)
-                            logging.warning(f"Scheduled {filepath} for deletion on next reboot")
-                        except Exception:
-                            logging.error(f"Could not schedule {filepath} for reboot deletion")
-        else:
-            logging.warning(f"File already missing when attempting to remove: {filepath}")
->>>>>>> origin/privacy-hide-connection-ips
     except Exception as e:
         logging.error(f'Error encrypting/quarantining {filepath}: {e}')
         for candidate in (tmp_dest, dest):

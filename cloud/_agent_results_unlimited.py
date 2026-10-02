@@ -26,7 +26,8 @@ def _monotonic_counter(device_id, key, report_value, live_value):
 
 
 def build_complete_agent_scan_results(legacy):
-    agents = legacy._all_agents()
+    get_agents = getattr(legacy, '_all_agents', None) or getattr(legacy, '_get_agents', None)
+    agents = get_agents() if callable(get_agents) else {}
     results = []
     total_findings = 0
     for device_id, ag in agents.items():

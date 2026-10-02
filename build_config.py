@@ -291,6 +291,7 @@ if not args.skip_exe:
         launcher_exe = os.path.join(DIST_DIR, 'IsolationBytesLauncher.exe')
         if os.path.isfile(launcher_exe):
             print(f'Universal launcher: {launcher_exe}')
+            _publish_build_artifact(launcher_exe, 'IsolationBytesLauncher.exe')
         else:
             print('WARNING: Universal launcher EXE not found.')
 
@@ -298,18 +299,36 @@ if not args.skip_exe:
     agent_spec = os.path.join(BASE_DIR, 'standalone_agent.spec')
     if os.path.isfile(agent_spec):
         print(f'\n{"="*60}\nBuilding standalone agent EXE\n{"="*60}')
-        _stop_running_agent_processes(os.path.join(DIST_DIR, 'IsolationBytesAgent.exe'))
+        agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
+        # Always remove the previous binary before building so a failed/stale
+        # PyInstaller output can never be mistaken for the current build.
+        if os.path.isfile(agent_exe):
+            try:
+                os.remove(agent_exe)
+            except OSError as exc:
+                print(f'ERROR: Cannot remove old agent EXE: {exc}')
+                sys.exit(1)
+        _stop_running_agent_processes(agent_exe)
         _patch_pyinstaller_spec_excludes(agent_spec)
         run([sys.executable, '-m', 'PyInstaller', agent_spec,
              '--noconfirm',
+             '--clean',
              '--distpath', DIST_DIR,
              '--workpath', BUILD_DIR])
-        agent_exe = os.path.join(DIST_DIR, 'IsolationBytesAgent.exe')
-        if os.path.isfile(agent_exe):
-            agent_size = os.path.getsize(agent_exe) / 1048576
-            print(f'Standalone agent: {agent_exe} ({agent_size:.1f} MB)')
-        else:
-            print('WARNING: Standalone agent EXE not found.')
+        if not os.path.isfile(agent_exe):
+            print(f'ERROR: Standalone agent EXE not found at {agent_exe}')
+            sys.exit(1)
+        agent_size = os.path.getsize(agent_exe) / 1048576
+        print(f'Standalone agent: {agent_exe} ({agent_size:.1f} MB)')
+
+        # The cloud update endpoint searches these directories. Keep a
+        # canonical copy next to the deployment artifacts so a newly built
+        # agent is the one distributed to existing installations.
+        agent_download_dir = os.path.join(BASE_DIR, 'downloads')
+        os.makedirs(agent_download_dir, exist_ok=True)
+        agent_download_path = os.path.join(agent_download_dir, 'IsolationBytesAgent.exe')
+        shutil.copy2(agent_exe, agent_download_path)
+        print(f'Agent download artifact: {agent_download_path}')
 else:
     print('Skipping PyInstaller build (--skip-exe)')
     onedir = os.path.join(DIST_DIR, 'antivirus_server')
@@ -348,6 +367,19 @@ publish_dir = os.path.join(NATIVE_DIR, 'bin', 'x64', 'Release',
 if not os.path.isdir(publish_dir):
     print(f'ERROR: publish output not found at {publish_dir}')
     sys.exit(1)
+
+# ---------------------------------------------------------------------------
+# Publish canonical installer artifacts before packaging/deployment.
+# ---------------------------------------------------------------------------
+def _publish_build_artifact(src, filename):
+    if not os.path.isfile(src):
+        raise RuntimeError(f'Expected build artifact missing: {src}')
+    os.makedirs(os.path.join(BASE_DIR, 'downloads'), exist_ok=True)
+    dst = os.path.join(BASE_DIR, 'downloads', filename)
+    shutil.copy2(src, dst)
+    print(f'Published {filename}: {dst}')
+    return dst
+
 
 # ---------------------------------------------------------------------------
 # 4. Stage the MSIX contents (WPF app + antivirus_server onedir)
@@ -415,6 +447,10 @@ shutil.copy2(temp_msix, msix_path)
 os.remove(temp_msix)
 print(f'MSIX packed: {msix_path}')
 
+# The MSIX in dist/ is the exact package just produced. Publish that exact
+# binary rather than relying on a previous server-side copy.
+_publish_build_artifact(msix_path, 'IsolationBytes.msix')
+
 # ---------------------------------------------------------------------------
 # 6. Sign the MSIX with signtool.exe
 # ---------------------------------------------------------------------------
@@ -438,6 +474,7 @@ ps_cmd = (
 run(['powershell.exe', '-NoProfile', '-Command', ps_cmd], check=False)
 if os.path.isfile(cer_path):
     print(f'Certificate exported: {cer_path}')
+    _publish_build_artifact(cer_path, 'IsolationBytes.cer')
 
 # ---------------------------------------------------------------------------
 # 7b. Trust the certificate locally so the MSIX can be sideloaded
@@ -474,6 +511,37 @@ for script in ['install-windows.ps1', 'install-windows.bat',
         else:
             print(f'{script} already in dist/')
 
+# Publish installer aliases with stable names.  These aliases are generated
+# from the same installer scripts used by the build, so they cannot drift to
+# an older release name.
+installer_aliases = {
+    'universal.bat': 'install-universal.bat',
+    'universal.ps1': 'install-windows.ps1',
+}
+for alias, source_name in installer_aliases.items():
+    source = os.path.join(DIST_DIR, source_name)
+    if not os.path.isfile(source):
+        source = os.path.join(BASE_DIR, source_name)
+    if os.path.isfile(source):
+        alias_path = os.path.join(DIST_DIR, alias)
+        shutil.copy2(source, alias_path)
+        print(f'Installer alias generated: {alias_path}')
+        _publish_build_artifact(alias_path, alias)
+    else:
+        print(f'WARNING: installer source {source_name} not found; {alias} skipped.')
+
+# Publish the canonical installer scripts themselves as well.
+for script in [
+    'install-windows.ps1', 'install-windows.bat',
+    'install-universal.bat', 'install-universal.sh',
+    'universal_launcher.py', 'start_agent.bat', 'start_agent.sh',
+    'install-macos.sh', 'install-linux.sh', 'install-ios.mobileconfig',
+    'install-android.sh', 'install-chromeos.sh',
+]:
+    script_path = os.path.join(DIST_DIR, script)
+    if os.path.isfile(script_path):
+        _publish_build_artifact(script_path, script)
+
 # ---------------------------------------------------------------------------
 # 8b. Generate the .appinstaller file so Windows can sideload & auto-update
 # ---------------------------------------------------------------------------
@@ -506,6 +574,7 @@ appinstaller_xml = f'''<?xml version="1.0" encoding="utf-8"?>
 with open(appinstaller_path, 'w', encoding='utf-8') as f:
     f.write(appinstaller_xml)
 print(f'AppInstaller generated: {appinstaller_path}')
+_publish_build_artifact(appinstaller_path, 'IsolationBytes.appinstaller')
 
 # ---------------------------------------------------------------------------
 # 9. Package PWA and Chrome extension
@@ -525,6 +594,7 @@ if os.path.isdir(os.path.join(BASE_DIR, 'static')):
                     arc = os.path.join('static', os.path.relpath(src, os.path.join(BASE_DIR, 'static')))
                     zf.write(src, arc)
     print(f'PWA packaged: {pwa_zip}')
+    _publish_build_artifact(pwa_zip, os.path.basename(pwa_zip))
 else:
     print('WARNING: static/ not found — PWA zip skipped')
 
@@ -538,6 +608,7 @@ if os.path.isdir(ext_dir):
                     arc = os.path.relpath(src, ext_dir)
                     zf.write(src, arc)
     print(f'Chrome extension packaged: {ext_zip}')
+    _publish_build_artifact(ext_zip, os.path.basename(ext_zip))
 else:
     print('WARNING: browser_extension/ not found — Chrome zip skipped')
 
@@ -558,6 +629,7 @@ if os.path.isfile(gradlew):
             src_apk = max(apks, key=os.path.getmtime)
             shutil.copy2(src_apk, apk_dst)
             print(f'APK built and copied: {apk_dst}')
+            _publish_build_artifact(apk_dst, os.path.basename(apk_dst))
         else:
             print(f'WARNING: no APK found in {apk_out}')
     else:
@@ -583,6 +655,7 @@ if os.path.isfile(sfx_builder):
         if os.path.isfile(sfx_path):
             sfx_size = os.path.getsize(sfx_path) / (1024 * 1024)
             print(f'SFX installer: {sfx_path} ({sfx_size:.1f} MB)')
+            _publish_build_artifact(sfx_path, os.path.basename(sfx_path))
 else:
     print(f'WARNING: {sfx_builder} not found — SFX build skipped.')
 
