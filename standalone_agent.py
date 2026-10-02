@@ -54,7 +54,7 @@ from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_
 
 DEFAULT_SERVER = "https://isolation-bytes.com"
 DEFAULT_API_KEY = os.environ.get('CLOUD_API_KEY', '')
-HEARTBEAT_INTERVAL = 10      # seconds between heartbeats
+HEARTBEAT_INTERVAL = 5       # seconds between heartbeats
 PAIRING_URL_PATH = '/agent/pair'
 
 

@@ -160,7 +160,7 @@ def _canonical_yara_agent_state():
 
 
 def _agent_online(agent, max_age=90):
-    """True when the agent has checked in recently (heartbeat is every ~10s)."""
+    """True when the agent has checked in recently (heartbeat is every ~5s)."""
     from datetime import datetime, timezone
     try:
         seen = datetime.fromisoformat(str(agent.get("last_seen") or "").replace("Z", "+00:00"))

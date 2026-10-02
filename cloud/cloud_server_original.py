@@ -3038,7 +3038,7 @@ def agent_heartbeat():
     }
     _update_agent(device_id, updates)
     # Auto-block: scan heartbeat connections for threats and queue block
-    # commands immediately — this runs on EVERY heartbeat (every 10 seconds)
+    # commands immediately — this runs on EVERY heartbeat (every 5 seconds)
     # so blocking works even when nobody is viewing the dashboard.
     if _auto_block_enabled and not device_id.startswith('LOCAL-'):
         conns = data.get('network_connections', [])
