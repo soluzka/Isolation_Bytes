@@ -8,6 +8,7 @@ offline.
 """
 
 import os
+import sys
 import time
 from functools import wraps
 
@@ -323,12 +324,27 @@ def conditional_startup_status_api():
     if not _logged_in():
         return jsonify({"error": "Authentication required"}), 401
     state = _canonical_yara_agent_state()
-    try:
-        legacy_state = _legacy.cloud_startup_status().get_json(silent=True) or {}
-        state["ml_models"] = legacy_state.get("ml_models") or {}
-    except Exception:
-        state.setdefault("ml_models", {})
+    state["ml_models"] = _ml_models_status()
     return jsonify(state), 200
+
+
+def _ml_models_status():
+    """Report which ML model files exist, without importing quick_start."""
+    try:
+        from security.detector import _find_models_dir as _fmd
+        models_dir = _fmd()
+    except BaseException:
+        meipass = getattr(sys, "_MEIPASS", None)
+        models_dir = (
+            os.path.join(meipass, "models") if meipass
+            else str(_legacy.BASE_DIR.parent / "models")
+        )
+    exists = lambda name: os.path.exists(os.path.join(models_dir, name))
+    return {
+        "bodmas_cnn": exists("bodmas_cnn.onnx") and exists("bodmas_cnn_scaler.pkl"),
+        "ember": exists("ember_malware_model.txt"),
+        "sklearn": exists("file_malware_classifier.pkl"),
+    }
 
 
 # Delegate compatibility attributes that older imports may still access.
