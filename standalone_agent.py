@@ -186,6 +186,27 @@ def _resolve_local_path(filepath):
     return os.path.abspath(filepath)
 
 
+def _is_runtime_cache_path(filepath):
+    """True for toolchain/package caches whose DLLs must not be quarantined.
+
+    Signature engines produce false positives on framework assemblies such as
+    System.Reflection.DispatchProxy.dll; removing them from the NuGet cache or
+    the .NET SDK breaks every subsequent build.
+    """
+    try:
+        path = os.path.abspath(str(filepath)).replace('\\', '/').lower()
+    except (TypeError, ValueError, OSError):
+        return False
+    for marker in ('.nuget', '.dotnet', 'node_modules', 'site-packages',
+                   '.gradle', '.m2'):
+        if f'/{marker}/' in path or path.endswith('/' + marker):
+            return True
+    for marker in ('/program files/dotnet', '/program files (x86)/dotnet'):
+        if marker in path:
+            return True
+    return False
+
+
 def _is_protected_path(filepath):
     """Return True if the path is a system directory that must never be
     modified by automatic scans or remediation."""
@@ -2040,11 +2061,18 @@ X-GNOME-Autostart-enabled=true
             if root_key.rstrip('/') in skip_roots:
                 dirs[:] = []
                 continue
+            if _is_runtime_cache_path(root):
+                dirs[:] = []
+                continue
+            dirs[:] = [d for d in dirs
+                       if not _is_runtime_cache_path(os.path.join(root, d))]
             for filename in files:
                 if not self._running:
                     dirs[:] = []
                     break
                 filepath = os.path.abspath(os.path.join(root, filename))
+                if _is_runtime_cache_path(filepath):
+                    continue
                 file_key = os.path.normcase(filepath)
                 if file_key in seen_files:
                     continue

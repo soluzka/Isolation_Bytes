@@ -807,6 +807,11 @@ folder_watcher_state = {
         'C:\\\\Program Files',
         'C:\\\\ProgramData',
         'node_modules', # NPM modules folder can be extremely large
+        '.nuget',       # NuGet package cache (framework DLLs)
+        '.dotnet',      # .NET SDK/runtime downloads
+        'Program Files\\dotnet', # Installed .NET SDK and shared runtime
+        '.gradle',      # Gradle dependency cache
+        '.m2',          # Maven dependency cache
         'venv',         # Python virtual environments folder
         '.git',         # Git repositories
         '$Recycle.Bin', # Recycle bin

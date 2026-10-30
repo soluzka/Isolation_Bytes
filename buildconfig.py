@@ -30,6 +30,11 @@ from utils.subprocess_safe import safe_popen, safe_run
 # ============================================================
 PROJECT_ROOT = Path(__file__).resolve().parent
 DIST_DIR = PROJECT_ROOT / 'dist'
+# PyInstaller intermediate files must not live under OneDrive: sync/placeholder
+# handling can make PYZ-00.pyz vanish between writing and packaging.
+BUILD_WORK_DIR = Path(os.environ.get(
+    'LOCALAPPDATA', str(Path.home() / 'AppData' / 'Local')
+)) / 'IsolationBytes' / 'pyinstaller'
 
 # URLs (no port — Caddy/Cloudflare handle HTTPS on 443)
 PUBLIC_URL = "https://isolation-bytes.com"
@@ -154,10 +159,12 @@ def build_cloud_server():
     spec_path.write_text(spec_content, encoding="utf-8")
     print(f"  Generated spec: {spec_path}")
 
-    # Run PyInstaller
+    # Run PyInstaller with intermediate files in a local (non-OneDrive) path.
+    BUILD_WORK_DIR.mkdir(parents=True, exist_ok=True)
     result = safe_run(
         [sys.executable, "-m", "PyInstaller", str(spec_path),
-         "--noconfirm", "--distpath", str(DIST_DIR)],
+         "--noconfirm", "--distpath", str(DIST_DIR),
+         "--workpath", str(BUILD_WORK_DIR)],
         cwd=str(PROJECT_ROOT),
     )
     if result.returncode != 0:

@@ -27,6 +27,22 @@ HEARTBEAT_INTERVAL = 5       # seconds between heartbeats (cloud treats 90s as o
 DEFAULT_SCAN_INTERVAL = 300  # seconds between automatic sweeps
 
 
+def _is_runtime_cache_path(filepath):
+    """True for toolchain/package caches whose DLLs must not be quarantined."""
+    try:
+        path = os.path.abspath(str(filepath)).replace('\\', '/').lower()
+    except (TypeError, ValueError, OSError):
+        return False
+    for marker in ('.nuget', '.dotnet', 'node_modules', 'site-packages',
+                   '.gradle', '.m2'):
+        if f'/{marker}/' in path or path.endswith('/' + marker):
+            return True
+    for marker in ('/program files/dotnet', '/program files (x86)/dotnet'):
+        if marker in path:
+            return True
+    return False
+
+
 def _is_valid_server_url(url):
     """Require http(s) with a host and no embedded credentials."""
     try:
@@ -514,10 +530,17 @@ class LocalAgent:
                     or root_key.startswith(quarantine_root + os.sep)):
                 dirs[:] = []
                 continue
+            if _is_runtime_cache_path(root):
+                dirs[:] = []
+                continue
+            dirs[:] = [d for d in dirs
+                       if not _is_runtime_cache_path(os.path.join(root, d))]
             for filename in files:
                 if not self._running:
                     break
                 filepath = os.path.abspath(os.path.realpath(os.path.join(root, filename)))
+                if _is_runtime_cache_path(filepath):
+                    continue
                 file_key = os.path.normcase(filepath)
                 if file_key in seen_files:
                     continue
