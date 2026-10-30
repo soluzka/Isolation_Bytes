@@ -37,7 +37,7 @@ class AgentService : Service() {
         private const val NOTIFICATION_ID = 1
         private const val HEARTBEAT_INTERVAL = 30000L // 30 seconds
         private const val SCAN_INTERVAL = 300000L // 5 minutes between full sweeps
-        private const val AGENT_VERSION = "1.8.954.0"
+        private const val AGENT_VERSION = "1.8.953.0"
     }
 
     private lateinit var handler: Handler
