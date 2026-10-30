@@ -23,6 +23,9 @@ import requests
 import urllib.parse
 from datetime import timezone
 
+HEARTBEAT_INTERVAL = 5       # seconds between heartbeats (cloud treats 90s as offline)
+DEFAULT_SCAN_INTERVAL = 300  # seconds between automatic sweeps
+
 
 def _is_valid_server_url(url):
     """Require http(s) with a host and no embedded credentials."""
@@ -37,7 +40,7 @@ class LocalAgent:
     """A built-in agent that scans the local machine and reports to the cloud server."""
 
     def __init__(self, server_url='https://isolation-bytes.com', api_key='',
-                 device_id=None, scan_interval=300, scan_dirs=None):
+                 device_id=None, scan_interval=DEFAULT_SCAN_INTERVAL, scan_dirs=None):
         if not _is_valid_server_url(server_url):
             raise ValueError(f'Invalid server URL: {server_url}')
         self.server_url = server_url.rstrip('/')
@@ -46,11 +49,8 @@ class LocalAgent:
         self.device_id = (device_id or env_id) or f'LOCAL-{socket.gethostname().upper()[:12]}'
         self.hostname = socket.gethostname()
         self.scan_interval = scan_interval
-        self.scan_dirs = scan_dirs or [
-            os.path.expanduser('~/Downloads'),
-            os.path.expanduser('~/Desktop'),
-            os.path.join(os.environ.get('TEMP', 'C:\\Windows\\Temp')),
-        ]
+        self.scan_dirs = self._normalize_scan_dirs(
+            scan_dirs or self._discover_default_scan_dirs())
         self._thread = None
         self._running = False
         self._registered = False
@@ -58,7 +58,92 @@ class LocalAgent:
         self._threats_blocked = 0
         self._quarantined_count = 0
         self._last_findings = []
+        self._counted_threat_files = set()
+        self._last_progress_report = 0.0
+        self._scan_lock = threading.Lock()
+        self._scan_requested = threading.Event()
         self._headers = {'X-Api-Key': api_key, 'Content-Type': 'application/json'}
+
+    @staticmethod
+    def _normalize_scan_dirs(directories):
+        """Expand, absolutize and de-duplicate monitored directories."""
+        result = []
+        seen = set()
+        for directory in directories or []:
+            try:
+                path = os.path.abspath(os.path.expanduser(str(directory)))
+            except (TypeError, ValueError, OSError):
+                continue
+            key = os.path.normcase(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(path)
+        return result
+
+    @staticmethod
+    def _discover_default_scan_dirs():
+        """Return full-system scan roots, not just the user's common folders.
+
+        The built-in agent is what the dashboard starts when no external
+        agent is connected; scanning only Downloads/Desktop/Temp made a
+        "full system scan" miss most of the machine.
+        """
+        try:
+            from folder_watcher import discover_all_drives_and_important_folders
+            discovered = discover_all_drives_and_important_folders()
+            if discovered:
+                return discovered
+        except Exception:
+            pass
+        # Inline fallback (frozen EXE where folder_watcher may be unavailable).
+        import platform as _platform
+        import string as _string
+        roots = []
+        if _platform.system() == 'Windows':
+            for letter in _string.ascii_uppercase:
+                drive = f'{letter}:\\'
+                if os.path.exists(drive):
+                    roots.append(drive)
+        else:
+            roots.append('/')
+        home = os.path.expanduser('~')
+        roots.extend([os.path.join(home, 'Downloads'), os.path.join(home, 'Desktop')])
+        return roots
+
+    def _effective_scan_dirs(self):
+        """Collapse overlapping roots so no file is traversed twice."""
+        normalized = sorted(
+            self._normalize_scan_dirs(self.scan_dirs),
+            key=lambda p: (len(os.path.normcase(p)), os.path.normcase(p)),
+        )
+        roots = []
+        root_keys = []
+        for path in normalized:
+            key = os.path.normcase(path)
+            if any(key == kept or key.startswith(kept.rstrip(os.sep) + os.sep)
+                   for kept in root_keys):
+                continue
+            roots.append(path)
+            root_keys.append(key)
+        return roots
+
+    def _get_dir_file_counts(self):
+        """Count direct children of each monitored directory for the heartbeat."""
+        counts = {}
+        for directory in self._effective_scan_dirs():
+            try:
+                files = 0
+                subdirs = 0
+                for entry in os.scandir(directory):
+                    if entry.is_dir():
+                        subdirs += 1
+                    else:
+                        files += 1
+                counts[directory] = {'files': files, 'subdirs': subdirs}
+            except (PermissionError, OSError):
+                counts[directory] = {'files': 0, 'subdirs': 0}
+        return counts
 
     def _get_system_info(self):
         """Collect system information for registration."""
@@ -74,9 +159,11 @@ class LocalAgent:
                 'ram_mb': int(vm.total / 1024 / 1024),
                 'ip': self._get_local_ip(),
                 'agent_version': '2.1.0-local',
+                'scan_dirs': self._effective_scan_dirs(),
             }
         except Exception:
-            return {'device_id': self.device_id, 'hostname': self.hostname}
+            return {'device_id': self.device_id, 'hostname': self.hostname,
+                    'scan_dirs': self._effective_scan_dirs()}
 
     def _get_live_stats(self):
         """Collect live system stats for heartbeat."""
@@ -131,6 +218,9 @@ class LocalAgent:
                 'processes': all_processes,
                 'process_count': len(all_processes),
                 'connection_count': len(network_connections),
+                'scanning': self._scan_lock.locked(),
+                'scan_dirs': self._effective_scan_dirs(),
+                'dir_file_counts': self._get_dir_file_counts(),
             }
         except Exception:
             return {'device_id': self.device_id}
@@ -171,15 +261,81 @@ class LocalAgent:
         return False
 
     def _heartbeat(self):
-        """Send a heartbeat with live stats."""
+        """Send a heartbeat and execute any commands returned by the server."""
         try:
             stats = self._get_live_stats()
             r = requests.post(f'{self.server_url}/agent/heartbeat',
                               json=stats, headers=self._headers,
                               verify=True, timeout=10)
-            return r.status_code == 200
+            if r.status_code == 404:
+                # The server lost its agent registry (restart/redeploy);
+                # re-register so scanning and triggers keep working.
+                self._registered = False
+                self._register()
+                return False
+            if r.status_code != 200:
+                return False
+            try:
+                for cmd in (r.json() or {}).get('commands', []) or []:
+                    if isinstance(cmd, dict):
+                        self._handle_command(cmd)
+            except Exception:
+                pass
+            return True
         except Exception:
             return False
+
+    def _handle_command(self, cmd):
+        """Handle a command queued by the cloud dashboard."""
+        action = str(cmd.get('action') or '')
+        if action == 'scan_now':
+            print('[CMD] Full scan requested from cloud dashboard')
+            if not self.request_scan():
+                # A sweep is already traversing; publish its live progress
+                # instead of queueing a redundant second full sweep.
+                threading.Thread(target=self._report, args=([], 'scan_progress'),
+                                 daemon=True).start()
+            return
+        if action == 'scan_file':
+            filepath = cmd.get('file_path') or ''
+            if filepath and os.path.isfile(filepath):
+                threading.Thread(target=self._scan_single_file,
+                                 args=(filepath,), daemon=True).start()
+            else:
+                print(f'[CMD] Scan file skipped (not a file): {filepath}')
+            return
+        if action == 'add_folder':
+            folder = cmd.get('folder_path') or ''
+            try:
+                folder = os.path.abspath(os.path.expanduser(str(folder)))
+            except (TypeError, ValueError, OSError):
+                folder = ''
+            if folder and os.path.isdir(folder) and os.path.normcase(folder) not in {
+                os.path.normcase(d) for d in self.scan_dirs
+            }:
+                self.scan_dirs.append(folder)
+                print(f'[CMD] Added scan folder: {folder}')
+                self.request_scan()
+            else:
+                print(f'[CMD] Add folder skipped (not a directory or already monitored): {folder}')
+            return
+        if action == 'remove_folder':
+            folder = cmd.get('folder_path') or ''
+            target = os.path.normcase(os.path.abspath(os.path.expanduser(str(folder)))) if folder else ''
+            remaining = [d for d in self.scan_dirs if os.path.normcase(d) != target]
+            if folder and len(remaining) != len(self.scan_dirs):
+                self.scan_dirs = remaining
+                print(f'[CMD] Removed scan folder: {folder}')
+            else:
+                print(f'[CMD] Remove folder not found: {folder}')
+            return
+
+    def request_scan(self):
+        """Ask the scan worker to start a sweep; False if one is already running."""
+        if self._scan_lock.locked():
+            return False
+        self._scan_requested.set()
+        return True
 
     def _execute_voice_command(self, cmd):
         """Execute a voice command from the cloud queue and post back the result."""
@@ -233,6 +389,17 @@ class LocalAgent:
         except Exception:
             return []
 
+    def _count_blocked_threat(self, filepath):
+        """Count a blocked threat once per file across repeated sweeps."""
+        try:
+            key = os.path.normcase(os.path.abspath(str(filepath)))
+        except Exception:
+            key = str(filepath)
+        if key in self._counted_threat_files:
+            return
+        self._counted_threat_files.add(key)
+        self._threats_blocked += 1
+
     def _hash_file(self, filepath):
         """Calculate SHA256 hash of a file."""
         try:
@@ -273,32 +440,98 @@ class LocalAgent:
             'quarantine_error': 'Quarantine artifact not found or could not be verified',
         }
 
-    def _scan_directory(self, dirpath, max_files=100):
-        """Scan a directory and return canonical, deduplicated findings."""
+    @staticmethod
+    def _match_severity(match):
+        """Return the canonical severity for a YARA match (meta/tags fallback)."""
+        try:
+            from security.yara_scanner import get_match_severity
+            severity = str(get_match_severity(match) or '').lower()
+            if severity in ('low', 'medium', 'high', 'critical'):
+                return severity
+        except Exception:
+            pass
+        meta = getattr(match, 'meta', None) or {}
+        severity = str(meta.get('severity', '') or '').lower()
+        if severity in ('low', 'medium', 'high', 'critical'):
+            return severity
+        tags = {str(tag).lower() for tag in (getattr(match, 'tags', None) or [])}
+        for level in ('critical', 'high', 'medium', 'low'):
+            if level in tags:
+                return level
+        return 'medium'
+
+    @staticmethod
+    def _match_threat_type(match):
+        """Classify a YARA match for the dashboard's threat-type counters."""
+        meta = getattr(match, 'meta', None) or {}
+        blob = ' '.join([
+            str(getattr(match, 'rule', '') or ''),
+            ' '.join(str(tag) for tag in (getattr(match, 'tags', None) or [])),
+            str(meta.get('description', '') or meta.get('Description', '') or ''),
+        ]).lower()
+        if any(token in blob for token in (
+                'ransom', 'vss_delete', 'shadow_copy', 'wbadmin',
+                'recovery_disabl', 'backup_delete', 'ransomnote')):
+            return 'ransomware'
+        if any(token in blob for token in (
+                'persist', 'startup', 'autorun', 'scheduled', 'rootkit',
+                'keylog', 'backdoor', 'trojan', 'implant', 'beacon', 'botnet',
+                'worm', 'miner', 'stealer', 'dropper', 'shellcode', 'exploit',
+                'webshell', 'web_shell', 'spyware', 'adware', 'process_inject',
+                'process_hollow', 'dll_hijack', 'api_hook', 'reflective_load',
+                'amsi_bypass', 'etw_bypass', 'defender_bypass', 'uac_bypass',
+                'privilege_escal', 'privesc', 'lateral_movement',
+                'credsteal', 'exfil')):
+            return 'persistence'
+        return 'yara_match'
+
+    def _scan_directory(self, dirpath, seen_files=None):
+        """Scan a directory tree and return canonical, deduplicated findings.
+
+        There is deliberately no file-count cap: a full scan must traverse the
+        whole monitored folder. Quarantine artifacts are skipped because the
+        original file is already contained under a different location.
+        """
         findings = []
         if not os.path.isdir(dirpath):
             return findings
 
-        scanned = 0
-        seen_files = set()
+        try:
+            from quarantine_utils import QUARANTINE_FOLDER
+            quarantine_root = os.path.normcase(os.path.abspath(QUARANTINE_FOLDER))
+        except Exception:
+            quarantine_root = ''
+
+        if seen_files is None:
+            seen_files = set()
         seen_findings = set()
         for root, dirs, files in os.walk(dirpath):
+            if not self._running:
+                break
+            root_key = os.path.normcase(os.path.abspath(root))
+            if quarantine_root and (
+                    root_key == quarantine_root
+                    or root_key.startswith(quarantine_root + os.sep)):
+                dirs[:] = []
+                continue
             for filename in files:
-                if scanned >= max_files or not self._running:
+                if not self._running:
                     break
-                filepath = os.path.normcase(os.path.abspath(os.path.realpath(os.path.join(root, filename))))
-                if filepath in seen_files:
+                filepath = os.path.abspath(os.path.realpath(os.path.join(root, filename)))
+                file_key = os.path.normcase(filepath)
+                if file_key in seen_files:
                     continue
-                seen_files.add(filepath)
+                seen_files.add(file_key)
                 try:
-                    if os.path.getsize(filepath) > 50 * 1024 * 1024:
-                        continue
-
                     # Hash before YARA runs. Critical YARA matches may quarantine
                     # or remove the original before control returns here.
                     file_hash = self._hash_file(filepath)
                     matches = self._scan_file_yara(filepath)
                     self._files_scanned += 1
+                    now = time.time()
+                    if now - self._last_progress_report >= 5:
+                        self._last_progress_report = now
+                        self._report([], report_type='scan_progress')
 
                     if matches:
                         quarantine = self._quarantine_record(filepath)
@@ -309,18 +542,14 @@ class LocalAgent:
                                 continue
                             seen_findings.add(finding_key)
 
-                            sev = 'medium'
+                            sev = self._match_severity(m)
                             tags = list(getattr(m, 'tags', []) or [])
-                            if any(str(t).lower() in ('critical', 'high') for t in tags):
-                                sev = 'high'
-                            if 'ransomware' in rule.lower() or 'ransom' in rule.lower():
-                                sev = 'critical'
 
                             findings.append({
                                 'path': filepath,
                                 'original_path': filepath,
                                 'severity': sev,
-                                'threat_type': 'YARA',
+                                'threat_type': self._match_threat_type(m),
                                 'reason': f'YARA rule matched: {rule}',
                                 'hash': file_hash,
                                 'sha256': file_hash,
@@ -328,17 +557,13 @@ class LocalAgent:
                                 'tags': tags,
                                 'quarantined': quarantine['quarantined'],
                                 'quarantine_path': quarantine['quarantine_path'],
-                                'quarantine_error': '' if quarantine['quarantined'] else quarantine['quarantine_error'],
                             })
-                            self._threats_blocked += 1
+                            self._count_blocked_threat(filepath)
 
                         if quarantine['quarantined']:
                             self._quarantined_count += 1
-                    scanned += 1
                 except Exception:
                     continue
-            if scanned >= max_files:
-                break
         return findings
 
     def _report(self, findings, report_type='scan'):
@@ -350,32 +575,109 @@ class LocalAgent:
                 'timestamp': datetime.datetime.now(timezone.utc).isoformat(),
                 'files_scanned': self._files_scanned,
                 'quarantined_count': self._quarantined_count,
+                'threats_blocked': self._threats_blocked,
+                'scan_dirs': self._effective_scan_dirs(),
+                'scanning': self._scan_lock.locked(),
                 'findings': findings,
             }
-            r = requests.post(f'{self.server_url}/cloud/agent/report',
+            r = requests.post(f'{self.server_url}/agent/report',
                               json=data, headers=self._headers,
-                              verify=True, timeout=15)
+                              verify=True, timeout=120)
             return r.status_code == 200
         except Exception:
             return False
 
     def _scan_cycle(self):
-        """Run one full scan cycle across all scan directories."""
+        """Run one full sweep across all monitored directories."""
+        if not self._scan_lock.acquire(blocking=False):
+            return
         all_findings = []
-        for dirpath in self.scan_dirs:
-            if not self._running:
-                break
-            if os.path.isdir(dirpath):
-                all_findings.extend(self._scan_directory(dirpath))
+        seen_files = set()
+        try:
+            for dirpath in self._effective_scan_dirs():
+                if not self._running:
+                    break
+                if not os.path.isdir(dirpath):
+                    continue
+                findings = self._scan_directory(dirpath, seen_files=seen_files)
+                all_findings.extend(findings)
+                # Report after each directory so the dashboard fills in while
+                # the sweep is still running instead of only at the very end.
+                self._report(findings, report_type='scan' if findings else 'scan_progress')
+            if all_findings:
+                self._last_findings = all_findings
+                print(f'[SCAN] Sweep found {len(all_findings)} finding(s)')
+        finally:
+            # Release first so the report carries scanning=False and the
+            # dashboard can stop polling as soon as the sweep ends.
+            # The complete snapshot lets the cloud replace stale findings.
+            self._scan_lock.release()
+            self._report(all_findings, report_type='scan_complete')
 
-        if all_findings:
-            self._last_findings = all_findings
-            self._report(all_findings)
-        else:
-            self._report([], report_type='heartbeat_scan')
+    def _scan_single_file(self, filepath):
+        """Scan one file requested from the dashboard and report it."""
+        findings = []
+        try:
+            print(f'[SCAN] Scanning single file: {filepath}')
+            file_hash = self._hash_file(filepath)
+            matches = self._scan_file_yara(filepath)
+            self._files_scanned += 1
+            quarantine = self._quarantine_record(filepath)
+            for match in matches:
+                rule = str(getattr(match, 'rule', '') or '')
+                tags = list(getattr(match, 'tags', []) or [])
+                findings.append({
+                    'path': filepath,
+                    'original_path': filepath,
+                    'severity': self._match_severity(match),
+                    'threat_type': self._match_threat_type(match),
+                    'reason': f'YARA rule matched: {rule}',
+                    'hash': file_hash,
+                    'sha256': file_hash,
+                    'rule': rule,
+                    'tags': tags,
+                    'quarantined': quarantine['quarantined'],
+                    'quarantine_path': quarantine['quarantine_path'],
+                })
+                self._count_blocked_threat(filepath)
+            if quarantine['quarantined']:
+                self._quarantined_count += 1
+            self._report(findings, report_type='single_file_scan')
+        except Exception as exc:
+            print(f'[SCAN] Single file scan failed: {exc}')
+            self._report([], report_type='single_file_scan')
+
+    def _heartbeat_loop(self):
+        """Heartbeat independently so the agent never looks offline mid-scan."""
+        beats = 0
+        while self._running:
+            try:
+                self._heartbeat()
+                beats += 1
+                if beats % 3 == 0:
+                    self._voice_poll()
+            except Exception:
+                pass
+            for _ in range(HEARTBEAT_INTERVAL):
+                if not self._running:
+                    break
+                time.sleep(1)
+
+    def _scan_loop(self):
+        """Run automatic sweeps, waking early when a scan is requested."""
+        while self._running:
+            try:
+                self._scan_requested.wait(timeout=self.scan_interval)
+                self._scan_requested.clear()
+                if not self._running:
+                    break
+                self._scan_cycle()
+            except Exception as exc:
+                print(f'[SCAN] Sweep failed: {exc}')
+                time.sleep(1)
 
     def _run(self):
-        """Main agent loop — runs in a background thread."""
+        """Register, then run heartbeat and scan workers in the background."""
         for _ in range(30):
             if not self._running:
                 return
@@ -395,21 +697,20 @@ class LocalAgent:
             time.sleep(3)
 
         if not self._registered:
+            # Allow a later dashboard trigger to start a fresh agent instead of
+            # handing back a dead instance whose scan worker was never created.
+            self._running = False
             return
 
-        while self._running:
-            try:
-                self._heartbeat()
-                self._scan_cycle()
-            except Exception:
-                pass
+        threading.Thread(target=self._heartbeat_loop, daemon=True,
+                         name='LocalAgentHeartbeat').start()
+        # The first automatic sweep starts right away, then every scan_interval.
+        self._scan_requested.set()
+        threading.Thread(target=self._scan_loop, daemon=True,
+                         name='LocalAgentScanner').start()
 
-            for i in range(self.scan_interval):
-                if not self._running:
-                    break
-                if i % 5 == 0:
-                    self._voice_poll()
-                time.sleep(1)
+        while self._running:
+            time.sleep(1)
 
     def start(self):
         """Start the agent in a background thread."""
@@ -422,6 +723,7 @@ class LocalAgent:
     def stop(self):
         """Stop the agent."""
         self._running = False
+        self._scan_requested.set()
         if self._thread:
             self._thread.join(timeout=5)
 
@@ -436,7 +738,8 @@ class LocalAgent:
             'threats_blocked': self._threats_blocked,
             'quarantined': self._quarantined_count,
             'last_findings_count': len(self._last_findings),
-            'scan_dirs': self.scan_dirs,
+            'scanning': self._scan_lock.locked(),
+            'scan_dirs': self._effective_scan_dirs(),
         }
 
 

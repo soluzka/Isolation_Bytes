@@ -1003,9 +1003,14 @@ if (stopAutoUpdatesBtn) {
                                 if (data.status === 'already_running') {
                                     messageDiv.innerHTML = '<p style="color:#b36200;">A scan is already running — watching for updates...</p>';
                                 }
+                                // Give a freshly started agent at least one
+                                // heartbeat window before accepting "not running",
+                                // otherwise a worker/agent race reports completion
+                                // while the scan is still starting.
+                                const scanStartedAt = Date.now();
                                 const waitForFinish = setInterval(() => {
                                     refreshStatus().then(d => {
-                                        if (d && !d.running) {
+                                        if (d && !d.running && Date.now() - scanStartedAt >= 10000) {
                                             clearInterval(waitForFinish);
                                             runBtn.disabled = false;
                                             runBtn.textContent = originalText;

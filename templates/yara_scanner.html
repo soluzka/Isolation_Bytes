@@ -922,6 +922,11 @@
         });
 
         function fetchAgentScanResults() {
+            // Use the shared renderer so this page and the main dashboard show
+            // identical findings, counters and scanning state.
+            if (window.NetworkDataUtils && typeof NetworkDataUtils.refreshUnifiedAgentScanResults === 'function') {
+                return NetworkDataUtils.refreshUnifiedAgentScanResults();
+            }
             fetch('/api/agent-scan-results', {credentials: 'same-origin'})
                 .then(r => r.json())
                 .then(data => {
@@ -946,8 +951,9 @@
             }
             let html = '';
             for (const ag of agents) {
-                const findings = ag.findings || [];
-                const scanDirs = ag.scan_dirs || [];
+                const findings = Array.isArray(ag.findings) ? ag.findings : [];
+                const scanDirs = Array.isArray(ag.scan_dirs) ? ag.scan_dirs : [];
+                const scanning = Boolean(ag.scanning);
                 const sevColor = {critical: '#dc3545', high: '#fd7e14', medium: '#ffc107', low: '#28a745'};
                 let findingsHtml = '';
                 if (findings.length) {
@@ -955,12 +961,12 @@
                     for (const f of findings) {
                         const sev = (f.severity || 'low').toLowerCase();
                         const color = sevColor[sev] || '#6c757d';
-                        const qIcon = f.quarantined ? '✓ Yes' : (f.quarantine_error ? '✗ Failed' : '—');
+                        const qIcon = f.quarantined ? '✓ Yes' : (f.blocked ? 'Blocked' : (f.quarantine_error ? '✗ Failed' : '—'));
                         findingsHtml += '<tr><td style="word-break:break-all;">' + escapeHtml(f.path || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
                     }
                     findingsHtml += '</tbody></table>';
                 } else {
-                    findingsHtml = '<p style="margin-top:8px;color:#28a745;">No threats found on last scan.</p>';
+                    findingsHtml = '<p style="margin-top:8px;color:#28a745;">' + (scanning ? 'No threats found so far. Scan is still running.' : 'No threats found on last scan.') + '</p>';
                 }
                 let dirsHtml = '';
                 if (scanDirs.length) {
@@ -970,7 +976,7 @@
                     }
                     dirsHtml += '</ul></details>';
                 }
-                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Findings: <strong style="color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';">' + (ag.finding_count || 0) + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+                html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id) + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + (ag.files_scanned || 0) + '</strong> &middot; Findings: <strong style="color:' + (ag.finding_count ? '#dc3545' : '#28a745') + ';">' + (ag.finding_count || 0) + '</strong> &middot; Quarantined: <strong>' + (ag.quarantined_count || 0) + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + (scanning ? ' &middot; <strong style="color:#b36200;">Scanning...</strong>' : '') + '</p>' + dirsHtml + findingsHtml + '</div>';
             }
             el.innerHTML = html;
         }
@@ -1069,33 +1075,84 @@
             });
         });
 
-        let scanAllInterval = null;
+        const scanAllBtn = document.getElementById('scanAllBtn');
+        const SCAN_BUTTON_IDLE_LABEL = 'Run Full System Scan (Agent PC)';
+        let scanStatusTimer = null;
+        let scanStatusBusy = false;
+        let scanStatusStartedAt = 0;
+        const SCAN_STATUS_GRACE_MS = 10000;
 
-        document.getElementById("scanAllBtn").addEventListener("click", function() {
-            const btn = this;
-            const status = document.getElementById('scanTriggerStatus');
+        function setScanButtonIdle(btn) {
+            btn.disabled = false;
+            btn.textContent = SCAN_BUTTON_IDLE_LABEL;
+            const loading = document.getElementById('loadingIndicator');
+            if (loading) loading.style.display = 'none';
+        }
 
-            // If already scanning, stop polling and reset
-            if (scanAllInterval) {
-                clearInterval(scanAllInterval);
-                scanAllInterval = null;
-                btn.textContent = 'Run Full System Scan (Agent PC)';
-                document.getElementById('loadingIndicator').style.display = 'none';
-                if (status) status.innerHTML = '<p>Scan stopped. Results shown below.</p>';
-                return;
+        function stopScanStatusPolling() {
+            if (scanStatusTimer) {
+                clearInterval(scanStatusTimer);
+                scanStatusTimer = null;
             }
+        }
 
-            btn.disabled = true;
-            btn.textContent = 'Triggering agent scan...';
-            document.getElementById('loadingIndicator').style.display = 'block';
-            if (status) status.innerHTML = '<p>Sending scan command to agent(s)...</p>';
-            fetch('/api/agent-trigger-scan', {
-                method: 'POST',
+        // The server owns the scan; the dashboard can only observe it. Poll the
+        // authoritative status endpoint until it reports the scan finished, then
+        // re-enable the button instead of leaving it on a fake "Stop" state.
+        function pollScanStatus(btn) {
+            if (scanStatusBusy) return;
+            scanStatusBusy = true;
+            fetch('/api/conditional_startup/status', {
                 credentials: 'same-origin',
-                headers: {'Content-Type': 'application/json'},
-                body: '{}'
+                cache: 'no-store',
+                headers: {'Accept': 'application/json'}
             })
-            .then(async response => {
+            .then(response => response.ok ? response.json() : Promise.reject(new Error('status ' + response.status)))
+            .then(state => {
+                if (!state || state.running) return;
+                // The status is worker/agent-derived; give a freshly started
+                // agent one heartbeat window before believing it has finished.
+                if (Date.now() - scanStatusStartedAt < SCAN_STATUS_GRACE_MS) return;
+                stopScanStatusPolling();
+                setScanButtonIdle(btn);
+                fetchAgentScanResults();
+                const status = document.getElementById('scanTriggerStatus');
+                if (status) status.innerHTML = '<p style="color:#28a745;">Scan complete. Results updated below.</p>';
+            })
+            .catch(() => {
+                // Transient status errors are not scan failures; keep polling.
+            })
+            .finally(() => { scanStatusBusy = false; });
+        }
+
+        function startScanStatusPolling(btn) {
+            stopScanStatusPolling();
+            scanStatusStartedAt = Date.now();
+            scanStatusTimer = setInterval(function() { pollScanStatus(btn); }, 5000);
+            setTimeout(function() { pollScanStatus(btn); }, 2000);
+        }
+
+        if (scanAllBtn) {
+            scanAllBtn.addEventListener('click', function() {
+                const btn = this;
+                const status = document.getElementById('scanTriggerStatus');
+                const results = document.getElementById('results');
+                if (btn.disabled) return;
+
+                btn.disabled = true;
+                btn.textContent = 'Starting scan...';
+                const loading = document.getElementById('loadingIndicator');
+                if (loading) loading.style.display = 'block';
+                if (status) status.innerHTML = '<p>Sending scan command to agent(s)...</p>';
+                if (results) results.innerHTML = '';
+
+                fetch('/api/agent-trigger-scan', {
+                    method: 'POST',
+                    credentials: 'same-origin',
+                    headers: {'Content-Type': 'application/json'},
+                    body: '{}'
+                })
+                .then(async response => {
                     const text = await response.text();
                     let data = {};
                     try { data = text ? JSON.parse(text) : {}; }
@@ -1105,40 +1162,40 @@
                     }
                     return data;
                 })
-            .then(data => {
-                const accepted = data.ok === true || data.success === true || data.status === 'accepted';
-            if (accepted) {
-                    btn.disabled = false;
-                    btn.textContent = 'Stop Scanning';
-                    if (status) status.innerHTML = '<p style="color:#28a745;">' + escapeHtml(data.message) + ' Polling for results every 5 seconds.</p>';
-                    document.getElementById('results').innerHTML = '<div class="alert info">' + escapeHtml(data.message) + ' Polling for results...</div>';
-                    // Immediately fetch results and start continuous polling
+                .then(data => {
+                    const accepted = data.ok === true || data.success === true ||
+                        data.status === 'started' || data.status === 'accepted' || data.status === 'already_running';
+                    if (!accepted) {
+                        throw new Error(data.message || data.error || 'No agents accepted the scan request.');
+                    }
+                    btn.textContent = 'Scanning...';
+                    if (status) status.innerHTML = '<p style="color:#28a745;">' + escapeHtml(data.message || 'Scan started.') + '</p>';
                     fetchAgentScanResults();
-                    scanAllInterval = setInterval(function() {
-                        fetchAgentScanResults();
-                    }, 5000);
-                } else {
-                    document.getElementById('loadingIndicator').style.display = 'none';
-                    document.getElementById('results').innerHTML = '<div class="alert">' + escapeHtml(data.message || 'No agents connected.') + '</div>';
-                    if (status) status.innerHTML = '<p style="color:#dc3545;">' + escapeHtml(data.message || 'No agents connected.') + '</p>';
-                    btn.disabled = false;
-                    btn.textContent = 'Run Full System Scan (Agent PC)';
-                }
-            })
-            .catch(function() {
-                document.getElementById('loadingIndicator').style.display = 'none';
-                document.getElementById('results').innerHTML = '<div class="alert">Failed to trigger agent scan.</div>';
-                if (status) status.innerHTML = '<p style="color:#dc3545;">Failed to trigger scan.</p>';
-                btn.disabled = false;
-                btn.textContent = 'Run Full System Scan (Agent PC)';
+                    startScanStatusPolling(btn);
+                })
+                .catch(error => {
+                    const message = (error && error.message) || 'Failed to trigger agent scan.';
+                    setScanButtonIdle(btn);
+                    if (results) results.innerHTML = '<div class="alert">' + escapeHtml(message) + '</div>';
+                    if (status) status.innerHTML = '<p style="color:#dc3545;">' + escapeHtml(message) + '</p>';
+                });
             });
-        });
 
-        // Auto-fetch agent scan results on page load (no VPS scan)
-        window.addEventListener('load', function() {
-            setTimeout(function() { fetchAgentScanResults(); }, 1000);
-        });
-        
+            // If the page is opened (or reloaded) during a running scan, reflect
+            // that state instead of allowing a second trigger.
+            fetch('/api/conditional_startup/status', {credentials: 'same-origin', cache: 'no-store'})
+                .then(response => response.ok ? response.json() : null)
+                .then(state => {
+                    if (!state || !state.running) return;
+                    scanAllBtn.disabled = true;
+                    scanAllBtn.textContent = 'Scanning...';
+                    const loading = document.getElementById('loadingIndicator');
+                    if (loading) loading.style.display = 'block';
+                    startScanStatusPolling(scanAllBtn);
+                })
+                .catch(() => {});
+        }
+
         // Coerce API payloads that may be a single value, an object or JSON text into an array
         function toArray(value) {
             if (Array.isArray(value)) return value;

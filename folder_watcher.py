@@ -348,22 +348,21 @@ def build_monitored_folders():
 
 MONITORED_FOLDERS = build_monitored_folders()
 
-def scan_and_quarantine(filepath, timeout=600, max_file_size=100 * 1024 * 1024):
+def scan_and_quarantine(filepath, timeout=600, max_file_size=None):
     """
     Scan the given file for viruses and quarantine if necessary.
     Handles .rar files by extracting and scanning their contents with Windows Defender.
-    Skips the scan if it times out or if the file size exceeds the max_file_size.
+    There is no file-size cap by default; pass max_file_size to impose one.
 
     Args:
         filepath (str): Path to the file to be scanned.
         timeout (int): Timeout for the Windows Defender scan in seconds.
-        max_file_size (int): Maximum file size in bytes to scan. Default is 100 MB.
+        max_file_size (int | None): Optional maximum file size in bytes.
     """
     try:
-        # Check if the file size exceeds the maximum allowed size
-        if os.path.getsize(filepath) > max_file_size:
-            # Use debug level logging to avoid filling logs with large file warnings
-            logging.debug(f"File {filepath} is too large to scan. Silently skipping.")
+        # A configured explicit cap may still be supplied by a caller.
+        if max_file_size is not None and os.path.getsize(filepath) > max_file_size:
+            logging.debug(f"File {filepath} exceeds the explicit size limit; skipping.")
             return
 
         # Check if the file is a .rar file

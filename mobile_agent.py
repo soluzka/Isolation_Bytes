@@ -50,8 +50,8 @@ except ImportError:
 DEFAULT_SERVER = "https://isolation-bytes.com"
 HEARTBEAT_INTERVAL = 30
 SCAN_INTERVAL = 300
-MAX_FILES_PER_SCAN = 100
-MAX_FILE_SIZE = 30 * 1024 * 1024  # 30 MB
+MAX_FILES_PER_SCAN = float('inf')  # full traversal, no file-count cap
+MAX_FILE_SIZE = float('inf')       # no size cap; YARA handles large files by path
 
 
 def _get_android_property(name):
@@ -147,6 +147,9 @@ class MobileAgent:
         self._headers = {'X-Api-Key': api_key, 'Content-Type': 'application/json'}
         self._scan_dirs = _get_android_scan_dirs()
         self._skipped_files = set()
+        self._counted_threat_files = set()
+        self._scan_lock = threading.Lock()
+        self._scan_requested = threading.Event()
 
     def _get_system_info(self):
         """Get system info for registration."""
@@ -252,6 +255,8 @@ class MobileAgent:
                 'files_scanned': self._files_scanned,
                 'threats_blocked': self._threats_blocked,
                 'quarantined_count': self._quarantined_count,
+                'scanning': self._scan_lock.locked(),
+                'scan_dirs': list(self._scan_dirs),
                 'network_connections': network_connections,
                 'network_devices': self._cached_network_devices,
                 'processes': all_processes,
@@ -307,10 +312,34 @@ class MobileAgent:
             print(f"[CMD] Block {ip} — not supported on mobile without root")
         elif action == 'unblock_ip' and ip:
             print(f"[CMD] Unblock {ip} — not supported on mobile without root")
-        elif action == 'scan':
-            target = cmd.get('target', '')
-            if target:
-                print(f"[CMD] Scan requested: {target}")
+        elif action in ('scan_now', 'scan', 'scan_all'):
+            print("[CMD] Full scan requested from cloud dashboard")
+            self.request_scan()
+        elif action == 'scan_file':
+            filepath = cmd.get('file_path') or ''
+            if filepath and os.path.isfile(filepath):
+                threading.Thread(target=self._scan_single_file, args=(filepath,), daemon=True).start()
+            else:
+                print(f"[CMD] Scan file skipped (not a file): {filepath}")
+        elif action == 'add_folder':
+            folder = os.path.abspath(os.path.expanduser(str(cmd.get('folder_path') or '')))
+            if folder and os.path.isdir(folder) and folder not in self._scan_dirs:
+                self._scan_dirs.append(folder)
+                print(f"[CMD] Added scan folder: {folder}")
+                self.request_scan()
+        elif action == 'remove_folder':
+            folder = cmd.get('folder_path') or ''
+            target = os.path.normcase(os.path.abspath(os.path.expanduser(str(folder)))) if folder else ''
+            self._scan_dirs = [d for d in self._scan_dirs
+                               if os.path.normcase(os.path.abspath(d)) != target]
+
+    def request_scan(self):
+        """Wake the scan worker immediately; False when a sweep is running."""
+        if self._scan_lock.locked():
+            self._report([], report_type='scan_progress')
+            return False
+        self._scan_requested.set()
+        return True
 
     def _scan_file_yara(self, filepath):
         """Scan a file with YARA rules if available."""
@@ -336,6 +365,7 @@ class MobileAgent:
     def _scan_directory(self, dirpath, max_files=MAX_FILES_PER_SCAN):
         findings = []
         scanned = 0
+        seen_rules = set()
         try:
             for root, dirs, files in os.walk(dirpath):
                 for filename in files:
@@ -343,7 +373,7 @@ class MobileAgent:
                     if filepath in self._skipped_files:
                         continue
                     try:
-                        if os.path.getsize(filepath) > MAX_FILE_SIZE:
+                        if MAX_FILE_SIZE != float('inf') and os.path.getsize(filepath) > MAX_FILE_SIZE:
                             continue
                         if not os.access(filepath, os.R_OK):
                             self._skipped_files.add(filepath)
@@ -353,6 +383,10 @@ class MobileAgent:
                         if matches:
                             h = self._hash_file(filepath)
                             for m in matches:
+                                key = (os.path.normcase(filepath), str(getattr(m, 'rule', '')).lower())
+                                if key in seen_rules:
+                                    continue
+                                seen_rules.add(key)
                                 sev = 'medium'
                                 tags = list(m.tags) if m.tags else []
                                 if any(t in ('critical', 'high') for t in tags):
@@ -361,33 +395,75 @@ class MobileAgent:
                                     sev = 'critical'
                                 findings.append({
                                     'file': filepath,
+                                    'path': filepath,
                                     'rule': m.rule,
+                                    'reason': f'YARA rule matched: {m.rule}',
+                                    'threat_type': 'yara_match',
                                     'tags': tags,
                                     'severity': sev,
                                     'hash': h,
+                                    'quarantined': False,
                                 })
                     except Exception:
                         pass
                     scanned += 1
-                    if scanned >= max_files:
+                    if max_files is not None and scanned >= max_files:
                         break
-                if scanned >= max_files:
+                if max_files is not None and scanned >= max_files:
                     break
         except Exception:
             pass
         return findings
 
+    def _scan_single_file(self, filepath):
+        """Scan one requested file and report it immediately."""
+        findings = []
+        try:
+            filepath = os.path.abspath(filepath)
+            matches = self._scan_file_yara(filepath)
+            self._files_scanned += 1
+            if matches:
+                h = self._hash_file(filepath)
+                seen = set()
+                for m in matches:
+                    rule = str(getattr(m, 'rule', '') or '')
+                    if rule.lower() in seen:
+                        continue
+                    seen.add(rule.lower())
+                    findings.append({
+                        'file': filepath,
+                        'path': filepath,
+                        'rule': rule,
+                        'reason': f'YARA rule matched: {rule}',
+                        'threat_type': 'yara_match',
+                        'tags': list(getattr(m, 'tags', []) or []),
+                        'severity': 'high',
+                        'hash': h,
+                        'quarantined': False,
+                    })
+        except Exception as exc:
+            print(f'[SCAN] Single file scan failed: {exc}')
+        self._report(findings, report_type='single_file_scan')
+
     def _scan_cycle(self):
+        if not self._scan_lock.acquire(blocking=False):
+            return
         all_findings = []
-        for dirpath in self._scan_dirs:
-            if os.path.isdir(dirpath):
-                findings = self._scan_directory(dirpath)
-                all_findings.extend(findings)
-        if all_findings:
-            print(f"[ALERT] Found {len(all_findings)} threat(s)!")
-            self._report(all_findings)
-        else:
-            self._report([], report_type='heartbeat_scan')
+        try:
+            for dirpath in list(self._scan_dirs):
+                if not self._running:
+                    break
+                if os.path.isdir(dirpath):
+                    findings = self._scan_directory(dirpath)
+                    all_findings.extend(findings)
+                    # Publish each directory as it completes so a long sweep
+                    # still shows progress instead of nothing until the end.
+                    self._report(findings, report_type='scan' if findings else 'scan_progress')
+            if all_findings:
+                print(f"[ALERT] Found {len(all_findings)} threat(s)!")
+        finally:
+            self._scan_lock.release()
+            self._report(all_findings, report_type='scan_complete')
 
     def _report(self, findings, report_type='scan'):
         try:
@@ -397,11 +473,14 @@ class MobileAgent:
                 'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'files_scanned': self._files_scanned,
                 'quarantined_count': self._quarantined_count,
+                'threats_blocked': self._threats_blocked,
+                'scanning': self._scan_lock.locked(),
+                'scan_dirs': list(self._scan_dirs),
                 'findings': findings,
             }
             r = requests.post(f'{self.server_url}/agent/report',
                               json=data, headers=self._headers,
-                              verify=True, timeout=15)
+                              verify=True, timeout=120)
             return r.status_code == 200
         except Exception:
             return False
@@ -437,14 +516,14 @@ class MobileAgent:
 
     def _scan_loop(self):
         while self._running:
+            self._scan_requested.wait(timeout=SCAN_INTERVAL)
+            self._scan_requested.clear()
+            if not self._running:
+                break
             try:
                 self._scan_cycle()
-            except Exception:
-                pass
-            for _ in range(SCAN_INTERVAL):
-                if not self._running:
-                    break
-                time.sleep(1)
+            except Exception as exc:
+                print(f'[SCAN] Sweep failed: {exc}')
 
     def start(self):
         self._running = True
@@ -491,7 +570,8 @@ class MobileAgent:
         net_thread = threading.Thread(target=self._network_scan_loop, daemon=True, name='NetScan')
         net_thread.start()
 
-        # Start scan thread
+        # Start scan thread and run the first sweep immediately.
+        self._scan_requested.set()
         scan_thread = threading.Thread(target=self._scan_loop, daemon=True, name='Scanner')
         scan_thread.start()
 

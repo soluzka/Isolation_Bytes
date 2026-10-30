@@ -173,4 +173,4 @@ tqdm>=4.64.0
 #transformers>=4.30.0
 wsproto>=1.2.0
 zstandard>=0.21.0
-PyGithub==1.76
+PyGithub==2.4.0

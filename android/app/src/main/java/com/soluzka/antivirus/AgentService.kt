@@ -21,7 +21,12 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
+import java.text.SimpleDateFormat
+import java.util.Collections
+import java.util.Locale
+import java.util.TimeZone
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 class AgentService : Service() {
 
@@ -31,9 +36,8 @@ class AgentService : Service() {
         private const val CHANNEL_ID = "isolation_bytes_agent"
         private const val NOTIFICATION_ID = 1
         private const val HEARTBEAT_INTERVAL = 30000L // 30 seconds
-        private const val SCAN_INTERVAL = 60000L // 60 seconds
-        private const val MAX_FILE_SIZE = 50L * 1024 * 1024 // 50 MB
-        private const val AGENT_VERSION = "1.8.953.0"
+        private const val SCAN_INTERVAL = 300000L // 5 minutes between full sweeps
+        private const val AGENT_VERSION = "1.8.954.0"
     }
 
     private lateinit var handler: Handler
@@ -44,6 +48,17 @@ class AgentService : Service() {
     private var threatsBlocked = 0
     private var quarantinedCount = 0
     private var lastScanFindings: JSONArray = JSONArray()
+    private val scanRunning = AtomicBoolean(false)
+    private val blockedFilePaths = mutableSetOf<String>()
+    private val scanDirs = Collections.synchronizedList(mutableListOf(
+        "/storage/emulated/0/Download",
+        "/storage/emulated/0/Documents",
+        "/storage/emulated/0/Pictures",
+        "/storage/emulated/0/Music",
+        "/storage/emulated/0/Movies",
+        "/storage/emulated/0/DCIM",
+        "/storage/emulated/0/Android/data"
+    ))
 
     // Suspicious file extensions to flag on Android
     private val suspiciousExtensions = setOf(
@@ -60,24 +75,38 @@ class AgentService : Service() {
 
     private val heartbeatRunnable = object : Runnable {
         override fun run() {
-            try {
-                sendHeartbeat()
-            } catch (e: Exception) {
-                // Ignore — will retry next interval
-            }
+            // Network I/O must never run on the service's main thread.
+            Thread {
+                try {
+                    sendHeartbeat()
+                } catch (e: Exception) {
+                    // Ignore — will retry next interval
+                }
+            }.start()
             handler.postDelayed(this, HEARTBEAT_INTERVAL)
         }
     }
 
     private val scanRunnable = object : Runnable {
         override fun run() {
-            try {
-                performScan()
-            } catch (e: Exception) {
-                // Ignore — will retry next interval
-            }
+            triggerScan()
             handler.postDelayed(this, SCAN_INTERVAL)
         }
+    }
+
+    private fun triggerScan() {
+        if (!scanRunning.compareAndSet(false, true)) return
+        Thread {
+            try {
+                sendHeartbeat() // publish scanning=true immediately
+                performScan()
+            } catch (e: Exception) {
+                // Ignore — the next scheduled sweep will retry
+            } finally {
+                scanRunning.set(false)
+                try { sendHeartbeat() } catch (e: Exception) { }
+            }
+        }.start()
     }
 
     override fun onCreate() {
@@ -112,7 +141,7 @@ class AgentService : Service() {
         }.start()
 
         handler.postDelayed(heartbeatRunnable, HEARTBEAT_INTERVAL)
-        handler.postDelayed(scanRunnable, SCAN_INTERVAL)
+        handler.postDelayed(scanRunnable, 10000L)
         return START_STICKY // Restart if killed
     }
 
@@ -159,8 +188,8 @@ class AgentService : Service() {
             put("agent_version", AGENT_VERSION)
             put("api_key", API_KEY)
         }
-        postJson("$SERVER_URL/agent/register", data)
-        registered = true
+        val response = postJson("$SERVER_URL/agent/register", data)
+        registered = response != null
     }
 
     private fun sendHeartbeat() {
@@ -169,6 +198,7 @@ class AgentService : Service() {
             return
         }
 
+        val dirs = synchronized(scanDirs) { scanDirs.toList() }
         val data = JSONObject().apply {
             put("device_id", deviceId)
             put("cpu_usage", 0)
@@ -178,15 +208,8 @@ class AgentService : Service() {
             put("files_scanned", filesScanned)
             put("threats_blocked", threatsBlocked)
             put("quarantined_count", quarantinedCount)
-            put("scan_dirs", JSONArray().apply {
-                put("/storage/emulated/0/Download")
-                put("/storage/emulated/0/Documents")
-                put("/storage/emulated/0/Pictures")
-                put("/storage/emulated/0/Music")
-                put("/storage/emulated/0/Movies")
-                put("/storage/emulated/0/DCIM")
-                put("/storage/emulated/0/Android/data")
-            })
+            put("scanning", scanRunning.get())
+            put("scan_dirs", JSONArray().apply { dirs.forEach { put(it) } })
             put("network_connections", JSONArray())
             put("network_devices", JSONArray())
             put("processes", JSONArray())
@@ -198,7 +221,33 @@ class AgentService : Service() {
             put("watched_count", 0)
             put("findings", lastScanFindings)
         }
-        postJson("$SERVER_URL/agent/heartbeat", data)
+        val response = postJson("$SERVER_URL/agent/heartbeat", data)
+        if (response == null) {
+            registered = false
+            return
+        }
+        val commands = response.optJSONArray("commands") ?: return
+        for (i in 0 until commands.length()) {
+            val cmd = commands.optJSONObject(i) ?: continue
+            when (cmd.optString("action")) {
+                "scan_now", "scan" -> triggerScan()
+                "scan_file" -> {
+                    val path = cmd.optString("file_path")
+                    if (path.isNotEmpty()) {
+                        Thread { scanSingleFile(path) }.start()
+                    }
+                }
+                "add_folder" -> {
+                    val folder = cmd.optString("folder_path")
+                    if (folder.isNotEmpty() && File(folder).isDirectory &&
+                        !scanDirs.contains(folder)) scanDirs.add(folder)
+                }
+                "remove_folder" -> {
+                    val folder = cmd.optString("folder_path")
+                    if (folder.isNotEmpty()) scanDirs.remove(folder)
+                }
+            }
+        }
     }
 
     private fun getMemUsage(): Int {
@@ -218,58 +267,64 @@ class AgentService : Service() {
     }
 
     private fun performScan() {
-        val scanDirs = listOf(
-            "/storage/emulated/0/Download",
-            "/storage/emulated/0/Documents",
-            "/storage/emulated/0/Pictures",
-            "/storage/emulated/0/Music",
-            "/storage/emulated/0/Movies",
-            "/storage/emulated/0/DCIM",
-            "/storage/emulated/0/Android/data",
-            getExternalFilesDir(null)?.absolutePath ?: "",
+        val candidates = (synchronized(scanDirs) { scanDirs.toList() } + listOfNotNull(
+            getExternalFilesDir(null)?.absolutePath,
             filesDir.absolutePath
-        ).filter { it.isNotEmpty() && File(it).exists() }
-
+        )).distinct()
+        // Drop roots already covered by a parent root so files are scanned once.
+        val dirs = candidates.filter { candidate ->
+            val path = File(candidate).absolutePath
+            candidates.none { other ->
+                other != candidate && path.startsWith(File(other).absolutePath + File.separator)
+            }
+        }
         val findings = JSONArray()
         var scanned = 0
+        val quarantineRoot = File(filesDir, "quarantine").absolutePath
 
-        for (dirPath in scanDirs) {
+        for (dirPath in dirs) {
             try {
                 val dir = File(dirPath)
                 if (!dir.isDirectory) continue
                 dir.walkTopDown().forEach { file ->
-                    if (!file.isFile) return@forEach
-                    if (file.length() > MAX_FILE_SIZE) return@forEach
-                    if (!file.canRead()) return@forEach
-
-                    val ext = file.extension.lowercase()
-                    if (ext.isNotEmpty() && ".$ext" in suspiciousExtensions) {
-                        val severity = if (".${ext}" in highRiskExtensions) "high" else "medium"
-                        val blocked = blockFile(file)
-                        val finding = JSONObject().apply {
-                            put("path", file.absolutePath)
-                            put("severity", severity)
-                            put("reason", "Suspicious file extension: .$ext")
-                            put("rule", "android_suspicious_ext")
-                            put("hash", hashFile(file))
-                            put("quarantined", false)
-                            put("blocked", blocked)
-                        }
-                        findings.put(finding)
-                        scanned++
-
-                        if (".${ext}" in highRiskExtensions) {
-                            threatsBlocked++
-                            val qok = quarantineFile(file)
-                            if (qok) {
-                                finding.put("quarantined", true)
-                                quarantinedCount++
-                            } else {
-                                finding.put("quarantine_error", true)
-                            }
-                        }
-                    }
+                    if (!file.isFile || !file.canRead()) return@forEach
+                    if (file.absolutePath.startsWith(quarantineRoot + File.separator)) return@forEach
                     scanned++
+
+                    val ext = file.extension.lowercase(Locale.US)
+                    if (ext.isEmpty() || ".$ext" !in suspiciousExtensions) return@forEach
+
+                    val highRisk = ".$ext" in highRiskExtensions
+                    val severity = if (highRisk) "high" else "medium"
+                    val finding = JSONObject().apply {
+                        put("path", file.absolutePath)
+                        put("severity", severity)
+                        put("reason", "Suspicious file extension: .$ext")
+                        put("rule", "android_suspicious_ext")
+                        put("hash", hashFile(file))
+                        put("quarantined", false)
+                        put("blocked", false)
+                    }
+                    findings.put(finding)
+
+                    if (highRisk) {
+                        val firstBlock = synchronized(blockedFilePaths) {
+                            blockedFilePaths.add(file.absolutePath)
+                        }
+                        if (firstBlock) threatsBlocked++
+                        // Quarantine first: blocking permissions first makes the
+                        // copy/delete used by quarantine fail.
+                        val qok = quarantineFile(file)
+                        if (qok) {
+                            finding.put("quarantined", true)
+                            quarantinedCount++
+                        } else {
+                            finding.put("quarantine_error", true)
+                            finding.put("blocked", blockFile(file))
+                        }
+                    } else {
+                        finding.put("blocked", blockFile(file))
+                    }
                 }
             } catch (e: Exception) {
                 // Permission denied or similar — skip
@@ -278,19 +333,71 @@ class AgentService : Service() {
 
         filesScanned += scanned
         lastScanFindings = findings
+        reportScan(findings, "scan_complete")
+    }
 
-        // Report findings to cloud
-        if (findings.length() > 0) {
-            val reportData = JSONObject().apply {
-                put("device_id", deviceId)
-                put("type", "scan")
-                put("files_scanned", scanned)
-                put("findings", findings)
-                put("quarantined_count", quarantinedCount)
-                put("timestamp", System.currentTimeMillis())
-            }
-            Thread { postJson("$SERVER_URL/agent/report", reportData) }.start()
+    private fun scanSingleFile(filePath: String) {
+        val file = File(filePath)
+        if (!file.isFile || !file.canRead()) return
+        val ext = file.extension.lowercase(Locale.US)
+        if (ext.isEmpty() || ".$ext" !in suspiciousExtensions) {
+            filesScanned++
+            reportScan(JSONArray(), "single_file_scan")
+            return
         }
+        val highRisk = ".$ext" in highRiskExtensions
+        val finding = JSONObject().apply {
+            put("path", file.absolutePath)
+            put("severity", if (highRisk) "high" else "medium")
+            put("reason", "Suspicious file extension: .$ext")
+            put("rule", "android_suspicious_ext")
+            put("hash", hashFile(file))
+            put("quarantined", false)
+            put("blocked", false)
+        }
+        if (highRisk) {
+            val firstBlock = synchronized(blockedFilePaths) {
+                blockedFilePaths.add(file.absolutePath)
+            }
+            if (firstBlock) threatsBlocked++
+            val qok = quarantineFile(file)
+            if (qok) {
+                finding.put("quarantined", true)
+                quarantinedCount++
+            } else {
+                finding.put("quarantine_error", true)
+                finding.put("blocked", blockFile(file))
+            }
+        } else {
+            finding.put("blocked", blockFile(file))
+        }
+        filesScanned++
+        reportScan(JSONArray().put(finding), "single_file_scan")
+    }
+
+    private fun reportScan(findings: JSONArray, reportType: String) {
+        val dirs = synchronized(scanDirs) { scanDirs.toList() }
+        val reportData = JSONObject().apply {
+            put("device_id", deviceId)
+            put("type", reportType)
+            put("files_scanned", filesScanned)
+            put("threats_blocked", threatsBlocked)
+            put("findings", findings)
+            put("quarantined_count", quarantinedCount)
+            put("scanning", false)
+            put("scan_dirs", JSONArray().apply { dirs.forEach { put(it) } })
+            put("timestamp", isoTimestamp())
+        }
+        // Keep the latest findings for the heartbeat, and always report — a
+        // clean scan must update last_scan or the dashboard polls forever.
+        lastScanFindings = findings
+        postJson("$SERVER_URL/agent/report", reportData)
+    }
+
+    private fun isoTimestamp(): String {
+        val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        format.timeZone = TimeZone.getTimeZone("UTC")
+        return format.format(java.util.Date())
     }
 
     private fun blockFile(file: File): Boolean {
@@ -337,34 +444,47 @@ class AgentService : Service() {
 
     private fun hashFile(file: File): String {
         return try {
-            val bytes = file.readBytes()
+            // Stream the hash; readBytes() would exhaust memory on a large APK.
             val md = MessageDigest.getInstance("SHA-256")
-            val digest = md.digest(bytes)
-            digest.joinToString("") { "%02x".format(it) }
+            file.inputStream().use { input ->
+                val buffer = ByteArray(1 shl 20)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    if (read > 0) md.update(buffer, 0, read)
+                }
+            }
+            md.digest().joinToString("") { "%02x".format(it) }
         } catch (e: Exception) {
             "unknown"
         }
     }
 
-    private fun postJson(urlStr: String, data: JSONObject) {
+    private fun postJson(urlStr: String, data: JSONObject): JSONObject? {
         try {
             // Validate URL to prevent SSRF — only HTTPS to our server is allowed
             val parsed = URL(urlStr)
             if (parsed.protocol != "https" || parsed.host != URL(SERVER_URL).host) {
-                return
+                return null
             }
             val conn = (parsed.openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
                 setRequestProperty("Content-Type", "application/json")
                 doOutput = true
-                connectTimeout = 10000
-                readTimeout = 10000
+                connectTimeout = 15000
+                readTimeout = 120000
             }
             conn.outputStream.use { it.write(data.toString().toByteArray()) }
-            conn.responseCode // Trigger the request
+            val code = conn.responseCode
+            val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+            val body = stream?.bufferedReader()?.use { it.readText() } ?: ""
             conn.disconnect()
+            if (code !in 200..299) return null
+            return if (body.isBlank()) JSONObject()
+            else try { JSONObject(body) } catch (e: Exception) { JSONObject() }
         } catch (e: Exception) {
             // Network error — will retry next heartbeat
+            return null
         }
     }
 }

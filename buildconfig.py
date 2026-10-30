@@ -20,9 +20,10 @@ import os
 import sys
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
-from utils.subprocess_safe import safe_run
+from utils.subprocess_safe import safe_popen, safe_run
 
 # ============================================================
 # SHARED CONFIGURATION — used by both EXEs
@@ -389,6 +390,179 @@ def clean():
 
 
 # ============================================================
+# START THE WEBSITE SERVER + REGISTER EVERY STARTUP MECHANISM
+# ============================================================
+SERVER_URLS = ('http://127.0.0.1:8000/', 'https://127.0.0.1:8443/')
+STARTUP_TASK_NAME = 'IsolationBytesCloudServerStartup'
+STARTUP_RUN_VALUE = 'IsolationBytesCloudServer'
+
+
+def _server_commands():
+    """Return every way to start the website server, best first."""
+    commands = []
+    exe = DIST_DIR / 'cloud_server.exe'
+    if exe.is_file():
+        commands.append([str(exe)])
+    script = PROJECT_ROOT / 'cloud' / 'cloud_server.py'
+    if script.is_file():
+        # Run as a module so the package-relative imports resolve; running the
+        # file path directly puts cloud/ on sys.path and breaks "import cloud".
+        commands.append([sys.executable, '-m', 'cloud.cloud_server'])
+    return commands
+
+
+def _server_command():
+    """Return the preferred command that starts the website server."""
+    commands = _server_commands()
+    return commands[0] if commands else None
+
+
+def _server_is_up():
+    """True when either the proxy port or direct port already answers."""
+    import socket
+    for port in (8000, 8443):
+        try:
+            with socket.create_connection(('127.0.0.1', port), timeout=1):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+def start_cloud_server(wait_seconds=45):
+    """Launch the built website server in the background.
+
+    If the built executable exits immediately (for example it predates the
+    entrypoint fix), try the source server so the website still comes up.
+    """
+    commands = _server_commands()
+    if not commands:
+        print('  WARNING: No cloud server executable or script found — not started.')
+        return False
+    if _server_is_up():
+        print('  Website server is already running on port 8000/8443.')
+        return True
+
+    for cmd in commands:
+        print(f"  Starting website server: {subprocess.list2cmdline(cmd)}")
+        kwargs = {
+            'cwd': str(PROJECT_ROOT),
+            'stdout': subprocess.DEVNULL,
+            'stderr': subprocess.DEVNULL,
+        }
+        if os.name == 'nt':
+            # Detached so the server survives the build shell closing.
+            kwargs['creationflags'] = 0x00000008 | 0x08000000
+        try:
+            proc = safe_popen(cmd, **kwargs)
+        except Exception as exc:
+            print(f'  WARNING: Could not start website server: {exc}')
+            continue
+
+        deadline = time.time() + max(1, int(wait_seconds))
+        while time.time() < deadline:
+            if _server_is_up():
+                print(f'  Website server ready (PID {proc.pid}).')
+                print('  Open: http://127.0.0.1:8000/  (or https://127.0.0.1:8443/)')
+                return True
+            if proc.poll() is not None:
+                print(f'  WARNING: Website server exited during startup (code {proc.returncode}).')
+                break
+            time.sleep(1)
+        if _server_is_up():
+            return True
+        print(f'  WARNING: Website server started (PID {proc.pid}) but did not answer; trying the next launcher.')
+    return False
+
+
+def _startup_folder():
+    return os.path.join(
+        os.environ.get('APPDATA', ''),
+        r'Microsoft\Windows\Start Menu\Programs\Startup',
+    )
+
+
+def install_server_startup():
+    """Register the website server in every Windows startup mechanism.
+
+    Covers Task Scheduler, HKCU Run, the Startup folder, and HKLM Run (when
+    the build is elevated). Each mechanism is independent, so a failure in
+    one still leaves the server auto-starting from the others.
+    """
+    cmd = _server_command()
+    if not cmd:
+        print('  WARNING: No server command to register at startup.')
+        return
+    if os.name != 'nt':
+        print('  Startup registration is Windows-only; skipped.')
+        return
+
+    command_line = subprocess.list2cmdline(cmd)
+    results = []
+
+    def run_quiet(args):
+        try:
+            return safe_run(args, capture_output=True, text=True, timeout=30)
+        except Exception as exc:
+            print(f'    {exc}')
+            return None
+
+    # 1) Scheduled Task at logon, highest privileges first, then plain logon.
+    run_quiet(['schtasks', '/delete', '/tn', STARTUP_TASK_NAME, '/f'])
+    task_args = ['schtasks', '/create', '/tn', STARTUP_TASK_NAME,
+                 '/tr', command_line, '/sc', 'ONLOGON', '/rl', 'HIGHEST', '/f']
+    if len(command_line) > 260:
+        wrapper_dir = os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'), 'IsolationBytes')
+        os.makedirs(wrapper_dir, exist_ok=True)
+        wrapper = os.path.join(wrapper_dir, 'cloud_server_start.bat')
+        with open(wrapper, 'w', encoding='utf-8') as fh:
+            fh.write(f'@echo off\r\n{command_line}\r\n')
+        task_args = ['schtasks', '/create', '/tn', STARTUP_TASK_NAME,
+                     '/tr', wrapper, '/sc', 'ONLOGON', '/rl', 'HIGHEST', '/f']
+    task = run_quiet(task_args)
+    if task is None or task.returncode != 0:
+        task = run_quiet(['schtasks', '/create', '/tn', STARTUP_TASK_NAME,
+                          '/tr', task_args[task_args.index('/tr') + 1],
+                          '/sc', 'ONLOGON', '/f'])
+    results.append(('Task Scheduler', task is not None and task.returncode == 0))
+
+    # 2) Per-user registry Run key.
+    hkcu = run_quiet(['reg', 'add', r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run',
+                      '/v', STARTUP_RUN_VALUE, '/t', 'REG_SZ', '/d', command_line, '/f'])
+    results.append(('HKCU Run key', hkcu is not None and hkcu.returncode == 0))
+
+    # 3) Startup folders (hidden VBS launcher; no console window).
+    escaped = command_line.replace('"', '""')
+    startup_dirs = [_startup_folder()]
+    all_users_startup = os.path.join(
+        os.environ.get('ProgramData', r'C:\ProgramData'),
+        r'Microsoft\Windows\Start Menu\Programs\StartUp',
+    )
+    startup_dirs.append(all_users_startup)
+    folder_ok = False
+    for startup_dir in startup_dirs:
+        try:
+            os.makedirs(startup_dir, exist_ok=True)
+            vbs_path = os.path.join(startup_dir, 'IsolationBytesCloudServer.vbs')
+            with open(vbs_path, 'w', encoding='utf-8') as fh:
+                fh.write('Set sh = CreateObject("WScript.Shell")\r\n')
+                fh.write(f'sh.Run "{escaped}", 0, False\r\n')
+            folder_ok = True
+        except Exception as exc:
+            print(f'    Startup folder registration skipped ({startup_dir}): {exc}')
+    results.append(('Startup folder', folder_ok))
+
+    # 4) Machine-wide Run key (succeeds only when the build is elevated).
+    hklm = run_quiet(['reg', 'add', r'HKLM\Software\Microsoft\Windows\CurrentVersion\Run',
+                      '/v', STARTUP_RUN_VALUE, '/t', 'REG_SZ', '/d', command_line, '/f'])
+    results.append(('HKLM Run key', hklm is not None and hklm.returncode == 0))
+
+    print('  Startup registration:')
+    for name, ok in results:
+        print(f'    {name + ":":<20s} {"OK" if ok else "skipped/failed (non-fatal)"}')
+
+
+# ============================================================
 # Main
 # ============================================================
 def main():
@@ -423,6 +597,17 @@ def main():
         ok = build_cloud_server() and ok
     if build_launcher_flag:
         ok = build_launcher() and ok  # No longer requires cloud_server.exe
+
+    # build_config.py invokes this script while building; it owns the final
+    # launch so the server is not started from a stale build mid-pipeline.
+    nested = os.environ.get('ISOLATION_BYTES_BUILD_NESTED') == '1'
+    if ok and not nested and '--no-start' not in args:
+        print(f"\n{'='*60}")
+        print('  STARTING WEBSITE SERVER')
+        print(f"{'='*60}")
+        start_cloud_server()
+    if ok and not nested and '--no-startup' not in args:
+        install_server_startup()
 
     print(f"\n{'='*60}")
     if ok:

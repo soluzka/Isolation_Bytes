@@ -187,18 +187,19 @@
         for (const ag of agents) {
             const findings = Array.isArray(ag.findings) ? ag.findings : (Array.isArray(ag.results) ? ag.results : []);
             const scanDirs = Array.isArray(ag.scan_dirs) ? ag.scan_dirs : [];
+            const scanning = Boolean(ag.scanning);
             let findingsHtml = '';
             if (findings.length) {
                 findingsHtml = '<table class="table" style="margin-top:8px;"><thead><tr><th>Path</th><th>Rule</th><th>Severity</th><th>Type</th><th>Quarantined</th></tr></thead><tbody>';
                 for (const f of findings) {
                     const sev = String(f.severity || 'low').toLowerCase();
                     const color = sevColor[sev] || '#6c757d';
-                    const qIcon = f.quarantined ? '✓ Yes' : (f.quarantine_error ? '✗ Failed' : '—');
+                    const qIcon = f.quarantined ? '✓ Yes' : (f.blocked ? 'Blocked' : (f.quarantine_error ? '✗ Failed' : '—'));
                     findingsHtml += '<tr><td style="word-break:break-all;">' + escapeHtml(f.path || '') + '</td><td>' + escapeHtml(f.rule || '') + '</td><td style="color:' + color + ';font-weight:bold;">' + escapeHtml(sev) + '</td><td>' + escapeHtml(f.threat_type || '') + '</td><td>' + escapeHtml(qIcon) + '</td></tr>';
                 }
                 findingsHtml += '</tbody></table>';
             } else {
-                findingsHtml = '<p style="margin-top:8px;color:#28a745;">No threats found on last scan.</p>';
+                findingsHtml = '<p style="margin-top:8px;color:#28a745;">' + (scanning ? 'No threats found so far. Scan is still running.' : 'No threats found on last scan.') + '</p>';
             }
 
             let dirsHtml = '';
@@ -211,7 +212,8 @@
             const filesScanned = Number(ag.files_scanned) || 0;
             const findingCount = Number(ag.finding_count) || findings.length;
             const quarantinedCount = Number(ag.quarantined_count) || 0;
-            html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id || 'Agent') + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + filesScanned + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; Quarantined: <strong>' + quarantinedCount + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + '</p>' + dirsHtml + findingsHtml + '</div>';
+            const scanningBadge = scanning ? ' &middot; <strong style="color:#b36200;">Scanning...</strong>' : '';
+            html += '<div style="border:1px solid #dee2e6;border-radius:6px;padding:12px;margin-bottom:12px;"><h4 style="margin:0 0 6px 0;">' + escapeHtml(ag.hostname || ag.device_id || 'Agent') + '</h4><p style="margin:2px 0;font-size:13px;">Files scanned: <strong>' + filesScanned + '</strong> &middot; Findings: <strong style="color:' + (findingCount ? '#dc3545' : '#28a745') + ';">' + findingCount + '</strong> &middot; Quarantined: <strong>' + quarantinedCount + '</strong> &middot; Last scan: ' + escapeHtml(ag.last_scan || 'N/A') + scanningBadge + '</p>' + dirsHtml + findingsHtml + '</div>';
         }
         el.innerHTML = html;
     }

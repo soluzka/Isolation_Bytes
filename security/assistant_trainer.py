@@ -1073,12 +1073,12 @@ rule {rule_name} : {severity}
 
         return result
 
-    def scan_directory(self, dirpath, max_files=500):
+    def scan_directory(self, dirpath, max_files=None):
         """Scan a directory for malware. Returns list of findings.
 
         Args:
             dirpath: Directory to scan
-            max_files: Maximum number of files to scan (safety limit)
+            max_files: Optional explicit file limit; None scans the whole tree
         Returns:
             List of finding dicts with risk scores
         """
@@ -1089,7 +1089,7 @@ rule {rule_name} : {severity}
         scanned = 0
         for root, dirs, files in os.walk(dirpath):
             for filename in files:
-                if scanned >= max_files:
+                if max_files is not None and scanned >= max_files:
                     break
                 filepath = os.path.join(root, filename)
                 try:
@@ -1101,7 +1101,7 @@ rule {rule_name} : {severity}
                     scanned += 1
                 except Exception:
                     continue
-            if scanned >= max_files:
+            if max_files is not None and scanned >= max_files:
                 break
 
         # Sort by risk score descending

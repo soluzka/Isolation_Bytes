@@ -81,6 +81,10 @@ def _with_secret_injection(file_path, placeholder='__CLOUD_API_KEY__', secret=No
 parser = argparse.ArgumentParser(description='Build Isolation Bytes MSIX')
 parser.add_argument('--skip-exe', action='store_true',
                     help='Skip PyInstaller build, MSIX only')
+parser.add_argument('--no-start', action='store_true',
+                    help='Do not launch the website server after building')
+parser.add_argument('--no-startup', action='store_true',
+                    help='Do not register the website server for Windows startup')
 args = parser.parse_args()
 
 
@@ -302,8 +306,10 @@ if not args.skip_exe:
     buildconfig = os.path.join(BASE_DIR, 'buildconfig.py')
     if os.path.isfile(buildconfig):
         print(f'\n{"="*60}\nBuilding cloud_server.exe + IsolationBytesLogin.exe\n{"="*60}')
+        nested_env = os.environ.copy()
+        nested_env['ISOLATION_BYTES_BUILD_NESTED'] = '1'
         with _with_secret_injection(PROGRAM_CS, secret=CLOUD_API_KEY):
-            run([sys.executable, buildconfig])
+            run([sys.executable, buildconfig], env=nested_env)
         login_exe = os.path.join(DIST_DIR, 'IsolationBytesLogin.exe')
         if os.path.isfile(login_exe):
             login_size = os.path.getsize(login_exe) / 1048576
@@ -700,6 +706,25 @@ if os.path.isfile(sfx_builder):
             _publish_build_artifact(sfx_path, os.path.basename(sfx_path))
 else:
     print(f'WARNING: {sfx_builder} not found — SFX build skipped.')
+
+# ---------------------------------------------------------------------------
+# 12. Start the website server and register every startup mechanism
+# ---------------------------------------------------------------------------
+
+if not args.no_start or not args.no_startup:
+    try:
+        from buildconfig import install_server_startup, start_cloud_server
+    except Exception as exc:
+        print(f'WARNING: Could not load server start/startup helpers: {exc}')
+        start_cloud_server = None
+        install_server_startup = None
+
+    if not args.no_start and start_cloud_server is not None:
+        print(f'\n{"="*60}\nStarting website server\n{"="*60}')
+        start_cloud_server()
+    if not args.no_startup and install_server_startup is not None:
+        print(f'\n{"="*60}\nRegistering website server for startup\n{"="*60}')
+        install_server_startup()
 
 # ---------------------------------------------------------------------------
 # Done

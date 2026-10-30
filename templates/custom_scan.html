@@ -24,10 +24,6 @@
                 <label class="form-label">Path to scan</label>
                 <input type="text" class="form-control" name="target_path" value="{{ target }}" placeholder="C:\\Users\\...\\file.exe" required>
             </div>
-            <div class="mb-3">
-                <label class="form-label">Max files (for directories)</label>
-                <input type="number" class="form-control" name="max_files" value="{{ max_files }}" min="1" max="5000">
-            </div>
             <div class="text-center">
                 <button type="submit" class="btn btn-primary">Scan Now</button>
             </div>
@@ -37,7 +33,7 @@
             {% if result.error %}
             <div class="alert alert-danger mt-3">{{ result.error }}</div>
             {% else %}
-            <div class="alert alert-info mt-3">Scanned {{ result.scanned }} file(s). Found {{ result.results | length }} matches.</div>
+            <div class="alert alert-info mt-3">Scanned all {{ result.scanned }} file(s). Found {{ result.total_matches }} match(es){% if result.errors %} in {{ result.errors }} unreadable file(s){% endif %}.</div>
             {% if result.results %}
             <table class="table table-sm table-striped mt-3">
                 <thead>

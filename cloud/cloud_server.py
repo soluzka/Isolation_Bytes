@@ -22,6 +22,8 @@ create_cloud_app = getattr(_legacy, 'create_cloud_app', lambda: app)
 _agent_scan_state = {}
 _STARTUP_RUNNING = False
 _STARTUP_STARTED_AT = None
+_STARTUP_STARTED_TS = 0.0
+_STARTUP_USES_BUILTIN = False
 
 
 def _logged_in():
@@ -43,22 +45,49 @@ def _pending_scan(agent_id):
         return False
 
 
+def _scan_after(agent, started_ts):
+    """True when the agent reported a scan at or after the trigger time."""
+    from datetime import datetime, timezone
+    try:
+        seen = datetime.fromisoformat(
+            str(agent.get("last_scan") or "").replace("Z", "+00:00")
+        )
+        if seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        return seen.timestamp() >= started_ts
+    except Exception:
+        return False
+
+
 def _scan_still_running(agents):
-    """A triggered scan ends once every agent reports newer data or it times out."""
+    """A triggered scan ends once every targeted agent reports newer data."""
     global _STARTUP_RUNNING
     if not _STARTUP_RUNNING:
         return False
     now = time.time()
-    for device_id, agent in agents.items():
+    tracked = False
+    # Ignore agents that have gone offline: their queued command will never be
+    # consumed and a stale "scanning" flag must not hold the run open for an hour.
+    online = {device_id: agent for device_id, agent in agents.items() if _agent_online(agent)}
+    for device_id, agent in online.items():
+        if _pending_scan(device_id) or agent.get("scanning"):
+            return True
         state = _agent_scan_state.get(device_id)
         if not state:
             continue
+        tracked = True
         if now - state["started_at"] > 3600:
             continue
-        if _pending_scan(device_id) or agent.get("scanning"):
-            return True
         if _agent_report_marker(agent) == state["report_marker"]:
             return True
+    if not tracked and _STARTUP_USES_BUILTIN:
+        # Scan was handed to the built-in agent, which has no per-agent state
+        # entry yet. Stay running until it reports a scan after the trigger;
+        # cap the wait so a dead built-in agent cannot pin the UI forever.
+        if now - _STARTUP_STARTED_TS > 300:
+            _STARTUP_RUNNING = False
+            return False
+        return not any(_scan_after(agent, _STARTUP_STARTED_TS) for agent in online.values())
     _STARTUP_RUNNING = False
     return False
 
@@ -78,6 +107,7 @@ def _canonical_yara_agent_state():
     yara = 0
     ml = 0
     findings = []
+    seen_findings = set()
     folders = []
     agent_rows = []
     running = _scan_still_running(agents)
@@ -93,19 +123,44 @@ def _canonical_yara_agent_state():
 
         scanned_files += files_scanned
         quarantined += quarantined_count
-        threats += int(agent.get("findings_count") or len(agent_findings) or 0)
-        blocked += int(agent.get("threats_blocked") or report.get("threats_blocked") or 0)
-        ransomware += int(agent.get("total_ransomware") or 0)
-        persistence += int(agent.get("total_persistence") or 0)
-        yara += int(agent.get("total_yara") or 0)
-        ml += int(agent.get("total_ml") or 0)
 
-        if agent.get("scanning") or _pending_scan(device_id):
+        agent_online = _agent_online(agent)
+        if agent_online and (agent.get("scanning") or _pending_scan(device_id)):
             running = True
 
         for finding in agent_findings:
-            if isinstance(finding, dict):
-                findings.append(finding)
+            if not isinstance(finding, dict):
+                continue
+            try:
+                key = _legacy._finding_key(finding)
+            except Exception:
+                key = (finding.get('path'), finding.get('rule'))
+            # Include the device: two PCs can report the same path+rule and
+            # both findings must remain visible.
+            key = (device_id,) + tuple(key)
+            if key in seen_findings:
+                continue
+            seen_findings.add(key)
+            findings.append(finding)
+
+            # Count exactly what is displayed. Reading the agent's cumulative
+            # counters here made "Threats found" larger than the findings table
+            # and kept growing on every re-scan.
+            ttype = str(finding.get('threat_type') or '').lower()
+            rule = str(finding.get('rule') or '').lower()
+            if ttype == 'ransomware':
+                ransomware += 1
+            elif ttype == 'persistence':
+                persistence += 1
+            elif ttype == 'ml_suspicious' or rule.startswith('ml_'):
+                ml += 1
+            try:
+                if _legacy._is_yara_finding(finding):
+                    yara += 1
+            except Exception:
+                pass
+            if finding.get('blocked') or finding.get('quarantined'):
+                blocked += 1
 
         host = agent.get("hostname", device_id)
         for directory in agent.get("scan_dirs") or []:
@@ -120,9 +175,11 @@ def _canonical_yara_agent_state():
             "last_seen": agent.get("last_seen", ""),
             "files_scanned": files_scanned,
             "quarantined": quarantined_count,
-            "threats": int(agent.get("findings_count") or len(agent_findings) or 0),
-            "scanning": bool(agent.get("scanning") or _pending_scan(device_id)),
+            "threats": len(agent_findings),
+            "scanning": bool(agent_online and (agent.get("scanning") or _pending_scan(device_id))),
         })
+
+    threats = len(findings)
 
     return {
         "success": True,
@@ -172,23 +229,23 @@ def _agent_online(agent, max_age=90):
 
 
 def _start_builtin_agent():
-    """Start the server's built-in agent if it can be; True when it is running."""
+    """Start the server's built-in agent; return it when it is running."""
     api_key = os.environ.get("CLOUD_API_KEY", "")
     if not api_key:
-        return False
+        return None
     try:
         from security.local_agent import start_local_agent
         agent = start_local_agent(
             server_url=os.environ.get("PUBLIC_URL", "https://isolation-bytes.com"),
             api_key=api_key,
         )
-        return bool(agent and getattr(agent, "_running", True))
+        return agent if agent and getattr(agent, "_running", True) else None
     except Exception:
-        return False
+        return None
 
 
 def _agent_trigger_scan_response():
-    global _STARTUP_RUNNING, _STARTUP_STARTED_AT
+    global _STARTUP_RUNNING, _STARTUP_STARTED_AT, _STARTUP_STARTED_TS, _STARTUP_USES_BUILTIN
     if not _logged_in():
         return jsonify({
             "ok": False,
@@ -202,30 +259,29 @@ def _agent_trigger_scan_response():
         }), 401
 
     agents = _legacy._all_agents()
-    if not agents:
-        return jsonify({
-            "ok": False,
-            "success": False,
-            "status": "error",
-            "message_type": "error",
-            "message": "No connected agents to scan.",
-            "error": "No connected agents to scan.",
-            "agents": 0,
-            "agents_triggered": 0,
-        }), 404
-
     online = {d: a for d, a in agents.items() if _agent_online(a)}
     if not online:
+        # No live agent: start the server's built-in agent instead of refusing
+        # the scan. This also covers a fresh install where no agent has ever
+        # registered yet.
         started = _start_builtin_agent()
         if started:
             _STARTUP_RUNNING = True
+            _STARTUP_USES_BUILTIN = True
             _STARTUP_STARTED_AT = time.strftime("%Y-%m-%d %H:%M:%S")
+            _STARTUP_STARTED_TS = time.time()
+            # Make the very first click run a scan; the agent picks this up as
+            # soon as it finishes registering instead of requiring a second click.
+            try:
+                started.request_scan()
+            except Exception:
+                pass
             return jsonify({
                 "ok": True, "success": True, "status": "started", "accepted": True,
                 "message_type": "success",
-                "message": "No agent was online, so the built-in agent was started. "
-                           "Click again in a few seconds to queue the scan once it checks in.",
-                "error": None, "agents": 0, "agents_triggered": 0,
+                "message": "No agent was online, so the built-in agent was started and "
+                           "queued to scan the local machine.",
+                "error": None, "agents": 1, "agents_triggered": 1,
             }), 200
         last_seen = max([str(a.get("last_seen") or "never") for a in agents.values()] or ["never"])
         message = (
@@ -240,11 +296,13 @@ def _agent_trigger_scan_response():
         }), 503
 
     _STARTUP_RUNNING = True
+    _STARTUP_USES_BUILTIN = False
     _STARTUP_STARTED_AT = time.strftime("%Y-%m-%d %H:%M:%S")
+    _STARTUP_STARTED_TS = time.time()
     now = time.time()
     sent = 0
 
-    for device_id, agent in agents.items():
+    for device_id, agent in online.items():
         try:
             pending = [
                 cmd for cmd in list(_legacy.commands.get(device_id, []))
@@ -404,3 +462,10 @@ def _ml_models_status():
 # Delegate compatibility attributes that older imports may still access.
 def __getattr__(name):
     return getattr(_legacy, name)
+
+
+if __name__ == '__main__':
+    # PyInstaller runs this module as the entry point. Starting the legacy
+    # server here is what actually opens the website listener; without it the
+    # built cloud_server.exe imported Flask, printed a warning and exited 0.
+    _legacy.run_server()

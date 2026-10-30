@@ -333,8 +333,8 @@ def _is_safe_quarantine_path(path, base_dir=None):
         return False
 
 
-def _custom_scan_target(target_path, max_files=100):
-    """YARA-scan a single file or a directory up to max_files."""
+def _custom_scan_target(target_path):
+    """YARA-scan a single file or an entire directory tree (no file cap)."""
     if not os.path.exists(target_path):
         return {'error': 'Path not found'}
     from security.yara_scanner import scan_file_with_yara
@@ -346,12 +346,14 @@ def _custom_scan_target(target_path, max_files=100):
                 results.append({'path': target_path, 'matches': [getattr(m, 'rule', str(m)) for m in matches]})
         except Exception as e:
             return {'error': str(e)}
-        return {'scanned': 1, 'results': results}
+        return {'scanned': 1, 'total_matches': sum(len(r['matches']) for r in results),
+                'errors': 0, 'results': results}
     scanned = 0
+    errors = 0
     for root, dirs, files in os.walk(target_path):
+        # Do not descend into excluded trees (e.g. quarantine or caches).
+        dirs[:] = [d for d in dirs if not should_exclude_path(os.path.join(root, d))]
         for f in files:
-            if scanned >= max_files:
-                break
             p = os.path.join(root, f)
             if should_exclude_path(p):
                 continue
@@ -360,9 +362,10 @@ def _custom_scan_target(target_path, max_files=100):
                 if matches:
                     results.append({'path': p, 'matches': [getattr(m, 'rule', str(m)) for m in matches]})
             except Exception:
-                pass
+                errors += 1
             scanned += 1
-    return {'scanned': scanned, 'results': results}
+    return {'scanned': scanned, 'total_matches': sum(len(r['matches']) for r in results),
+            'errors': errors, 'results': results}
 
 
 def _hash_sha256(file_path):
@@ -552,38 +555,72 @@ def install_startup():
         print("Cannot install startup: executable path could not be resolved.")
         return False
 
-    if _is_startup_installed():
-        print("Startup entry already exists.")
-        return True
+    tr_value = subprocess.list2cmdline([exe_path])
+    registered = False
 
-    # Try Task Scheduler first
-    try:
-        tr_value = subprocess.list2cmdline([exe_path])
-        subprocess.run(
-            ['schtasks', '/create', '/tn', 'AntivirusYARAServerStartup',
-             '/tr', tr_value, '/sc', 'ONLOGON', '/f'],
-            check=True, capture_output=True, text=True,
-            creationflags=CREATE_NO_WINDOW
-        )
-        print("Startup task created. It will run at logon.")
-        return True
-    except Exception as e:
-        print(f"Task Scheduler install failed: {e}; using registry fallback.")
+    # 1) Task Scheduler (highest privileges, then plain logon).
+    for extra in (['/rl', 'HIGHEST'], []):
+        try:
+            subprocess.run(
+                ['schtasks', '/create', '/tn', 'AntivirusYARAServerStartup',
+                 '/tr', tr_value, '/sc', 'ONLOGON', *extra, '/f'],
+                check=True, capture_output=True, text=True,
+                creationflags=CREATE_NO_WINDOW
+            )
+            print("Startup task created. It will run at logon.")
+            registered = True
+            break
+        except Exception as e:
+            print(f"Task Scheduler install failed ({' '.join(extra) or 'default'}): {e}")
 
-    # Fallback to HKCU\...\Run
+    # 2) HKCU\\...\\Run
     try:
         key = winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
             r'Software\Microsoft\Windows\CurrentVersion\Run',
             0, winreg.KEY_SET_VALUE
         )
-        winreg.SetValueEx(key, 'AntivirusYARAServer', 0, winreg.REG_SZ, exe_path)
+        winreg.SetValueEx(key, 'AntivirusYARAServer', 0, winreg.REG_SZ, tr_value)
         winreg.CloseKey(key)
         print("Added to HKCU\\...\\Run for current-user logon.")
-        return True
+        registered = True
     except Exception as e:
-        print(f"Registry install failed: {e}")
-        return False
+        print(f"HKCU registry install failed: {e}")
+
+    # 3) Startup folders (hidden VBS launcher).
+    escaped = tr_value.replace('"', '""')
+    startup_dirs = [
+        os.path.join(os.environ.get('APPDATA', ''),
+                     r'Microsoft\Windows\Start Menu\Programs\Startup'),
+        os.path.join(os.environ.get('ProgramData', r'C:\ProgramData'),
+                     r'Microsoft\Windows\Start Menu\Programs\StartUp'),
+    ]
+    for startup_dir in startup_dirs:
+        try:
+            os.makedirs(startup_dir, exist_ok=True)
+            vbs_path = os.path.join(startup_dir, 'IsolationBytesServer.vbs')
+            with open(vbs_path, 'w', encoding='utf-8') as fh:
+                fh.write('Set sh = CreateObject("WScript.Shell")\r\n')
+                fh.write(f'sh.Run "{escaped}", 0, False\r\n')
+            print(f"Added hidden launcher to startup folder: {startup_dir}")
+            registered = True
+        except Exception as e:
+            print(f"Startup folder install skipped ({startup_dir}): {e}")
+
+    # 4) Machine-wide Run key (works when elevated).
+    try:
+        subprocess.run(
+            ['reg', 'add', r'HKLM\Software\Microsoft\Windows\CurrentVersion\Run',
+             '/v', 'IsolationBytesServer', '/t', 'REG_SZ', '/d', tr_value, '/f'],
+            check=True, capture_output=True, text=True,
+            creationflags=CREATE_NO_WINDOW
+        )
+        print("Added to HKLM\\...\\Run for all users.")
+        registered = True
+    except Exception as e:
+        print(f"HKLM registry install skipped (needs admin): {e}")
+
+    return registered
 
 # Create a clean app instance
 app = Flask(__name__, 
@@ -931,6 +968,11 @@ def _perform_scan_all():
     '''Scan all monitored directories using YARA rules and optional ML scoring.'''
     from security.yara_scanner import scan_file_with_yara
     from security.detector import ember_detector, detector
+    try:
+        from security.yara_scanner import get_rules_fingerprint
+        rules_fp = get_rules_fingerprint()
+    except Exception:
+        rules_fp = ''
 
     monitored_dirs = list(set(network_state['monitored_directories'] + folder_watcher_state['monitored_paths']))
     start_time = time.time()
@@ -1017,12 +1059,22 @@ def _perform_scan_all():
 
                         try:
                             cached = scan_cache.get(file_path)
+                            # A cached clean/positive verdict is only valid for
+                            # the rule set that produced it; invalidate when
+                            # rules are added or edited.
+                            if cached is not None and cached.get('rules_signature') != rules_fp:
+                                cached = None
                             if cached is not None:
                                 cached_matches = cached.get('yara_matches', [])
                                 if cached_matches:
                                     total_yara_matches += len(cached_matches)
                                     detected_threats += 1
                                     results.append('YARA match: ' + file_path + ' - Rules: ' + ', '.join(cached_matches))
+                                    # Cached results are still real findings. They
+                                    # used to be dropped from the review list, so
+                                    # the next scan reported zero suspicious files
+                                    # even though matches existed.
+                                    yara_suspicious.append({'file': file_path, 'rules': cached_matches})
                                 continue
 
                             file_ext = os.path.splitext(file_path)[1].lower()
@@ -1081,6 +1133,7 @@ def _perform_scan_all():
                             cache_entry = {
                                 'yara_matches': rule_names,
                                 'yara_score': yara_score,
+                                'rules_signature': rules_fp,
                                 'quarantined': False,
                                 'reported': False
                             }
@@ -1900,16 +1953,11 @@ def custom_scan():
         return redirect(url_for('login'))
     result = None
     target = ''
-    max_files = 100
     if request.method == 'POST':
         target = request.form.get('target_path', '').strip()
-        try:
-            max_files = max(1, min(5000, int(request.form.get('max_files', 100))))
-        except Exception:
-            max_files = 100
         if target:
-            result = _custom_scan_target(target, max_files=max_files)
-    return render_template('custom_scan.html', target=target, max_files=max_files, result=result)
+            result = _custom_scan_target(target)
+    return render_template('custom_scan.html', target=target, result=result)
 
 
 @app.route('/processes')
@@ -3590,17 +3638,8 @@ def c2_detector_report():
 
 @app.route('/scan')
 def scan():
-    """Run a full system scan using YARA rules"""
-    # Mock scan results
-    scan_results = {
-        'status': 'completed',
-        'scanned_files': 15423,
-        'detected_threats': 0,
-        'scan_time': '352.4 seconds',
-        'scanned_directories': folder_watcher_state['monitored_paths'] + network_state['monitored_directories'],
-        'timestamp': time.strftime('%Y-%m-%d %H:%M:%S')
-    }
-    return render_template('scan_results.html', results=scan_results) if os.path.exists(os.path.join(app.template_folder, 'scan_results.html')) else jsonify(scan_results)
+    """Start a real full system scan (same background path as the dashboard)."""
+    return run_startup()
 
 @app.route('/scan_all_processes')
 def scan_all_processes():
@@ -4181,7 +4220,9 @@ if __name__ == '__main__':
     if '--install-startup' in sys.argv:
         install_startup()
         sys.exit(0)
-    if sys.executable.lower().endswith('.exe') and not _is_startup_installed():
+    if sys.executable.lower().endswith('.exe'):
+        # Install into every startup mechanism on each launch; each entry is
+        # overwritten in place, so this is idempotent and repairs missing ones.
         install_startup()
     _single_instance_handle = _ensure_single_instance()
     print("Starting clean Windows Defender app instance...")

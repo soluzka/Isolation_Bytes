@@ -1126,17 +1126,19 @@ def scan():
         try:
             file_path = result.split(": ", 1)[-1].strip()
             if os.path.exists(file_path):
-                # Get ML prediction from the best available model
+                # Get ML prediction from the best available model.
                 score, model = _get_best_ml_score(file_path)
-                if score is not None and score >= 0.60:
-                    results.append({
-                        'file': file_path,
-                        'size': os.path.getsize(file_path),
-                        'ml_prediction': 'malicious',
-                        'anomaly_score': float(score),
-                        'model': model,
-                        'is_malicious': True
-                    })
+                # A YARA hit is a finding even when no ML model is available or
+                # scores it below the threshold; dropping it hid real matches.
+                results.append({
+                    'file': file_path,
+                    'size': os.path.getsize(file_path),
+                    'ml_prediction': 'malicious' if (score is not None and score >= 0.60) else 'suspicious',
+                    'anomaly_score': float(score) if score is not None else None,
+                    'model': model,
+                    'is_malicious': bool(score is not None and score >= 0.60),
+                    'yara_match': True,
+                })
         except Exception as e:
             logger.error(f"Error processing scan result {result}: {str(e)}")
             continue
@@ -5701,144 +5703,6 @@ def scan_pages():
     # Automatically trigger the manual scan for pages
     scan_result = perform_manual_scan_pages()
     return render_template('index.html', scan_results=scan_result, status='ON')
-
-@app.route('/something', methods=['POST'])
-def scan_all_monitored():
-    """Scan all monitored folders for threats using ML models."""
-    try:
-        results = []
-        monitored_folders = load_scan_directories()
-        
-        for folder in monitored_folders:
-            if not os.path.exists(folder):
-                continue
-                
-            for root, _, files in os.walk(folder):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    try:
-                        # Skip system files and directories
-                        if any(sys_dir in file_path.lower() for sys_dir in ['windows', 'program files']):
-                            continue
-                            
-                        # Skip if file is in quarantine
-                        if QUARANTINE_FOLDER in file_path.lower():
-                            continue
-                            
-                        # Perform ML-based threat detection
-                        ml_results = detect_threat(file_path)
-                        
-                        # Check for traditional threats
-                        is_traditional_threat = is_infected(file_path)
-                        
-                        # Combine results
-                        result = {
-                            'file_path': file_path,
-                            'size': os.path.getsize(file_path),
-                            'last_modified': os.path.getmtime(file_path),
-                            'ml_results': ml_results,
-                            'is_traditional_threat': is_traditional_threat
-                        }
-                        results.append(result)
-                        
-                        # If any threat is detected, handle it
-                        if ml_results.get('malware', {}).get('prediction', 0) == 1 or is_traditional_threat:
-                            handle_threat(file_path, 'malware')
-                        if ml_results.get('ddos', {}).get('prediction', 0) == 1:
-                            handle_threat(file_path, 'ddos')
-                        if ml_results.get('exfiltration', {}).get('prediction', 0) == 1:
-                            handle_threat(file_path, 'exfiltration')
-                        if ml_results.get('lateral_movement', {}).get('prediction', 0) == 1:
-                            handle_threat(file_path, 'lateral_movement')
-                            
-                    except Exception as e:
-                        logging.error(f"Error scanning {file_path}: {e}")
-                        continue
-        
-        return jsonify({
-            'status': 'success',
-            'results': results,
-            'total_files_scanned': len(results)
-        })
-    except Exception as e:
-        logging.error(f"Error in scan_all_monitored: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-    except Exception as e:
-        logging.info(encrypt_message(f"Web: Starting scan of all monitored folders from {request.remote_addr}"))
-    # Get monitored folders directly from FolderWatcher
-    monitored_folders = folder_watcher.get_directories()
-    
-    if not monitored_folders:
-        error_msg = "No monitored folders configured. Please check scan_directories.txt or folder_watcher configuration."
-        logging.error(encrypt_message(error_msg))
-        return render_template('index.html', 
-                                   scan_results=error_msg,
-                                   status='ERROR')    
-    results = []
-    total_scanned = 0
-    max_file_size = 100 * 1024 * 1024  # 100 MB
-    # Scan each monitored folder
-    for folder in monitored_folders:
-        logging.info(encrypt_message(f"Scanning folder: {folder}"))
-        return psutil.net_io_counters().bytes_sent / psutil.boot_time()
-
-def get_login_attempts():
-    """Get login attempt count from Windows security logs."""
-
-    for root, _, files in os.walk(folder):
-        for filename in files:
-            filepath = os.path.join(root, filename)
-            try:
-                # Check if the file size exceeds the maximum allowed size
-                if os.path.getsize(filepath) > max_file_size:
-                    # Use debug level to avoid filling logs with large file warnings
-                    logging.debug(encrypt_message(f"Silently skipping large file {filepath} ({os.path.getsize(filepath) / (1024 * 1024):.2f} MB)"))
-                    continue
-
-                # Standard virus scan
-                scan_success, malware_found, msg = scan_file_for_viruses(filepath)
-                total_scanned += 1
-                if not scan_success:
-                    results.append(f"Scan failed for {filepath}: {msg}")
-                elif malware_found:
-                    results.append(f"Threat found in {filepath}: {msg}")
-                # Windows Defender scan if available
-                if platform.system() == "Windows" and os.path.isfile(filepath):
-                    try:
-                        # Escape single quotes inside a PowerShell single-quoted string,
-                        # then run via -EncodedCommand so the variable never appears in the
-                        # process command line as user-supplied text.
-                        safe_path = filepath.replace("'", "''")
-                        ps_script = f"Start-MpScan -ScanPath '{safe_path}' -ScanType CustomScan"
-                        encoded = base64.b64encode(ps_script.encode('utf-16-le')).decode('ascii')
-                        defender_result = subprocess.run(  # nosec B603
-                        ["powershell", "-Command", "Start-MpScan -ScanType FullScan"],
-                            capture_output=True,
-                            text=True,
-                            timeout=300,
-                            creationflags=subprocess.CREATE_NO_WINDOW
-                        )
-                        if defender_result.returncode != 0:
-                            results.append(f"Windows Defender found threat in {filepath}")
-                    except Exception as e:
-                        logging.error(f"Windows Defender scan failed for {filepath}: {e}")
-                # ClamAV scan if available and enabled
-                if USE_CLAMAV and platform.system() != "Windows":
-                    try:
-                        import clamd
-                        cd = clamd.ClamdUnixSocket()
-                        clam_result = cd.scan(filepath)
-                        if clam_result and filepath in clam_result:
-                            results.append(f"ClamAV found threat in {filepath}")
-                    except Exception as e:
-                        logging.error(f"ClamAV scan failed for {filepath}: {e}")
-            except Exception as e:
-                logging.error(f"Error scanning file {filepath}: {e}")
-                results.append(f"Error scanning {filepath}: {str(e)}")
-        scan_summary = f"Scan complete. Total files scanned: {total_scanned}"
-        if results:
-            scan_summary += f"\nIssues found:\n" + "\n".join(results)
-        return render_template('index.html', scan_results=scan_summary, status='COMPLETE')
 
 # Add threat detection endpoints
 @app.route('/detect_threat', methods=['POST'])

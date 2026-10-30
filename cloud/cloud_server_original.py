@@ -185,7 +185,6 @@ def _create_default_env(env_path):
         ('AUTO_UPDATE_INTERVAL', '24'),
         ('RTP_ENABLED', 'True'),
         ('RTP_SCAN_INTERVAL', '5'),
-        ('MAX_SCAN_SIZE', '100'),
         ('USE_WINDOWS_DEFENDER', 'True'),
         ('DEFENDER_SCAN_TIMEOUT', '300'),
         ('ANTIVIRUS_RUNTIME_DIR', r'%ProgramData%\AntivirusServer'),
@@ -987,6 +986,40 @@ _PAIRING_TTL_SECONDS = 2 * 60 * 60
 
 _AGENTS_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'agents.json')
 
+
+class _agents_file_lock:
+    """Cross-process lock for read-modify-write on agents.json.
+
+    Gunicorn workers do not share _agents_lock, so without this lock two
+    simultaneous reports could overwrite each other's findings.
+    """
+    def __enter__(self):
+        self._lf = open(_AGENTS_FILE + '.lock', 'a+b')
+        try:
+            if sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(self._lf.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._lf.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            self._lf.seek(0)
+            if sys.platform == 'win32':
+                import msvcrt
+                msvcrt.locking(self._lf.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(self._lf.fileno(), fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self._lf.close()
+
+
 def _load_agents():
     """Load agents from the shared JSON file."""
     try:
@@ -996,11 +1029,20 @@ def _load_agents():
         return {}
 
 def _save_agents(data):
-    """Save agents to the shared JSON file."""
+    """Atomically save agents to the shared JSON file."""
+    tmp_path = f'{_AGENTS_FILE}.tmp.{os.getpid()}'
     try:
-        with open(_AGENTS_FILE, 'w') as f:
+        with open(tmp_path, 'w') as f:
             json.dump(data, f, default=str)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, _AGENTS_FILE)
     except (OSError, TypeError):
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
         pass
 
 def _get_agents():
@@ -1010,13 +1052,13 @@ def _get_agents():
     }
 
 def _set_agent(device_id, info):
-    with _agents_lock:
+    with _agents_lock, _agents_file_lock():
         data = _load_agents()
         data[device_id] = info
         _save_agents(data)
 
 def _update_agent(device_id, updates):
-    with _agents_lock:
+    with _agents_lock, _agents_file_lock():
         data = _load_agents()
         if device_id in data:
             data[device_id].update(updates)
@@ -1335,7 +1377,6 @@ def cloud_config():
         'proxy_port': int(os.environ.get('PROXY_PORT') or 8000),
         'https_port': int(os.environ.get('HTTPS_PORT') or 443),
         'rtp_enabled': _clean_val(os.environ.get('RTP_ENABLED') or 'True'),
-        'max_scan_size': _clean_val(os.environ.get('MAX_SCAN_SIZE') or '100'),
         'auto_update_interval': _clean_val(os.environ.get('AUTO_UPDATE_INTERVAL') or '24'),
         'reputation_api_available': True,  # Customers can use /api/reputation/* proxies
     })
@@ -2886,7 +2927,7 @@ def agent_register():
     # Clean up stale agents with the same hostname but different device_id
     # (prevents duplicate entries when the agent restarts with a new ID)
     if hostname:
-        with _agents_lock:
+        with _agents_lock, _agents_file_lock():
             existing = _load_agents()
             to_remove = []
             for did, a in existing.items():
@@ -2918,15 +2959,23 @@ def agent_register():
         'registered_at': datetime.now(timezone.utc).isoformat(),
         'last_seen': datetime.now(timezone.utc).isoformat(),
         'status': 'online',
-        'last_scan': None,
+        # Re-registration must not erase scan results or progress: the agent
+        # process may restart while the dashboard keeps showing its findings.
+        'last_scan': existing.get('last_scan'),
         'findings_count': existing.get('findings_count', 0) or 0,
         'threats_blocked': existing.get('threats_blocked', 0) or 0,
         'files_scanned': existing.get('files_scanned', 0) or 0,
         'quarantined_count': existing.get('quarantined_count', 0) or 0,
+        'quarantine_files': existing.get('quarantine_files', []),
         'processes': [],
         'network_connections': [],
         'last_report': existing.get('last_report'),
+        'findings_store': existing.get('findings_store', []),
+        'scan_dirs': data.get('scan_dirs', existing.get('scan_dirs', [])),
+        'dir_file_counts': existing.get('dir_file_counts', {}),
+        'scanning': False,
         # Preserve cumulative threat-type counters
+        'total_findings': existing.get('total_findings', 0) or 0,
         'total_ransomware': existing.get('total_ransomware', 0) or 0,
         'total_persistence': existing.get('total_persistence', 0) or 0,
         'total_yara': existing.get('total_yara', 0) or 0,
@@ -2934,7 +2983,9 @@ def agent_register():
         'blocked_files': existing.get('blocked_files', []),
         '_device_credential_hash': existing.get('_device_credential_hash', ''),
     })
-    commands[device_id] = []
+    # Keep any commands queued while the agent was restarting instead of
+    # silently dropping a pending scan.
+    commands[device_id] = list(commands.get(device_id, []) or [])
     return jsonify({'ok': True}), 200
 
 
@@ -3026,6 +3077,10 @@ def agent_heartbeat():
         'watched_count': data.get('watched_count', 0),
         'scan_dirs': data.get('scan_dirs', agent.get('scan_dirs', [])),
         'dir_file_counts': data.get('dir_file_counts', agent.get('dir_file_counts', {})),
+        # True while the agent's full traversal is in progress; the dashboard
+        # uses this to keep the scan status live instead of guessing from
+        # report timestamps.
+        'scanning': bool(data.get('scanning', agent.get('scanning', False))),
         # Cumulative finding counters: the cloud's own totals survive agent
         # restarts (an agent restarting reports 0), so never let them go down.
         'total_findings': max(_as_int(data.get('total_findings')), _as_int(agent.get('total_findings'))),
@@ -3122,10 +3177,16 @@ def flagged_connections():
 
 
 def _finding_key(f):
+    """Stable identity for a finding: the same file + rule is one finding.
+
+    The hash is deliberately excluded: the same file is re-scanned every
+    sweep, and a missing/refreshed hash must not create duplicate rows or
+    inflate cumulative counters.
+    """
     return (
-        str(f.get('path') or f.get('file') or '').lower(),
+        # normcase only folds case on Windows; Linux paths are case-sensitive.
+        os.path.normcase(str(f.get('path') or f.get('file') or '')),
         str(f.get('rule') or '').lower(),
-        str(f.get('hash') or ''),
     )
 
 
@@ -3142,8 +3203,10 @@ def _is_yara_finding(f):
 def _agent_findings_list(ag):
     """Authoritative retained findings for an agent (falls back to last report)."""
     store = ag.get('findings_store')
-    if store:
+    if isinstance(store, list) and store:
         return list(store)
+    if isinstance(store, dict) and store:
+        return list(store.values())
     report = ag.get('last_report') or {}
     found = report.get('findings') or report.get('results') or []
     return list(found) if isinstance(found, list) else []
@@ -3157,12 +3220,25 @@ def agent_report():
     if not device_id or not _get_agent(device_id):
         return jsonify({'error': 'unknown device'}), 404
 
+    # Read the agent record once: previously this happened twice per finding,
+    # which made large reports slow enough to time out and lose results.
+    agent_record = _get_agent(device_id) or {}
+    agent_hostname = agent_record.get('hostname', device_id)
+
     # Enrich findings with classification, risk score, and timestamps
     raw_findings = data.get('findings') or data.get('results') or []
+    if not isinstance(raw_findings, list):
+        raw_findings = []
     enriched = []
     for f in raw_findings:
         if not isinstance(f, dict):
             f = {'value': str(f)}
+        # Older/mobile agents report the location as "file"; normalize it so
+        # every dashboard renderer can display the row consistently.
+        if not f.get('path') and f.get('file'):
+            f['path'] = f['file']
+        if not f.get('reason') and f.get('rule'):
+            f['reason'] = f"YARA rule matched: {f['rule']}"
         sev = str(f.get('severity', f.get('risk', 'low'))).lower()
         # Auto-classify threat type from reason/path/rule/tags
         reason = str(f.get('reason', f.get('description', ''))).lower()
@@ -3205,13 +3281,13 @@ def agent_report():
         f['risk_score'] = risk
         f['detected_at'] = f.get('detected_at') or data.get('timestamp') or datetime.now(timezone.utc).isoformat()
         f['device_id'] = device_id
-        f['hostname'] = _get_agent(device_id).get('hostname', device_id) if _get_agent(device_id) else device_id
+        f['hostname'] = agent_hostname
         enriched.append(f)
 
     data['findings'] = enriched
     data['finding_count'] = len(enriched)
     # Build cumulative counters so clean scans don't zero them out
-    existing = _get_agent(device_id) or {}
+    existing = agent_record
     prev_findings_count = existing.get('findings_count', 0) or 0
     # If this report has findings, add to cumulative total. If clean, keep
     # the previous cumulative total so the dashboard still shows history.
@@ -3223,19 +3299,36 @@ def agent_report():
     report_persistence = 0
     report_yara = 0
     report_ml = 0
+    report_type = str(data.get('type') or '')
+    is_scan_complete = report_type == 'scan_complete'
     # Retain every distinct finding (path+rule) in one authoritative store so
     # the dashboard, YARA page and cumulative counters all read the same list
     # and a re-reported (already blocked) file is never double counted.
-    findings_store = list(existing.get('findings_store') or [])
-    store_index = {_finding_key(sf): i for i, sf in enumerate(findings_store)}
+    # A completed sweep is a snapshot: replace the old store so files that no
+    # longer exist or no longer match disappear instead of accumulating forever.
+    stored_findings = [] if is_scan_complete else existing.get('findings_store')
+    if isinstance(stored_findings, dict):
+        stored_findings = list(stored_findings.values())
+    if not isinstance(stored_findings, list):
+        stored_findings = []
+    findings_store = list(stored_findings)
+    store_index = {_finding_key(sf): i for i, sf in enumerate(findings_store)
+                   if isinstance(sf, dict)}
     new_unique = []
     for f in enriched:
         key = _finding_key(f)
         if key in store_index:
             stored = findings_store[store_index[key]]
-            for field in ('quarantined', 'blocked', 'quarantine_error', 'block_error', 'detected_at'):
-                if field in f:
-                    stored[field] = f[field]
+            # Refresh mutable fields so a re-scan can raise/lower severity or
+            # record remediation without creating a duplicate finding.
+            for field in ('quarantined', 'blocked', 'quarantine_error', 'block_error',
+                          'detected_at', 'severity', 'reason', 'threat_type',
+                          'description', 'ml_score', 'ml_reason', 'tags', 'hash'):
+                if field not in f:
+                    continue
+                if field == 'hash' and not f[field]:
+                    continue  # never replace a real hash with an empty one
+                stored[field] = f[field]
             if f.get('quarantined'):
                 stored['blocked'] = False
         else:
@@ -3286,25 +3379,80 @@ def agent_report():
     # Preserve last_report findings when the new report has no findings
     # (clean scan shouldn't wipe the findings list the dashboard needs)
     new_findings = data.get('findings') or []
-    if new_findings:
+    if new_findings or is_scan_complete:
         last_report = data
     else:
         # Keep the previous last_report so findings stay visible
         last_report = existing.get('last_report') or data
+    is_scan_report = report_type in {
+        'scan', 'scan_progress', 'scan_complete', 'heartbeat_scan', 'single_file_scan'
+    } or bool(enriched)
+    stored_quarantined = sum(
+        1 for sf in findings_store
+        if isinstance(sf, dict) and sf.get('quarantined')
+    )
+    # Ignore a directory/progress report that arrives after the completed
+    # snapshot for the same sweep; otherwise an in-flight HTTP request could
+    # append stale findings back after the store was replaced.
+    if is_scan_report and not is_scan_complete:
+        try:
+            incoming_ts = datetime.fromisoformat(
+                str(data.get('timestamp') or '').replace('Z', '+00:00')
+            )
+            previous_scan = datetime.fromisoformat(
+                str(existing.get('last_scan') or '').replace('Z', '+00:00')
+            )
+            if incoming_ts.tzinfo is None:
+                incoming_ts = incoming_ts.replace(tzinfo=timezone.utc)
+            if previous_scan.tzinfo is None:
+                previous_scan = previous_scan.replace(tzinfo=timezone.utc)
+            if previous_scan > incoming_ts:
+                return jsonify({'ok': True, 'findings_processed': 0, 'stale_report': True}), 200
+        except Exception:
+            pass
+
+    if is_scan_complete:
+        current_findings_count = len(findings_store)
+    else:
+        # Never report fewer retained findings than the store actually holds.
+        current_findings_count = max(prev_findings_count + len(new_unique), len(findings_store))
     update_fields = {
         'last_report': last_report,
         'findings_store': findings_store,
         'last_seen': datetime.now(timezone.utc).isoformat(),
-        'findings_count': prev_findings_count + len(new_unique),
-        'last_scan': data.get('timestamp', datetime.now(timezone.utc).isoformat()),
+        'findings_count': current_findings_count,
+        'total_findings': current_findings_count,
+        # Quarantine/list bookkeeping is not a scan; keep the last real scan
+        # timestamp so the dashboard and running-state logic do not jump.
+        'last_scan': (data.get('timestamp') if is_scan_report
+                      else existing.get('last_scan')),
         'files_scanned': data.get('files_scanned', existing.get('files_scanned', 0)),
-        'quarantined_count': data.get('quarantined_count', existing.get('quarantined_count', 0)),
-        # Cumulative threat-type counters (only increase, never reset)
-        'total_ransomware': (existing.get('total_ransomware', 0) or 0) + report_ransomware,
-        'total_persistence': (existing.get('total_persistence', 0) or 0) + report_persistence,
-        'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,
-        'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,
+        # A row that says "quarantined" must be reflected in the summary count.
+        'quarantined_count': max(
+            _as_int(data.get('quarantined_count', existing.get('quarantined_count', 0))),
+            stored_quarantined,
+        ),
+        'scan_dirs': data.get('scan_dirs', existing.get('scan_dirs', [])),
+        'scanning': bool(data.get('scanning', existing.get('scanning', False))),
     }
+    if is_scan_complete:
+        # The snapshot counters replace the old values; this is what makes two
+        # identical sweeps return identical totals.
+        update_fields.update({
+            'total_ransomware': report_ransomware,
+            'total_persistence': report_persistence,
+            'total_yara': report_yara,
+            'total_ml': report_ml,
+            'scanning': False,
+        })
+    else:
+        # Cumulative threat-type counters (only increase, never reset)
+        update_fields.update({
+            'total_ransomware': (existing.get('total_ransomware', 0) or 0) + report_ransomware,
+            'total_persistence': (existing.get('total_persistence', 0) or 0) + report_persistence,
+            'total_yara': (existing.get('total_yara', 0) or 0) + report_yara,
+            'total_ml': (existing.get('total_ml', 0) or 0) + report_ml,
+        })
     # Store agent quarantine list when the agent reports it
     if data.get('type') == 'quarantine_list' and 'quarantine_files' in data:
         update_fields['quarantine_files'] = data['quarantine_files']
@@ -4411,14 +4559,12 @@ def _run_continuous_scan_all():
                         if root != directory:
                             total_subdirectories += 1
                             folder_subdir_count += 1
-                            if len(folder_subdirs) < 100:
-                                folder_subdirs.append(root)
+                            folder_subdirs.append(root)
                         else:
                             folder_subdir_count += len(dirs)
                             total_subdirectories += len(dirs)
                             for d in dirs:
-                                if len(folder_subdirs) < 100:
-                                    folder_subdirs.append(os.path.join(root, d))
+                                folder_subdirs.append(os.path.join(root, d))
 
                         for filename in files:
                             if not _continuous_scan_state['active']:
@@ -6345,7 +6491,29 @@ import threading as _auto_thread
 _auto_thread.Thread(target=_auto_start_agent, daemon=True).start()
 
 
-if __name__ == '__main__':
+def run_server():
+    """Start the Flask server, reverse proxy and tunnel helpers.
+
+    Kept as a function so the PyInstaller entry module can start the same
+    app object that the cloud compatibility layer decorates; a module-level
+    ``__main__`` block would never run when the entry module imports this.
+    """
+    # Multiple startup mechanisms (Task Scheduler, Run keys, Startup folder)
+    # may launch this server at the same time. Only the first instance runs;
+    # the rest exit before they can fight over the listening port.
+    _SINGLE_INSTANCE_MUTEX = None
+    if os.name == 'nt':
+        try:
+            import ctypes
+            _SINGLE_INSTANCE_MUTEX = ctypes.windll.kernel32.CreateMutexW(
+                None, False, 'Local\\IsolationBytesCloudServer'
+            )
+            if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+                print('Cloud server is already running; exiting this duplicate instance.')
+                sys.exit(0)
+        except Exception:
+            _SINGLE_INSTANCE_MUTEX = None
+
     _reload_env()
     flask_public = os.environ.get('FLASK_PUBLIC', '').lower() in ('1', 'true', 'yes')
     flask_ssl = os.environ.get('FLASK_SSL', '').lower() in ('1', 'true', 'yes')
@@ -6574,4 +6742,10 @@ if __name__ == '__main__':
             print('cloudflared not found — skipping tunnel')
     _threading.Thread(target=_delayed_start_cloudflared, daemon=True).start()
 
-    create_cloud_app().run(host=host, port=flask_port, debug=False, threaded=True, ssl_context=ssl_ctx)
+    # Run the module-level app: cloud/cloud_server.py adds the agent-scan
+    # hooks and compatibility routes to this exact object at import time.
+    app.run(host=host, port=flask_port, debug=False, threaded=True, ssl_context=ssl_ctx)
+
+
+if __name__ == '__main__':
+    run_server()

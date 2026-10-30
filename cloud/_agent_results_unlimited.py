@@ -32,9 +32,24 @@ def build_complete_agent_scan_results(legacy):
     total_findings = 0
     for device_id, ag in agents.items():
         report = ag.get('last_report') or {}
-        findings = legacy._agent_findings_list(ag)
-        if not isinstance(findings, list):
-            findings = []
+        raw_findings = legacy._agent_findings_list(ag)
+        if not isinstance(raw_findings, list):
+            raw_findings = []
+        # De-duplicate here as well so older stores written before the
+        # path+rule identity change cannot show duplicate rows.
+        findings = []
+        seen = set()
+        for finding in raw_findings:
+            if not isinstance(finding, dict):
+                continue
+            try:
+                key = legacy._finding_key(finding)
+            except Exception:
+                key = (finding.get('path'), finding.get('rule'))
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(finding)
 
         files_scanned = _monotonic_counter(
             device_id, 'files_scanned',
@@ -54,6 +69,15 @@ def build_complete_agent_scan_results(legacy):
         except Exception:
             pass
 
+        pending_scan = False
+        try:
+            pending_scan = any(
+                isinstance(cmd, dict) and cmd.get('action') == 'scan_now'
+                for cmd in legacy.commands.get(device_id, [])
+            )
+        except Exception:
+            pass
+
         results.append({
             'hostname': ag.get('hostname', device_id),
             'device_id': device_id,
@@ -63,6 +87,7 @@ def build_complete_agent_scan_results(legacy):
             'findings': findings,
             'quarantined_count': quarantined_count,
             'scan_dirs': ag.get('scan_dirs') or report.get('scan_dirs') or [],
+            'scanning': bool(ag.get('scanning') or pending_scan),
         })
         total_findings += len(findings)
     return {'agents': results, 'total_findings': total_findings}

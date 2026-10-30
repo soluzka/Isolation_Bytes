@@ -3,7 +3,6 @@ import os
 import logging
 import sys
 import time
-import functools
 import warnings
 import re
 from yara import Error as YaraError, TimeoutError as YaraTimeoutError
@@ -315,9 +314,34 @@ def _classify_filetype(filepath):
 
     return ''
 
-@functools.lru_cache(maxsize=None)
+_RULES_CACHE = None
+_RULES_CACHE_SIGNATURE = None
+_RULES_CACHE_CHECKED_AT = 0.0
+_RULES_CACHE_TTL = 30.0  # seconds; picks up AI-learned/new rules without recompiling per file
+
+
+def _yara_rules_signature(rules_dir):
+    """Cheap signature of the rule files so edited/added rules invalidate cache."""
+    entries = []
+    try:
+        for root, _, files in os.walk(rules_dir):
+            for name in files:
+                if not name.endswith(('.yar', '.yara')):
+                    continue
+                path = os.path.join(root, name)
+                try:
+                    stat = os.stat(path)
+                    entries.append((path, stat.st_mtime_ns, stat.st_size))
+                except OSError:
+                    continue
+    except Exception:
+        return None
+    return tuple(sorted(entries))
+
+
 def load_yara_rules():
     """Load YARA rules from the rules directory structure or create basic rules if none exist."""
+    global _RULES_CACHE, _RULES_CACHE_SIGNATURE, _RULES_CACHE_CHECKED_AT
     # Create a fallback rule to ensure we have at least one rule available
     # NOTE: This fallback is only used if no external .yar rule files are found.
     # It is compiled here so it's ready to append if needed, but it is NOT
@@ -369,6 +393,14 @@ def load_yara_rules():
     # Find the YARA rules directory
     security_dir = os.path.dirname(os.path.abspath(__file__))
     rules_dir = os.path.join(security_dir, 'yara_rules')
+
+    now = time.time()
+    if _RULES_CACHE is not None and now - _RULES_CACHE_CHECKED_AT < _RULES_CACHE_TTL:
+        return _RULES_CACHE
+    signature = _yara_rules_signature(rules_dir)
+    _RULES_CACHE_CHECKED_AT = now
+    if _RULES_CACHE is not None and signature == _RULES_CACHE_SIGNATURE:
+        return _RULES_CACHE
     
     # Check if rules directory exists
     if not os.path.exists(rules_dir):
@@ -454,9 +486,12 @@ def load_yara_rules():
         
         if not compiled_rules and fallback_rule:
             logging.warning("No rules could be compiled, using fallback rule only")
-            return [fallback_rule]
-            
-        return compiled_rules
+            result = [fallback_rule]
+        else:
+            result = compiled_rules
+        _RULES_CACHE = result
+        _RULES_CACHE_SIGNATURE = signature
+        return result
     
     # Create our own basic rule as a fallback if all rules fail
     except Exception as e:
@@ -464,6 +499,12 @@ def load_yara_rules():
         if fallback_rule:
             return [fallback_rule]
         return []
+
+def get_rules_fingerprint():
+    """Return a stable fingerprint of the loaded rule files for cache keys."""
+    load_yara_rules()
+    return repr(_RULES_CACHE_SIGNATURE)
+
 
 def scan_file_with_yara(filepath, timeout=2):
     """
@@ -528,8 +569,8 @@ def scan_file_with_yara(filepath, timeout=2):
         
         # Load small files into memory so libyara doesn't have to re-open the
         # path itself, which can trigger spurious "Failed to open" messages on
-        # locked/protected or oddly-handled files. Keep using the file path for
-        # anything > 100 MB to avoid excessive memory use.
+        # locked/protected or oddly-handled files. Larger files are scanned by
+        # path so a multi-gigabyte file is never loaded into memory.
         data = None
         use_data = file_size <= 5 * 1024 * 1024
 
@@ -574,8 +615,10 @@ def scan_file_with_yara(filepath, timeout=2):
                         logging.warning(f"{rule_highest.upper() if rule_highest else 'YARA'} match in {filepath}: {', '.join(rule_names)}")
             except YaraTimeoutError:
                 timeouts += 1
-                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}), stopping this file")
-                break
+                # One slow rule must not hide matches from every rule set after
+                # it: skip this rule and keep scanning the rest of the file.
+                logging.warning(f"YARA timeout scanning {filepath} (rule {rule_index}), continuing with remaining rules")
+                continue
             except YaraError as ye:
                 errors += 1
                 logging.error(f"YARA error scanning {filepath}: {str(ye)}")
@@ -833,19 +876,14 @@ def scan_all_folders_with_yara(monitored_folders, rules_path=None):
             if root != folder:
                 folder_stats['subdirectory_count'] += 1
                 scan_stats['total_subdirectories'] += 1
-                # Add this subdirectory to our list (with a limit check)
-                if len(folder_stats['subdirectories']) < 100:
-                    folder_stats['subdirectories'].append(root)
+                folder_stats['subdirectories'].append(root)
             else:
                 # Count immediate subdirectories for folder stats
                 folder_stats['subdirectory_count'] += len(dirs)
                 scan_stats['total_subdirectories'] += len(dirs)
                 
-                # Add immediate subdirectories to our list (with a limit check)
                 for subdir in dirs:
-                    if len(folder_stats['subdirectories']) < 100:
-                        subdir_path = os.path.join(folder, subdir)
-                        folder_stats['subdirectories'].append(subdir_path)
+                    folder_stats['subdirectories'].append(os.path.join(folder, subdir))
                 
             for filename in files:
                 filepath = os.path.join(root, filename)

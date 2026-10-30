@@ -1173,8 +1173,8 @@ def _yara_scanner_available():
         return None
 
 
-def _collect_scan_targets(max_files=40):
-    """Build a small, high-value target list for a voice-triggered malware scan."""
+def _collect_scan_targets():
+    """Build the full high-value target list for a voice-triggered malware scan."""
     targets = []
     # Running executables are a prime target.
     if psutil is not None:
@@ -1205,25 +1205,18 @@ def _collect_scan_targets(max_files=40):
             for entry in os.scandir(d):
                 if entry.is_file(follow_symlinks=False):
                     targets.append(entry.path)
-                if len(targets) >= max_files:
-                    break
         except (PermissionError, OSError):
             continue
-        if len(targets) >= max_files:
-            break
-    return list(dict.fromkeys(targets))[:max_files]
+    return list(dict.fromkeys(targets))
 
 
-def _scan_targets_with_yara(targets, per_file_timeout=5, total_budget=25):
+def _scan_targets_with_yara(targets, per_file_timeout=5):
     ys = _yara_scanner_available()
     if ys is None:
         return None, 'YARA scanner is not available. The antivirus engine may need to be installed.'
     results = []
     total = 0
-    start = time.time()
     for path in targets:
-        if time.time() - start > total_budget:
-            break
         try:
             matches = _call_with_timeout(ys.scan_file_with_yara, args=(path,), timeout=per_file_timeout)
             total += 1
@@ -1238,7 +1231,7 @@ def _scan_targets_with_yara(targets, per_file_timeout=5, total_budget=25):
 
 
 def scan_for_viruses(apply_fix=False):
-    targets = _collect_scan_targets(max_files=5)
+    targets = _collect_scan_targets()
     total, results = _scan_targets_with_yara(targets)
     if total is None:
         return _make_response('virus_scan', results, {}, success=False,

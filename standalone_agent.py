@@ -55,6 +55,7 @@ from utils.subprocess_safe import safe_run, safe_popen, safe_check_output, safe_
 DEFAULT_SERVER = "https://isolation-bytes.com"
 DEFAULT_API_KEY = os.environ.get('CLOUD_API_KEY', '')
 HEARTBEAT_INTERVAL = 5       # seconds between heartbeats
+SCAN_INTERVAL = 300          # seconds between automatic full sweeps
 PAIRING_URL_PATH = '/agent/pair'
 
 
@@ -256,9 +257,15 @@ class StandaloneAgent:
         self._total_persistence = 0
         self._total_yara = 0
         self._total_ml = 0
+        # Finding identities that have already contributed to the cumulative
+        # counters. A repeated sweep must refresh a finding, not count it again.
+        self._counted_finding_keys = set()
+        self._counted_threat_files = set()
+        self._last_progress_report = 0.0
         self._last_report_ok = False
         self._last_report_error = ''
         self._scan_lock = threading.Lock()
+        self._scan_requested = threading.Event()
         self._cached_network_devices = []
         self._net_scan_thread = None
         self._headers = {'Content-Type': 'application/json'}
@@ -355,6 +362,17 @@ class StandaloneAgent:
             elif threat_type != 'yara_match':
                 self._blocked_files[filepath] = threat_type
                 self._save_blocked_registry()
+
+    def _count_blocked_threat(self, filepath):
+        """Count a blocked threat once per file, not once per sweep/match."""
+        try:
+            key = os.path.normcase(os.path.abspath(str(filepath)))
+        except Exception:
+            key = str(filepath)
+        if key in self._counted_threat_files:
+            return
+        self._counted_threat_files.add(key)
+        self._threats_blocked += 1
 
     def _unregister_blocked_file(self, filepath):
         """Remove a file from the blocked registry after unblocking."""
@@ -703,6 +721,7 @@ class StandaloneAgent:
                 'uptime': f'{days}d {hours}h {mins}m',
                 'files_scanned': self._files_scanned,
                 'threats_blocked': self._threats_blocked,
+                'scanning': self._scan_lock.locked(),
                 'total_findings': self._total_findings,
                 'total_ransomware': self._total_ransomware,
                 'total_persistence': self._total_persistence,
@@ -720,7 +739,7 @@ class StandaloneAgent:
                 'connection_count': len(network_connections),
                 'flagged_connections': flagged_connections,
                 'watched_connections': watched_connections,
-                'scan_dirs': self._scan_dirs,
+                'scan_dirs': self._effective_scan_dirs(),
                 'dir_file_counts': self._get_dir_file_counts(),
                 'flagged_count': len(flagged_connections),
                 'watched_count': len(watched_connections),
@@ -830,18 +849,13 @@ class StandaloneAgent:
             return
         if action == 'scan_now':
             if self._scan_lock.locked():
-                # The continuous scanner is already traversing; publish current
-                # progress immediately instead of silently dropping the trigger.
+                # A sweep is already traversing; publish current progress
+                # immediately instead of silently dropping the trigger.
                 print("[CMD] Scan trigger received while a traversal is running — reporting live progress")
                 threading.Thread(target=self._report, args=([], 'scan_progress'), daemon=True).start()
                 return
             print("[CMD] Scan triggered from cloud dashboard — running immediate scan")
-            try:
-                import threading
-                t = threading.Thread(target=self._scan_cycle, daemon=True)
-                t.start()
-            except Exception as e:
-                print(f"[CMD] Scan trigger failed: {e}")
+            self._scan_requested.set()
             return
         if action == 'scan_file':
             filepath = cmd.get('file_path', '')
@@ -1968,52 +1982,85 @@ X-GNOME-Autostart-enabled=true
         except Exception:
             return ''
 
-    def _scan_directory(self, dirpath, cycle_start=None):
+    def _effective_scan_dirs(self):
+        """Return non-overlapping scan roots.
+
+        Discovery adds a drive plus its common subdirectories, so the same
+        file used to be traversed several times per sweep. That inflated the
+        files-scanned counter and re-reported the same findings. Keep only the
+        outermost roots: scanning C:\\ already covers C:\\Windows.
+        """
+        normalized = []
+        seen = set()
+        for raw in self._scan_dirs or []:
+            try:
+                path = os.path.abspath(os.path.expanduser(str(raw)))
+            except (TypeError, ValueError, OSError):
+                continue
+            key = os.path.normcase(path)
+            if key and key not in seen:
+                seen.add(key)
+                normalized.append(path)
+
+        normalized.sort(key=lambda p: (len(os.path.normcase(p)), os.path.normcase(p)))
+        roots = []
+        root_keys = []
+        for path in normalized:
+            key = os.path.normcase(path)
+            prefix = key.rstrip(os.sep) + os.sep
+            if any(key == kept or key.startswith(kept.rstrip(os.sep) + os.sep)
+                   for kept in root_keys):
+                continue
+            roots.append(path)
+            root_keys.append(key)
+        return roots
+
+    def _scan_directory(self, dirpath, cycle_start=None, seen_files=None):
         findings = []
         if not os.path.isdir(dirpath):
             return findings
+        if seen_files is None:
+            seen_files = set()
+        try:
+            quarantine_root = os.path.normcase(os.path.abspath(QUARANTINE_DIR))
+        except Exception:
+            quarantine_root = ''
+        # Virtual filesystems contain no user files and can block forever.
+        skip_roots = {'/proc', '/sys', '/dev', '/run'}
         for root, dirs, files in os.walk(dirpath):
+            if not self._running:
+                dirs[:] = []
+                break
+            root_key = os.path.normcase(os.path.abspath(root))
+            if quarantine_root and (
+                    root_key == quarantine_root
+                    or root_key.startswith(quarantine_root + os.sep)):
+                dirs[:] = []
+                continue
+            if root_key.rstrip('/') in skip_roots:
+                dirs[:] = []
+                continue
             for filename in files:
                 if not self._running:
                     dirs[:] = []
                     break
-                filepath = os.path.join(root, filename)
+                filepath = os.path.abspath(os.path.join(root, filename))
+                file_key = os.path.normcase(filepath)
+                if file_key in seen_files:
+                    continue
+                seen_files.add(file_key)
                 self._files_scanned += 1
-                # Publish periodic progress so the dashboard cannot remain
-                # stuck on an old completed-run value during a traversal.
-                if self._files_scanned % 25 == 0:
+                # Publish progress on a time budget instead of every 25 files;
+                # a network post per 25 files made large scans crawl.
+                now = time.time()
+                if now - self._last_progress_report >= 5:
+                    self._last_progress_report = now
                     self._report([], report_type='scan_progress')
                 try:
-                    # Skip files we can't read (locked, permission denied)
-                    # BUT don't skip files we blocked ourselves — they're
-                    # still threats and need to stay in the findings list
+                    # A file we blocked ourselves is already in the findings
+                    # store. Re-reporting it here created a second row for the
+                    # same threat on every sweep.
                     if not os.access(filepath, os.R_OK):
-                        # Check if it's a file we blocked
-                        is_blocked = False
-                        blocked_ttype = 'yara_match'
-                        if isinstance(self._blocked_files, dict):
-                            if filepath in self._blocked_files:
-                                is_blocked = True
-                                blocked_ttype = self._blocked_files[filepath]
-                        elif filepath in self._blocked_files:
-                            is_blocked = True
-                        if is_blocked:
-                            # Already blocked — still report it as a finding
-                            # with the ORIGINAL threat type so dashboard
-                            # counters for ransomware/persistence stay populated
-                            findings.append({
-                                'path': filepath,
-                                'severity': 'high',
-                                'reason': f'Blocked threat (previously detected: {blocked_ttype})',
-                                'hash': '',
-                                'rule': 'blocked_threat',
-                                'tags': [],
-                                'threat_type': blocked_ttype,
-                                'description': 'File blocked in place by Isolation Bytes',
-                                'quarantined': False,
-                                'blocked': True,
-                            })
-                            continue
                         continue
                     matches = self._scan_file_yara(filepath)
                     if matches:
@@ -2117,7 +2164,7 @@ X-GNOME-Autostart-enabled=true
                             # matches, not medium, to avoid inflating the
                             # dashboard counter with low-confidence hits.
                             if _rank_of(highest) >= _rank_of('medium'):
-                                self._threats_blocked += 1
+                                self._count_blocked_threat(filepath)
                                 # Contain first, then automatically quarantine confirmed
                                 # high/critical malware. _quarantine_file() delegates to
                                 # quarantine_utils, whose canonical destination is
@@ -2181,7 +2228,7 @@ X-GNOME-Autostart-enabled=true
                                     self._register_blocked_file(filepath, ml_ttype)
                                 except Exception:
                                     pass
-                                self._threats_blocked += 1
+                                self._count_blocked_threat(filepath)
                             # Quarantine ML-only findings at a strong-confidence threshold.
                             try:
                                 if ml_suspicious and ml_score >= 60 and os.path.exists(filepath):
@@ -2458,8 +2505,21 @@ X-GNOME-Autostart-enabled=true
         try:
             # Derive quarantine count from this agent's actual quarantine store; never use Defender history.
             self._quarantined_count = len(self._list_quarantine())
-            # Count findings by type for cumulative counters
+            # Count findings by type for cumulative counters. Identities are
+            # tracked so the same file+rule is counted once even though every
+            # sweep re-reports it to refresh its blocked/quarantined state.
             for f in findings:
+                if not isinstance(f, dict):
+                    continue
+                try:
+                    key = (os.path.normcase(str(f.get('path') or '')),
+                           str(f.get('rule') or '').lower())
+                except Exception:
+                    key = None
+                if key is not None:
+                    if key in self._counted_finding_keys:
+                        continue
+                    self._counted_finding_keys.add(key)
                 ttype = (f.get('threat_type') or '').lower()
                 self._total_findings += 1
                 if ttype == 'ransomware':
@@ -2476,11 +2536,19 @@ X-GNOME-Autostart-enabled=true
                 'timestamp': datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 'files_scanned': self._files_scanned,
                 'quarantined_count': self._quarantined_count,
+                'threats_blocked': self._threats_blocked,
+                'scanning': self._scan_lock.locked(),
+                'scan_dirs': self._effective_scan_dirs(),
+                'total_findings': self._total_findings,
+                'total_ransomware': self._total_ransomware,
+                'total_persistence': self._total_persistence,
+                'total_yara': self._total_yara,
+                'total_ml': self._total_ml,
                 'findings': findings,
             }
             r = requests.post(f'{self.server_url}/agent/report',
                               json=data, headers=self._headers,
-                              verify=True, timeout=15)
+                              verify=True, timeout=120)
             if r.status_code != 200:
                 self._last_report_ok = False
                 self._last_report_error = f'HTTP {r.status_code}: {r.text[:200]}'
@@ -2500,18 +2568,18 @@ X-GNOME-Autostart-enabled=true
         if not self._scan_lock.acquire(blocking=False):
             print("[SCAN] Full traversal already running; ignoring duplicate trigger")
             return
+        all_findings = []
         try:
             # Keep the file counter cumulative across full traversals. A new
             # traversal must not make the dashboard jump backward to zero.
             # Threat-type totals are also cumulative.
-            cycle_start = time.time()
-            all_findings = []
-            for dirpath in self._scan_dirs:
+            seen_files = set()
+            for dirpath in self._effective_scan_dirs():
                 if not self._running:
                     break
                 if os.path.isdir(dirpath):
                     try:
-                        findings = self._scan_directory(dirpath, cycle_start=cycle_start)
+                        findings = self._scan_directory(dirpath, seen_files=seen_files)
                         all_findings.extend(findings)
                         # Report each directory's findings as soon as it
                         # finishes so the dashboard indicators fill in during
@@ -2521,11 +2589,39 @@ X-GNOME-Autostart-enabled=true
                         print(f"[SCAN] Directory scan error for {dirpath}: {e}")
                         self._report([], report_type='scan_progress')
                         continue
+            # Blocked files are skipped during traversal (they are no longer
+            # readable), but they are still active threats. Include each of
+            # them once in the snapshot so the dashboard can still review,
+            # unblock, or quarantine them after a sweep.
+            reported = {os.path.normcase(str(f.get('path') or '')) for f in all_findings}
+            blocked_registry = self._blocked_files if isinstance(self._blocked_files, dict) else {}
+            for blocked_path, blocked_type in blocked_registry.items():
+                key = os.path.normcase(str(blocked_path))
+                if key in reported:
+                    continue
+                if not (os.path.exists(blocked_path) or os.path.exists(str(blocked_path) + '.blocked')):
+                    continue
+                all_findings.append({
+                    'path': blocked_path,
+                    'severity': 'high',
+                    'reason': f'Blocked threat (previously detected: {blocked_type})',
+                    'hash': '',
+                    'rule': 'blocked_threat',
+                    'tags': [],
+                    'threat_type': blocked_type or 'yara_match',
+                    'description': 'File blocked in place by Isolation Bytes',
+                    'quarantined': False,
+                    'blocked': True,
+                })
             if all_findings:
                 print(f"[ALERT] Found {len(all_findings)} threat(s)! Types: {[f.get('threat_type','?') for f in all_findings]}")
-            self._report([], report_type='heartbeat_scan')
         finally:
+            # Release before reporting so the report carries scanning=False and
+            # the dashboard can finish polling the moment the sweep ends.
+            # scan_complete is the authoritative snapshot of this sweep: the
+            # cloud replaces the old findings with exactly this list.
             self._scan_lock.release()
+            self._report(all_findings, report_type='scan_complete')
 
     def _scan_single_file(self, filepath):
         """Scan a single file and report findings immediately."""
@@ -2612,7 +2708,7 @@ X-GNOME-Autostart-enabled=true
                         except Exception:
                             pass
                     if _rank_of(highest) >= _rank_of('medium'):
-                        self._threats_blocked += 1
+                        self._count_blocked_threat(filepath)
                         # Block in place only — no quarantine during scan
                         bok = self._block_file_in_place(filepath)
                         if not bok:
@@ -2662,7 +2758,7 @@ X-GNOME-Autostart-enabled=true
                         self._register_blocked_file(filepath, ml_ttype)
                     except Exception:
                         pass
-                    self._threats_blocked += 1
+                    self._count_blocked_threat(filepath)
                     try:
                         if ml_score >= 60 and os.path.exists(filepath):
                             qok = self._quarantine_file(filepath)
@@ -2847,16 +2943,21 @@ del "{bat_path}" 2>nul
                 time.sleep(1)
 
     def _scan_loop(self):
-        # Continuous scanner: each full traversal starts again immediately
-        # after the previous one completes. There is no file-count or
-        # elapsed-time ceiling and no idle/watchdog mode.
+        # No file-count or elapsed-time ceiling. Wait between full sweeps so the
+        # agent is not permanently stuck in "scanning", then wake immediately
+        # when the dashboard asks for a scan.
+        first_cycle = True
         while self._running:
+            if not first_cycle:
+                self._scan_requested.wait(timeout=SCAN_INTERVAL)
+            first_cycle = False
+            self._scan_requested.clear()
+            if not self._running:
+                break
             try:
                 self._scan_cycle()
             except Exception as e:
-                print(f"[SCAN] Continuous traversal error: {e}")
-            if self._running:
-                time.sleep(0.05)
+                print(f"[SCAN] Full traversal error: {e}")
 
     def start(self):
         self._running = True
@@ -2919,6 +3020,9 @@ del "{bat_path}" 2>nul
         voice_thread.start()
 
         # Start network device scan thread (background, non-blocking)
+        # Start a sweep as soon as the agent comes online, then every
+        # SCAN_INTERVAL seconds unless triggered sooner.
+        self._scan_requested.set()
         net_thread = threading.Thread(target=self._network_scan_loop, daemon=True, name='NetScan')
         net_thread.start()
 
