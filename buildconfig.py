@@ -397,6 +397,25 @@ STARTUP_TASK_NAME = 'IsolationBytesCloudServerStartup'
 STARTUP_RUN_VALUE = 'IsolationBytesCloudServer'
 
 
+def _install_cloudflared():
+    """Keep a user-local cloudflared so boot startup can find it."""
+    src = PROJECT_ROOT / 'cloud' / 'cloudflared.exe'
+    if not src.is_file():
+        return
+    base = os.environ.get('LOCALAPPDATA') or os.path.join(
+        os.path.expanduser('~'), 'AppData', 'Local')
+    dest_dir = Path(base) / 'IsolationBytes' / 'cloudflared'
+    dest = dest_dir / 'cloudflared.exe'
+    try:
+        if dest.is_file() and dest.stat().st_size == src.stat().st_size:
+            return
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        print(f'  Cloudflared available at: {dest}')
+    except Exception as exc:
+        print(f'  WARNING: Could not install cloudflared: {exc}')
+
+
 def _server_commands():
     """Return every way to start the website server, best first."""
     commands = []
@@ -435,6 +454,7 @@ def start_cloud_server(wait_seconds=45):
     If the built executable exits immediately (for example it predates the
     entrypoint fix), try the source server so the website still comes up.
     """
+    _install_cloudflared()
     commands = _server_commands()
     if not commands:
         print('  WARNING: No cloud server executable or script found — not started.')
@@ -489,6 +509,7 @@ def install_server_startup():
     the build is elevated). Each mechanism is independent, so a failure in
     one still leaves the server auto-starting from the others.
     """
+    _install_cloudflared()
     cmd = _server_command()
     if not cmd:
         print('  WARNING: No server command to register at startup.')

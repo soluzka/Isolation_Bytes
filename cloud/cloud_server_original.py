@@ -6671,7 +6671,6 @@ def run_server():
         _pf86 = os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')
         _commonappdata = os.environ.get('ProgramData', r'C:\ProgramData')
         cloudflared_exe = None
-        tunnel_name = os.environ.get('CLOUDFLARED_TUNNEL_NAME', 'isolation-bytes')
         # 1. Bundled in PyInstaller (exe only — no credentials bundled)
         if getattr(sys, 'frozen', False):
             _base = sys._MEIPASS if hasattr(sys, '_MEIPASS') else os.path.dirname(sys.executable)
@@ -6721,8 +6720,11 @@ def run_server():
         if cloudflared_exe:
             try:
                 if cloudflared_config:
+                    # Do not pass a tunnel name here. The config already names the
+                    # tunnel (usually its UUID); passing the friendly name selected
+                    # a different/no-ingress tunnel and produced Cloudflare 502s.
                     _subproc2.Popen(
-                        [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run', tunnel_name],
+                        [cloudflared_exe, 'tunnel', '--config', cloudflared_config, 'run'],
                         stdout=_subproc2.DEVNULL,
                         stderr=_subproc2.DEVNULL,
                         creationflags=getattr(_subproc2, 'CREATE_NO_WINDOW', 0),
