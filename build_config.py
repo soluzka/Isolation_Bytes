@@ -30,7 +30,13 @@ from utils.subprocess_safe import safe_run
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 DIST_DIR = os.path.join(BASE_DIR, 'dist')
-BUILD_DIR = os.path.join(BASE_DIR, 'build')
+# Keep PyInstaller intermediates off OneDrive. Files written under a synced
+# OneDrive folder can disappear between creation and packaging, which caused
+# base_library.zip and PYZ-00.pyz build failures.
+BUILD_DIR = os.path.join(
+    os.environ.get('LOCALAPPDATA', os.path.expanduser('~')),
+    'IsolationBytes', 'pyinstaller'
+)
 NATIVE_DIR = os.path.join(BASE_DIR, 'native', 'IsolationBytesMSIX')
 CSPROJ = os.path.join(NATIVE_DIR, 'IsolationBytes.csproj')
 MANIFEST = os.path.join(NATIVE_DIR, 'Package.appxmanifest')

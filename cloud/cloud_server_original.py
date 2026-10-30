@@ -152,6 +152,7 @@ def _create_default_env(env_path):
 
     generated = {
         'SECRET_KEY': _secrets.token_hex(32),
+        'FLASK_SECRET_KEY': _secrets.token_hex(32),
         'FERNET_KEY': Fernet.generate_key().decode(),
         'CLOUD_API_KEY': _secrets.token_hex(32),
         'CLOUD_SECRET_KEY': _secrets.token_hex(32),
@@ -172,6 +173,7 @@ def _create_default_env(env_path):
         ('FLASK_SSL_CERT', ''),
         ('FLASK_SSL_KEY', ''),
         ('SECRET_KEY', generated['SECRET_KEY']),
+        ('FLASK_SECRET_KEY', generated['FLASK_SECRET_KEY']),
         ('FERNET_KEY', generated['FERNET_KEY']),
         ('CLOUD_API_KEY', generated['CLOUD_API_KEY']),
         ('CLOUD_SECRET_KEY', generated['CLOUD_SECRET_KEY']),
@@ -268,6 +270,18 @@ def _reload_env():
     for env_file in env_candidates:
         if env_file.exists():
             load_dotenv(env_file, override=True)
+
+    # Older generated .env files have CLOUD_SECRET_KEY/SECRET_KEY but no
+    # FLASK_SECRET_KEY, which made the production config loader log a scary
+    # (but non-fatal) error on every start. Derive a stable key automatically
+    # instead of requiring manual configuration.
+    if not (os.environ.get('FLASK_SECRET_KEY') or '').strip():
+        _fallback_secret = (
+            (os.environ.get('CLOUD_SECRET_KEY') or '').strip()
+            or (os.environ.get('SECRET_KEY') or '').strip()
+            or secrets.token_hex(32)
+        )
+        os.environ['FLASK_SECRET_KEY'] = _fallback_secret
 
 _reload_env()
 
@@ -6746,6 +6760,31 @@ def run_server():
 
     # Run the module-level app: cloud/cloud_server.py adds the agent-scan
     # hooks and compatibility routes to this exact object at import time.
+    #
+    # Waitress is a production WSGI server and is used automatically whenever
+    # TLS is terminated elsewhere (the normal reverse-proxy/tunnel deployment).
+    # It cannot terminate TLS itself, so direct-SSL mode still falls back to
+    # Flask's server; the recommended setup is BEHIND_PROXY=1 with Caddy or a
+    # tunnel handling HTTPS on port 443.
+    if ssl_ctx is None:
+        try:
+            from waitress import serve as _waitress_serve
+            print(f'Serving with Waitress (production WSGI) on {host}:{flask_port}')
+            _waitress_serve(
+                app,
+                host=host,
+                port=flask_port,
+                threads=16,
+                channel_timeout=300,
+                connection_limit=1000,
+                expose_tracebacks=False,
+                ident='IsolationBytes',
+                url_scheme='https' if behind_proxy else 'http',
+            )
+            return
+        except ImportError:
+            print('WARNING: waitress is not installed; falling back to the Flask development server')
+
     app.run(host=host, port=flask_port, debug=False, threaded=True, ssl_context=ssl_ctx)
 
 
