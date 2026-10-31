@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
 import joblib
 import os
+
+from model_compatibility import load_model_safely
 import logging
 from typing import Dict, List, Tuple
 import time
@@ -42,15 +44,15 @@ class ThreatDetectionModel:
                 try:
                     # Load the model
                     model_path = os.path.join(self.model_dir, f'{threat_type}_model.pkl')
-                    self.models[threat_type] = joblib.load(model_path)
+                    self.models[threat_type] = load_model_safely(model_path)
                     
                     # Load the scaler
                     scaler_path = os.path.join(self.model_dir, f'{threat_type}_scaler.pkl')
-                    self.scalers[threat_type] = joblib.load(scaler_path)
+                    self.scalers[threat_type] = load_model_safely(scaler_path)
                     
                     # Load the PCA
                     pca_path = os.path.join(self.model_dir, f'{threat_type}_pca.pkl')
-                    self.pcas[threat_type] = joblib.load(pca_path)
+                    self.pcas[threat_type] = load_model_safely(pca_path)
                     
                     logging.info(f"Successfully loaded {threat_type} model and components")
                 except FileNotFoundError:
@@ -90,15 +92,15 @@ class ThreatDetectionModel:
             try:
                 # Load the model
                 model_path = os.path.join(self.model_dir, f'{threat_type}_model.pkl')
-                self.models[threat_type] = joblib.load(model_path)
+                self.models[threat_type] = load_model_safely(model_path)
                 
                 # Load the scaler
                 scaler_path = os.path.join(self.model_dir, f'{threat_type}_scaler.pkl')
-                self.scalers[threat_type] = joblib.load(scaler_path)
+                self.scalers[threat_type] = load_model_safely(scaler_path)
                 
                 # Load the PCA
                 pca_path = os.path.join(self.model_dir, f'{threat_type}_pca.pkl')
-                self.pcas[threat_type] = joblib.load(pca_path)
+                self.pcas[threat_type] = load_model_safely(pca_path)
                 
                 logging.info(f"Successfully loaded {threat_type} model and components")
             except FileNotFoundError:
@@ -239,13 +241,13 @@ class ThreatDetectionModel:
         try:
             model_path = os.path.join(self.model_dir, f"{threat_type}_model.pkl")
             if os.path.exists(model_path):
-                self.models[threat_type] = joblib.load(model_path)
+                self.models[threat_type] = load_model_safely(model_path)
                 
                 # Load scaler and PCA
                 scaler_path = os.path.join(self.model_dir, f"{threat_type}_scaler.pkl")
                 pca_path = os.path.join(self.model_dir, f"{threat_type}_pca.pkl")
-                self.scalers[threat_type] = joblib.load(scaler_path)
-                self.pcas[threat_type] = joblib.load(pca_path)
+                self.scalers[threat_type] = load_model_safely(scaler_path)
+                self.pcas[threat_type] = load_model_safely(pca_path)
                 
                 logging.info(f"Loaded {threat_type} model successfully")
                 return True

@@ -11,6 +11,8 @@ from sklearn.ensemble import IsolationForest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from model_compatibility import load_model_safely
+
 
 class SecurityMLModel:
     """Defensive anomaly model for network and static file/code analysis."""
@@ -35,7 +37,7 @@ class SecurityMLModel:
             self.save_model()
         if os.path.exists(self.pca_path):
             try:
-                self.pca = joblib.load(self.pca_path)
+                self.pca = load_model_safely(self.pca_path)
             except Exception as exc:
                 logging.warning("Invalid PCA artifact; using a fresh PCA: %s", exc)
                 self.pca = PCA(n_components=0.95)
@@ -43,7 +45,7 @@ class SecurityMLModel:
             self.pca = PCA(n_components=0.95)
         if os.path.exists(self.scaler_path):
             try:
-                self.scaler = joblib.load(self.scaler_path)
+                self.scaler = load_model_safely(self.scaler_path)
             except Exception as exc:
                 logging.warning("Invalid scaler artifact; using a fresh scaler: %s", exc)
                 self.scaler = StandardScaler()
@@ -75,7 +77,7 @@ class SecurityMLModel:
 
     def load_model(self):
         try:
-            loaded = joblib.load(self.model_path)
+            loaded = load_model_safely(self.model_path)
             if isinstance(loaded, Pipeline):
                 self.pipeline = loaded
                 self.model = loaded.named_steps.get('model')

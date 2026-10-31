@@ -6603,6 +6603,7 @@ def run_server():
     # Start Caddy reverse proxy if installed (provides HTTPS on port 443)
     def _delayed_start_caddy():
         import time as _ctime
+        import socket as _socket
         import subprocess as _subproc
         import tempfile as _tempfile
         _ctime.sleep(2)
@@ -6632,17 +6633,21 @@ def run_server():
                 caddy_exe = _dest_exe
                 caddyfile = _dest_caddyfile
                 caddy_cwd = _caddy_dir
-        # 2. Search known locations (portable)
+        # 2. Search known locations (portable), including the copy shipped
+        #    beside the source tree so a missing C:\caddy install still works
+        _project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         if not caddy_exe:
             _caddy_candidates = [
                 r'C:\caddy\caddy.exe',
                 os.path.join(_localappdata, 'IsolationBytes', 'caddy', 'caddy.exe'),
                 os.path.join(_pf, 'Caddy', 'caddy.exe'),
                 os.path.join(_pf86, 'Caddy', 'caddy.exe'),
+                os.path.join(_project_dir, 'cloud', 'caddy.exe'),
             ]
             _caddyfile_candidates = [
                 r'C:\caddy\Caddyfile',
                 os.path.join(_localappdata, 'IsolationBytes', 'caddy', 'Caddyfile'),
+                os.path.join(_project_dir, 'cloud', 'Caddyfile'),
                 os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Caddyfile'),
             ]
             for _ce in _caddy_candidates:
@@ -6655,20 +6660,46 @@ def run_server():
                             break
                     if caddy_exe:
                         break
-        if caddy_exe and caddyfile:
+        if not (caddy_exe and caddyfile):
+            print('Caddy not started (caddy.exe or Caddyfile not found); '
+                  'port 443 will not answer — the Cloudflare tunnel still serves the site.')
+            return
+
+        # An earlier instance (previous run or boot registration) may already
+        # own port 443; starting a second Caddy would only fail to bind.
+        try:
+            with _socket.create_connection(('127.0.0.1', 443), timeout=1):
+                print('Caddy reverse proxy already listening on port 443')
+                return
+        except OSError:
+            pass
+
+        try:
+            _caddy_proc = _subproc.Popen(
+                [caddy_exe, 'run', '--config', caddyfile],
+                cwd=caddy_cwd,
+                stdout=_subproc.DEVNULL,
+                stderr=_subproc.DEVNULL,
+                creationflags=getattr(_subproc, 'CREATE_NO_WINDOW', 0),
+            )
+        except Exception as e:
+            print(f'Failed to start Caddy: {e}')
+            return
+
+        # Confirm the proxy actually came up instead of assuming success.
+        _caddy_deadline = _ctime.time() + 15
+        while _ctime.time() < _caddy_deadline:
+            if _caddy_proc.poll() is not None:
+                print(f'Caddy exited during startup (code {_caddy_proc.returncode}) — '
+                      f'check the Caddyfile at {caddyfile}')
+                return
             try:
-                _subproc.Popen(
-                    [caddy_exe, 'run', '--config', caddyfile],
-                    cwd=caddy_cwd,
-                    stdout=_subproc.DEVNULL,
-                    stderr=_subproc.DEVNULL,
-                    creationflags=getattr(_subproc, 'CREATE_NO_WINDOW', 0),
-                )
-                print('Caddy reverse proxy started on port 443')
-            except Exception as e:
-                print(f'Failed to start Caddy: {e}')
-        else:
-            print('Caddy not found — skipping reverse proxy')
+                with _socket.create_connection(('127.0.0.1', 443), timeout=1):
+                    print(f'Caddy reverse proxy started on port 443 ({caddyfile})')
+                    return
+            except OSError:
+                _ctime.sleep(0.5)
+        print(f'Caddy started (PID {_caddy_proc.pid}) but port 443 is not answering yet')
     _threading.Thread(target=_delayed_start_caddy, daemon=True).start()
 
     # Start Cloudflare tunnel if installed (provides public access without port forwarding)

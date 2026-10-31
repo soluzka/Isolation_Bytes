@@ -32,6 +32,21 @@ class NetworkSegmentManager:
         self.segments = {}
         self.initialize_segments()
         
+    @staticmethod
+    def _parse_service(value):
+        """Resolve a service from either its value ('web') or name ('WEB')."""
+        if isinstance(value, ServiceType):
+            return value
+        text = str(value).strip()
+        try:
+            return ServiceType(text.lower())
+        except ValueError:
+            pass
+        try:
+            return ServiceType[text.upper()]
+        except KeyError:
+            raise ValueError(f"unknown service type: {value!r}")
+
     def initialize_segments(self):
         """Initialize network segments from config."""
         try:
@@ -39,11 +54,20 @@ class NetworkSegmentManager:
                 with open(self.config_path, 'r') as f:
                     config = json.load(f)
                     for name, data in config.items():
+                        allowed_services = set()
+                        for service in data.get('services', []):
+                            try:
+                                allowed_services.add(self._parse_service(service))
+                            except ValueError as exc:
+                                logging.warning(
+                                    "Skipping invalid service in segment %s: %s",
+                                    name, exc,
+                                )
                         self.segments[name] = NetworkSegment(
                             name=name,
                             ip_ranges=data.get('ip_ranges', []),
-                            allowed_services=set(ServiceType[s] for s in data.get('services', [])),
-                            allowed_ports=set(data.get('ports', [])),
+                            allowed_services=allowed_services,
+                            allowed_ports=set(int(p) for p in data.get('ports', [])),
                             priority=data.get('priority', 100)
                         )
             else:

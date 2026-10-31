@@ -5,9 +5,10 @@ import logging
 import functools
 from collections import Counter
 
-import joblib
 import numpy as np
 from sklearn.ensemble import IsolationForest
+
+from model_compatibility import load_model_safely
 
 
 def _find_models_dir():
@@ -149,7 +150,7 @@ class MalwareDetector:
         try:
             model_path = os.path.join(_find_models_dir(), 'file_malware_classifier.pkl')
             if os.path.exists(model_path):
-                bundle = joblib.load(model_path)
+                bundle = load_model_safely(model_path)
                 self.using_trained_model = True
                 self.logger.info(f"Loaded trained malware classifier from {model_path}")
                 return bundle['model']
@@ -373,7 +374,7 @@ class BodmasCnnDetector:
         try:
             from security.ember_vendor import PEFeatureExtractor
             self.extractor = PEFeatureExtractor(2, print_feature_warning=False)
-            self.scaler = joblib.load(_BODMAS_CNN_SCALER_PATH)
+            self.scaler = load_model_safely(_BODMAS_CNN_SCALER_PATH)
             self.session = ort.InferenceSession(
                 _BODMAS_CNN_MODEL_PATH,
                 providers=['CPUExecutionProvider']
